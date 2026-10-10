@@ -26,7 +26,7 @@ export default function ProjectsScreen() {
 
   const handleOpenProject = (project: StoryProject) => {
     router.push({
-      pathname: '/graph',
+      pathname: '/graph' as any,
       params: { projectId: project.id },
     });
   };

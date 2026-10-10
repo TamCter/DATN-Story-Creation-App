@@ -21,7 +21,7 @@ export default function AuthScreen() {
   const [password, setPassword] = useState('••••••••••••');
 
   const handleEnterApp = () => {
-    router.push('/projects');
+    router.push('/projects' as any);
   };
 
   return (
