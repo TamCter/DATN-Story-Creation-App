@@ -17,6 +17,28 @@ export interface StoryLink {
   type?: 'solid' | 'dashed';
 }
 
+export interface StoryTag {
+  name: string;
+  type: StoryNode['type'];
+  symbol: string;
+  color: string;
+}
+
+export interface StoryTimelineEvent {
+  id: string;
+  chapter: string;
+  title: string;
+  desc: string;
+  tags: StoryTag[];
+}
+
+export interface StoryLocationItem {
+  id: string;
+  name: string;
+  region: string;
+  desc: string;
+}
+
 export interface StoryProject {
   id: string;
   number: string;
@@ -27,6 +49,8 @@ export interface StoryProject {
   updatedAt: string;
   nodes: StoryNode[];
   links: StoryLink[];
+  events?: StoryTimelineEvent[];
+  locations?: StoryLocationItem[];
 }
 
 export const NODE_TYPE_CONFIG = {
@@ -73,19 +97,29 @@ export const INITIAL_PROJECTS: StoryProject[] = [
     number: '№ 01',
     title: 'Hoàng Hôn Kiếm Vương',
     genre: 'Kiếm hiệp · Huyền huyễn',
-    nodeCount: 10,
-    linkCount: 12,
-    updatedAt: '2 giờ trước',
+    nodeCount: 11,
+    linkCount: 13,
+    updatedAt: 'Vừa xong',
     nodes: [
       {
         id: 'lang-tieu',
-        name: 'Lăng Tiêu',
+        name: 'Lãng Tiêu',
         type: 'character',
-        role: 'CHÍNH DIỆN',
+        role: 'NHÂN VẬT CHÍNH',
         subType: 'KIẾM KHÁCH',
-        desc: 'Kiếm khách phiêu bạt, người nắm giữ bí mật về Kiếm Hoàng Hôn.',
+        desc: 'Kiếm sĩ lưu vong, mang trong mình mảnh vỡ của thanh Hoàng Hôn. Trầm lặng, không tin lời thề.',
         x: 185,
         y: 355,
+      },
+      {
+        id: 'moc-lan',
+        name: 'Mộc Lan',
+        type: 'character',
+        role: 'ĐỒNG HÀNH',
+        subType: 'Y SƯ',
+        desc: 'Y sư của Bạch Liên Cốc, giữ bí mật về cái chết của sư phụ Lãng Tiêu.',
+        x: 100,
+        y: 215,
       },
       {
         id: 'trieu-vo-cuc',
@@ -93,19 +127,29 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         type: 'character',
         role: 'PHẢN DIỆN',
         subType: 'MINH CHỦ',
-        desc: 'Minh chủ Thiên Hạ Minh, người từng là huynh đệ kết nghĩa của Lăng Tiêu.',
+        desc: 'Minh chủ Thiên Hạ Minh, người từng là huynh đệ kết nghĩa của Lãng Tiêu.',
         x: 295,
         y: 195,
       },
       {
-        id: 'moc-lan',
-        name: 'Mộc Lan',
-        type: 'character',
-        role: 'ĐỒNG MINH',
-        subType: 'Y SƯ',
-        desc: 'Truyền nhân của Bạch Liên Cốc, y thuật cao minh và tinh thông thảo dược.',
-        x: 100,
-        y: 215,
+        id: 'kiem-hoang-hon',
+        name: 'Kiếm Hoàng Hôn',
+        type: 'item',
+        role: '7 MẢNH',
+        subType: 'BẢO VẬT',
+        desc: 'Thanh kiếm vỡ làm bảy mảnh. Mỗi mảnh nhớ một chủ nhân đã chết bởi nó.',
+        x: 275,
+        y: 470,
+      },
+      {
+        id: 'thien-ha-minh',
+        name: 'Thiên Hạ Minh',
+        type: 'faction',
+        role: 'CHÍNH PHÁI',
+        subType: 'ĐỆ NHẤT THẾ LỰC',
+        desc: 'Liên minh võ lâm do Triệu Vô Cực đứng đầu, bề ngoài chính nghĩa.',
+        x: 305,
+        y: 335,
       },
       {
         id: 'bach-lien-coc',
@@ -113,27 +157,17 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         type: 'faction',
         role: 'TRUNG LẬP',
         subType: 'ẨN THẾ MÔN PHÁI',
-        desc: 'Môn phái y dược độc lập giữa chốn võ lâm hỗn loạn.',
+        desc: 'Môn phái y thuật ẩn cư, trung lập, đang bị Thiên Hạ Minh dò xét.',
         x: 75,
         y: 375,
-      },
-      {
-        id: 'thien-ha-minh',
-        name: 'Thiên Hạ Minh',
-        type: 'faction',
-        role: 'ĐỐI ĐỊCH',
-        subType: 'ĐỆ NHẤT THẾ LỰC',
-        desc: 'Minh chủ thống lĩnh 72 lộ hào kiệt Trung Nguyên xưng bá giang hồ.',
-        x: 305,
-        y: 335,
       },
       {
         id: 'dem-hoa-thieu',
         name: 'Đêm Hỏa Thiêu Sơn Trang',
         type: 'event',
-        role: 'BIẾN CỐ LỊCH SỬ',
+        role: 'CHƯƠNG 1',
         subType: 'THẢM KỊCH',
-        desc: 'Bi kịch thảm sát mở ra mối huyết hải thâm thù 10 năm trước.',
+        desc: 'Sơn trang họ Lăng bị thiêu rụi. Chỉ Lãng Tiêu sống sót, tay còn cầm chuôi kiếm gãy.',
         x: 140,
         y: 495,
       },
@@ -141,29 +175,19 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         id: 'hoi-the-nguyet-ha',
         name: 'Hội Thề Nguyệt Hạ',
         type: 'event',
-        role: 'QUÁ KHỨ',
+        role: 'CHƯƠNG 7',
         subType: 'KẾT NGHĨA',
-        desc: 'Lời thề kết nghĩa giữa Lăng Tiêu và Triệu Vô Cực dưới trăng rằm.',
+        desc: 'Buổi họp mặt lớn nhất của võ lâm, nơi mảnh kiếm đầu tiên xuất hiện.',
         x: 230,
         y: 595,
-      },
-      {
-        id: 'kiem-hoang-hon',
-        name: 'Kiếm Hoàng Hôn',
-        type: 'item',
-        role: 'THẦN BINH CỔ ĐẠI',
-        subType: 'BẢO VẬT',
-        desc: 'Thanh kiếm táng tích hoàng hôn vạn năm, ẩn chứa kiếm ý vô thượng.',
-        x: 275,
-        y: 470,
       },
       {
         id: 'han-nguyet-thanh',
         name: 'Hàn Nguyệt Thành',
         type: 'location',
-        role: 'BIÊN ẢI',
+        role: 'PHƯƠNG BẮC',
         subType: 'THÀNH CỔ',
-        desc: 'Tòa thành cổ tuyết phủ quanh năm, nơi lưu đày các kiếm khách lưu vong.',
+        desc: 'Thành cảng lạnh giá ở biên giới phía Bắc, nơi giao thương và gián điệp trà trộn.',
         x: 115,
         y: 630,
       },
@@ -173,9 +197,46 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         type: 'location',
         role: 'HIỂM ĐỊA',
         subType: 'CẤM ĐỊA TỬ VONG',
-        desc: 'Hẻm vực sâu vạn trượng ngăn cách Trung Nguyên và Man Tộc.',
+        desc: 'Vách đá nơi bảy mảnh kiếm được cho là đã rơi xuống.',
         x: 330,
         y: 590,
+      },
+    ],
+    events: [
+      {
+        id: 'event-1',
+        chapter: 'CHƯƠNG 1',
+        title: 'Đêm Hỏa Thiêu Sơn Trang',
+        desc: 'Sơn trang họ Lăng bị thiêu rụi. Chỉ Lăng Tiêu sống sót, tay còn cầm chuôi kiếm gãy.',
+        tags: [
+          { name: 'Lãng Tiêu', type: 'character', symbol: '●', color: '#e5a93c' },
+          { name: 'Triệu Vô Cực', type: 'character', symbol: '●', color: '#e5a93c' },
+          { name: 'Hàn Nguyệt Thành', type: 'location', symbol: '▲', color: '#9f70cf' },
+        ],
+      },
+      {
+        id: 'event-2',
+        chapter: 'CHƯƠNG 7',
+        title: 'Hội Thề Nguyệt Hạ',
+        desc: 'Buổi họp mặt lớn nhất của võ lâm, nơi mảnh kiếm đầu tiên xuất hiện.',
+        tags: [
+          { name: 'Kiếm Hoàng Hôn', type: 'item', symbol: '◆', color: '#42b883' },
+          { name: 'Thiên Hạ Minh', type: 'faction', symbol: '⬡', color: '#d95a38' },
+        ],
+      },
+    ],
+    locations: [
+      {
+        id: 'loc-1',
+        name: 'Hàn Nguyệt Thành',
+        region: 'PHƯƠNG BẮC',
+        desc: 'Thành cảng lạnh giá ở biên giới phía Bắc, nơi giao thương và gián điệp trà trộn.',
+      },
+      {
+        id: 'loc-2',
+        name: 'Vực Vọng Hồn',
+        region: 'HIỂM ĐỊA',
+        desc: 'Vách đá nơi bảy mảnh kiếm được cho là đã rơi xuống.',
       },
     ],
     links: [

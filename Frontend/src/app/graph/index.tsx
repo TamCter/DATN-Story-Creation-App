@@ -3,7 +3,6 @@ import React, { useMemo, useState } from 'react';
 import {
   Dimensions,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -16,7 +15,6 @@ import Svg, {
   Circle,
   G,
   Line,
-  Path,
   Polygon,
   Rect,
   Text as SvgText,
@@ -26,7 +24,6 @@ import {
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
-  StoryProject,
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 
@@ -36,11 +33,11 @@ export default function GraphScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
 
-  const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
+  const currentProject = useMemo(() => {
     return (
       INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
     );
-  });
+  }, [projectId]);
 
   const [nodes, setNodes] = useState<StoryNode[]>(currentProject.nodes);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
@@ -84,9 +81,6 @@ export default function GraphScreen() {
     if (!activeFilter) return nodes;
     return nodes.filter((n) => n.type === activeFilter);
   }, [nodes, activeFilter]);
-
-  // Pan responder for dragging nodes
-  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
 
   const handleZoomIn = () => {
     setZoomLevel((prev) => Math.min(prev + 0.15, 1.8));
@@ -537,7 +531,12 @@ export default function GraphScreen() {
 
             <Pressable
               style={styles.viewDetailLink}
-              onPress={() => setDetailModalOpen(true)}>
+              onPress={() =>
+                router.push({
+                  pathname: '/graph/nodes' as any,
+                  params: { projectId: currentProject.id },
+                })
+              }>
               <Text style={styles.viewDetailText}>Xem chi tiết →</Text>
             </Pressable>
           </View>
@@ -581,10 +580,14 @@ export default function GraphScreen() {
                   {
                     num: '02',
                     title: 'Chi tiết node',
-                    sub: 'Node đang chọn',
+                    sub: 'Danh sách các node',
+                    badge: `${nodes.length}`,
                     onPress: () => {
                       setDrawerOpen(false);
-                      if (selectedNode) setDetailModalOpen(true);
+                      router.push({
+                        pathname: '/graph/nodes' as any,
+                        params: { projectId: currentProject.id },
+                      });
                     },
                   },
                   {
@@ -592,8 +595,26 @@ export default function GraphScreen() {
                     title: 'Chi tiết sự kiện',
                     sub: 'Dòng thời gian',
                     badge: '2',
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/events' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
                   },
-                  { num: '04', title: 'Địa điểm', badge: '2' },
+                  {
+                    num: '04',
+                    title: 'Địa điểm',
+                    badge: '2',
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/locations' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
+                  },
                   { num: '05', title: 'Nhân vật', badge: '3' },
                   { num: '06', title: 'Phe phái', badge: '2' },
                   { num: '07', title: 'Vật phẩm', badge: '1' },

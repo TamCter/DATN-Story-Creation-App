@@ -14,6 +14,9 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="projects/index" />
         <Stack.Screen name="graph/index" />
+        <Stack.Screen name="graph/nodes" />
+        <Stack.Screen name="graph/events" />
+        <Stack.Screen name="graph/locations" />
       </Stack>
     </ThemeProvider>
   );

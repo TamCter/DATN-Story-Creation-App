@@ -13,12 +13,14 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Line } from 'react-native-svg';
 
-import { AppFonts, Spacing, ThemeColors } from '@/constants/theme';
+import { AppFonts, ThemeColors } from '@/constants/theme';
 
 export default function AuthScreen() {
-  const [tab, setTab] = useState<'login' | 'register'>('login');
-  const [email, setEmail] = useState('tam@nguyentam.dev');
-  const [password, setPassword] = useState('••••••••••••');
+  const [tab, setTab] = useState<'login' | 'register'>('register');
+  const [penName, setPenName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
 
   const handleEnterApp = () => {
     router.push('/projects' as any);
@@ -144,30 +146,79 @@ export default function AuthScreen() {
 
           {/* Form */}
           <View style={styles.formContainer}>
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>Email</Text>
-              <TextInput
-                style={styles.textInput}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="Nhập địa chỉ email"
-                placeholderTextColor="#5a5449"
-                keyboardType="email-address"
-                autoCapitalize="none"
-              />
-            </View>
+            {tab === 'register' ? (
+              <>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={penName}
+                    onChangeText={setPenName}
+                    placeholder="Bút danh"
+                    placeholderTextColor="#5c5447"
+                    autoCapitalize="words"
+                  />
+                </View>
 
-            <View style={styles.inputWrapper}>
-              <Text style={styles.inputLabel}>Mật khẩu</Text>
-              <TextInput
-                style={styles.textInput}
-                value={password}
-                onChangeText={setPassword}
-                placeholder="Nhập mật khẩu"
-                placeholderTextColor="#5a5449"
-                secureTextEntry
-              />
-            </View>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Email"
+                    placeholderTextColor="#5c5447"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Mật khẩu"
+                    placeholderTextColor="#5c5447"
+                    secureTextEntry
+                  />
+                </View>
+
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={confirmPassword}
+                    onChangeText={setConfirmPassword}
+                    placeholder="Nhập lại mật khẩu"
+                    placeholderTextColor="#5c5447"
+                    secureTextEntry
+                  />
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={email}
+                    onChangeText={setEmail}
+                    placeholder="Email"
+                    placeholderTextColor="#5c5447"
+                    keyboardType="email-address"
+                    autoCapitalize="none"
+                  />
+                </View>
+
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.textInput}
+                    value={password}
+                    onChangeText={setPassword}
+                    placeholder="Mật khẩu"
+                    placeholderTextColor="#5c5447"
+                    secureTextEntry
+                  />
+                </View>
+              </>
+            )}
 
             {/* Main Action Button */}
             <Pressable
@@ -176,7 +227,9 @@ export default function AuthScreen() {
                 pressed && styles.primaryBtnPressed,
               ]}
               onPress={handleEnterApp}>
-              <Text style={styles.primaryBtnText}>Vào xưởng viết</Text>
+              <Text style={styles.primaryBtnText}>
+                {tab === 'register' ? 'Tạo tài khoản' : 'Vào xưởng viết'}
+              </Text>
             </Pressable>
 
             {/* Guest Demo Action */}
@@ -277,33 +330,27 @@ const styles = StyleSheet.create({
     backgroundColor: ThemeColors.gold,
   },
   formContainer: {
-    gap: 22,
+    gap: 16,
   },
   inputWrapper: {
     borderBottomWidth: 1,
-    borderBottomColor: '#29251d',
-    paddingBottom: 8,
-  },
-  inputLabel: {
-    fontSize: 13,
-    color: '#756d5e',
-    marginBottom: 4,
-    fontFamily: AppFonts.sans,
+    borderBottomColor: '#28241c',
   },
   textInput: {
-    fontSize: 15,
+    fontSize: 15.5,
     color: ThemeColors.textPrimary,
-    paddingVertical: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 0,
     fontFamily: AppFonts.sans,
   },
   primaryBtn: {
-    marginTop: 18,
-    backgroundColor: '#db9d33',
-    paddingVertical: 15,
+    marginTop: 24,
+    backgroundColor: '#dca13c',
+    paddingVertical: 16,
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    shadowColor: '#db9d33',
+    shadowColor: '#dca13c',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.25,
     shadowRadius: 10,
