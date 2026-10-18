@@ -6,7 +6,8 @@
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "frontend",
-    "userInterfaceStyle": "automatic",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0e0d0b",
     "ios": {
       "icon": "./assets/expo.icon",
       "bundleIdentifier": "com.zen1311.Frontend",
