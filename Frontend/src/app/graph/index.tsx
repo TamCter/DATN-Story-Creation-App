@@ -15,6 +15,7 @@ import Svg, {
   Circle,
   G,
   Line,
+  Path,
   Polygon,
   Rect,
   Text as SvgText,
@@ -28,6 +29,19 @@ import {
 import { AppFonts, ThemeColors } from '@/constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+// Precomputed static SVG path for the dot grid (replaces 646 separate Circle elements)
+const DOT_GRID_PATH = (() => {
+  let path = '';
+  for (let col = 0; col < 19; col++) {
+    for (let row = 0; row < 34; row++) {
+      const cx = col * 20 + 10;
+      const cy = row * 20 + 10;
+      path += `M${cx - 0.8},${cy}a0.8,0.8 0 1,0 1.6,0a0.8,0.8 0 1,0 -1.6,0 `;
+    }
+  }
+  return path;
+})();
 
 export default function GraphScreen() {
   const params = useLocalSearchParams();
@@ -394,20 +408,8 @@ export default function GraphScreen() {
             width={SCREEN_WIDTH}
             height={SCREEN_HEIGHT * 0.72}
             viewBox="0 0 380 720">
-            {/* Dot Grid Background */}
-            <G opacity={0.25}>
-              {Array.from({ length: 19 }).map((_, col) =>
-                Array.from({ length: 34 }).map((__, row) => (
-                  <Circle
-                    key={`dot-${col}-${row}`}
-                    cx={col * 20 + 10}
-                    cy={row * 20 + 10}
-                    r={0.8}
-                    fill="#e5a93c"
-                  />
-                ))
-              )}
-            </G>
+            {/* Dot Grid Background (Single Native Node) */}
+            <Path d={DOT_GRID_PATH} fill="#e5a93c" opacity={0.25} />
 
             {/* Connecting Links / Edges */}
             {currentProject.links.map((link) => {

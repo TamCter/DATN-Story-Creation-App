@@ -54,6 +54,7 @@ export default function EventsDetailScreen() {
       {/* Top Header */}
       <View style={styles.headerBar}>
         <Pressable
+          hitSlop={12}
           style={({ pressed }) => [
             styles.backBtn,
             pressed && styles.backBtnPressed,

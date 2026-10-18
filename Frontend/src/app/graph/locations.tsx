@@ -45,6 +45,7 @@ export default function LocationsScreen() {
       {/* Top Header */}
       <View style={styles.headerBar}>
         <Pressable
+          hitSlop={12}
           style={({ pressed }) => [
             styles.backBtn,
             pressed && styles.backBtnPressed,
