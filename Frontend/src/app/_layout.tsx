@@ -36,7 +36,12 @@ export default function RootLayout() {
         <Stack.Screen name="graph/index" />
         <Stack.Screen name="graph/nodes" />
         <Stack.Screen name="graph/events" />
+        <Stack.Screen name="graph/chapters" />
         <Stack.Screen name="graph/locations" />
+        <Stack.Screen name="graph/characters" />
+        <Stack.Screen name="graph/factions" />
+        <Stack.Screen name="graph/items" />
+        <Stack.Screen name="graph/links" />
       </Stack>
     </ThemeProvider>
   );
