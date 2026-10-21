@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Modal,
@@ -78,8 +78,18 @@ export default function GraphScreen() {
   const [links, setLinks] = useState<StoryLink[]>(activeChapter.links);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+  const prevChapterRef = useRef<StoryChapter>(activeChapter);
+  const chapterNodesRef = useRef<Record<string, StoryNode[]>>({});
+  const nodesRef = useRef<StoryNode[]>(nodes);
+  nodesRef.current = nodes;
+
   useEffect(() => {
-    setNodes(activeChapter.nodes);
+    if (prevChapterRef.current && prevChapterRef.current.id !== activeChapter.id) {
+      chapterNodesRef.current[prevChapterRef.current.id] = nodesRef.current;
+    }
+    prevChapterRef.current = activeChapter;
+
+    setNodes(chapterNodesRef.current[activeChapter.id] || activeChapter.nodes);
     setLinks(activeChapter.links);
     setSelectedNodeId(null);
   }, [activeChapter]);
@@ -150,7 +160,11 @@ export default function GraphScreen() {
       x: 180 + (Math.random() * 80 - 40),
       y: 350 + (Math.random() * 80 - 40),
     };
-    setNodes((prev) => [...prev, newNode]);
+    setNodes((prev) => {
+      const next = [...prev, newNode];
+      chapterNodesRef.current[activeChapter.id] = next;
+      return next;
+    });
     setSelectedNodeId(newNode.id);
     setAddModalOpen(false);
     setNewNodeName('');
