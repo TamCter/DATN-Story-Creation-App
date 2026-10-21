@@ -100,7 +100,10 @@ async function createChapter(req, res, next) {
   }
 
   let num = 1;
-  if (chapterNumber !== undefined) {
+  if (chapterNumber !== undefined && chapterNumber !== null) {
+    if (typeof chapterNumber === 'string' && chapterNumber.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
+    }
     const parsed = Number(chapterNumber);
     if (!Number.isFinite(parsed)) {
       return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
@@ -170,11 +173,15 @@ async function updateChapter(req, res, next) {
   const { chapterNumber, code, title, shortTitle, watermark, desc, events } = req.body || {};
 
   let parsedChapterNumber = null;
-  if (chapterNumber !== undefined) {
-    parsedChapterNumber = Number(chapterNumber);
-    if (!Number.isFinite(parsedChapterNumber)) {
+  if (chapterNumber !== undefined && chapterNumber !== null) {
+    if (typeof chapterNumber === 'string' && chapterNumber.trim() === '') {
       return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
     }
+    const parsed = Number(chapterNumber);
+    if (!Number.isFinite(parsed)) {
+      return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
+    }
+    parsedChapterNumber = parsed;
   }
 
   try {

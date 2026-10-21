@@ -192,11 +192,11 @@ async function createNode(req, res, next) {
       updatedAt: Date.now(),
     };
 
-    if (weapon !== undefined) nodeProperties.weapon = String(weapon);
-    if (sect !== undefined) nodeProperties.sect = String(sect);
-    if (status !== undefined) nodeProperties.status = String(status);
-    if (personality !== undefined) nodeProperties.personality = String(personality);
-    if (region !== undefined) nodeProperties.region = String(region);
+    if (weapon !== undefined) nodeProperties.weapon = weapon !== null ? String(weapon) : '';
+    if (sect !== undefined) nodeProperties.sect = sect !== null ? String(sect) : '';
+    if (status !== undefined) nodeProperties.status = status !== null ? String(status) : '';
+    if (personality !== undefined) nodeProperties.personality = personality !== null ? String(personality) : '';
+    if (region !== undefined) nodeProperties.region = region !== null ? String(region) : '';
 
     const createQuery = `
       MATCH (p:Project { id: $projectId })
