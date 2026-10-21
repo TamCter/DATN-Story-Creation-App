@@ -146,9 +146,23 @@ export default function ItemsScreen() {
         item.name.toLowerCase().includes(q) ||
         item.desc.toLowerCase().includes(q) ||
         (item.role && item.role.toLowerCase().includes(q));
-      return matchesSearch;
+      if (!matchesSearch) return false;
+
+      if (selectedFilter === 'all') return true;
+      if (selectedFilter === 'weapon') {
+        const extra = ITEM_EXTRAS[item.id];
+        return extra && extra.fragments && extra.fragments.length === 0;
+      }
+      if (selectedFilter === 'fragment') {
+        const extra = ITEM_EXTRAS[item.id];
+        return extra && extra.fragments && extra.fragments.length > 0;
+      }
+      if (selectedFilter === 'scroll') {
+        return item.subType?.toLowerCase().includes('bí kíp') || item.subType?.toLowerCase().includes('phổ') || false;
+      }
+      return true;
     });
-  }, [items, searchQuery]);
+  }, [items, searchQuery, selectedFilter]);
 
   const handleAddItem = () => {
     if (!newItemName.trim()) return;
@@ -247,10 +261,8 @@ export default function ItemsScreen() {
         {/* Category Filters */}
         <View style={styles.filterRow}>
           {[
-            { id: 'all', label: 'Tất cả (1)' },
-            { id: 'weapon', label: 'Thần binh (1)' },
-            { id: 'fragment', label: 'Mảnh kiếm (7)' },
-            { id: 'scroll', label: 'Bí kíp / Phổ' },
+            { id: 'all', label: `Tất cả (${items.length})` },
+            { id: 'fragment', label: `Có mảnh vỡ (${items.filter((i) => (ITEM_EXTRAS[i.id]?.fragments?.length ?? 0) > 0).length})` },
           ].map((item) => {
             const isSelected = selectedFilter === item.id;
             return (
@@ -451,7 +463,7 @@ export default function ItemsScreen() {
                       });
                     }}>
                     <Text style={styles.actionOutlineBtnText}>
-                      Xem 4 mối liên kết →
+                      Xem {extra.associatedNodes.length} mối liên kết →
                     </Text>
                   </Pressable>
 

@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -172,41 +174,46 @@ export default function ProjectsScreen() {
             style={styles.modalDismissArea}
             onPress={() => setModalVisible(false)}
           />
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Khai sinh một thế giới</Text>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardAvoiding}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Khai sinh một thế giới</Text>
 
-            <View style={styles.modalInputGroup}>
-              <TextInput
-                style={[styles.modalInput, styles.modalInputTitle]}
-                value={newTitle}
-                onChangeText={setNewTitle}
-                placeholder="Tên truyện"
-                placeholderTextColor="#665f52"
-                autoFocus
-              />
+              <View style={styles.modalInputGroup}>
+                <TextInput
+                  style={[styles.modalInput, styles.modalInputTitle]}
+                  value={newTitle}
+                  onChangeText={setNewTitle}
+                  placeholder="Tên truyện"
+                  placeholderTextColor="#665f52"
+                  autoFocus
+                />
 
-              <TextInput
-                style={styles.modalInput}
-                value={newGenre}
-                onChangeText={setNewGenre}
-                placeholder="Thể loại (vd. Kiếm hiệp, Trinh thám...)"
-                placeholderTextColor="#665f52"
-              />
+                <TextInput
+                  style={styles.modalInput}
+                  value={newGenre}
+                  onChangeText={setNewGenre}
+                  placeholder="Thể loại (vd. Kiếm hiệp, Trinh thám...)"
+                  placeholderTextColor="#665f52"
+                />
+              </View>
+
+              <View style={styles.modalActionRow}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setModalVisible(false)}>
+                  <Text style={styles.modalCancelText}>Hủy</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalConfirmBtn}
+                  onPress={handleCreateProject}>
+                  <Text style={styles.modalConfirmText}>Tạo dự án</Text>
+                </Pressable>
+              </View>
             </View>
-
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={styles.modalCancelBtn}
-                onPress={() => setModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Hủy</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalConfirmBtn}
-                onPress={handleCreateProject}>
-                <Text style={styles.modalConfirmText}>Tạo dự án</Text>
-              </Pressable>
-            </View>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -385,6 +392,9 @@ const styles = StyleSheet.create({
   },
   modalDismissArea: {
     flex: 1,
+  },
+  modalKeyboardAvoiding: {
+    width: '100%',
   },
   modalCard: {
     width: '100%',

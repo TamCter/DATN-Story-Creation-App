@@ -147,7 +147,7 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         type: 'character',
         role: 'PHẢN DIỆN',
         subType: 'MINH CHỦ',
-        desc: 'Minh chủ Thiên Hạ Minh, người từng là huynh đệ kết nghĩa của Lãng Tiêu.',
+        desc: 'Minh chủ Thiên Hạ Minh, người từng là huynh đệ kết nghĩa của Lăng Tiêu.',
         x: 295,
         y: 195,
       },
@@ -239,14 +239,14 @@ export const INITIAL_PROJECTS: StoryProject[] = [
         title: 'Đêm Hỏa Thiêu Sơn Trang',
         desc: 'Sơn trang họ Lăng bị thiêu rụi. Chỉ Lăng Tiêu sống sót, tay còn cầm chuôi kiếm gãy.',
         tags: [
-          { name: 'Lãng Tiêu', type: 'character', symbol: '●', color: '#e5a93c' },
+          { name: 'Lăng Tiêu', type: 'character', symbol: '●', color: '#e5a93c' },
           { name: 'Triệu Vô Cực', type: 'character', symbol: '●', color: '#e5a93c' },
           { name: 'Hàn Nguyệt Thành', type: 'location', symbol: '▲', color: '#9f70cf' },
         ],
       },
       {
         id: 'event-2',
-        chapter: 'CHƯƠNG 7',
+        chapter: 'CHƯƠNG 3',
         title: 'Hội Thề Nguyệt Hạ',
         desc: 'Buổi họp mặt lớn nhất của võ lâm, nơi mảnh kiếm đầu tiên xuất hiện.',
         tags: [

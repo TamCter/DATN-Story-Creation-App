@@ -25,20 +25,15 @@ export default function LocationsScreen() {
     );
   }, [projectId]);
 
-  const locations: StoryLocationItem[] = currentProject.locations || [
-    {
-      id: 'loc-1',
-      name: 'Hàn Nguyệt Thành',
-      region: 'PHƯƠNG BẮC',
-      desc: 'Thành cảng lạnh giá ở biên giới phía Bắc, nơi giao thương và gián điệp trà trộn.',
-    },
-    {
-      id: 'loc-2',
-      name: 'Vực Vọng Hồn',
-      region: 'HIỂM ĐỊA',
-      desc: 'Vách đá nơi bảy mảnh kiếm được cho là đã rơi xuống.',
-    },
-  ];
+  const locations: StoryLocationItem[] = currentProject.locations || 
+    currentProject.nodes
+      .filter((n) => n.type === 'location')
+      .map((n) => ({
+        id: n.id,
+        name: n.name,
+        region: n.role,
+        desc: n.desc,
+      }));
 
   return (
     <SafeAreaView style={styles.safeArea}>

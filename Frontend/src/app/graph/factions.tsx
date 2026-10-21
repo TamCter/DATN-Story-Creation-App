@@ -373,7 +373,7 @@ export default function FactionsScreen() {
                       });
                     }}>
                     <Text style={styles.actionOutlineBtnText}>
-                      Xem liên kết ({extra.relations?.length || 2})
+                      Xem liên kết ({extra.relations?.length ?? 0})
                     </Text>
                   </Pressable>
 

@@ -66,6 +66,8 @@ const CHAR_EXTRAS: Record<string, CharacterExtra> = {
   },
 };
 
+const MAIN_ROLES = new Set(['NHÂN VẬT CHÍNH', 'CHÍNH DIỆN']);
+
 export default function CharactersScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
@@ -93,7 +95,7 @@ export default function CharactersScreen() {
         c.role.toLowerCase().includes(q);
 
       if (!matchesSearch) return false;
-      if (selectedRole === 'main' && c.role !== 'NHÂN VẬT CHÍNH') return false;
+      if (selectedRole === 'main' && !MAIN_ROLES.has(c.role)) return false;
       if (selectedRole === 'ally' && c.role !== 'ĐỒNG HÀNH') return false;
       if (selectedRole === 'villain' && c.role !== 'PHẢN DIỆN') return false;
 
@@ -137,12 +139,16 @@ export default function CharactersScreen() {
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>1</Text>
+            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
+              {characters.filter((c) => MAIN_ROLES.has(c.role)).length}
+            </Text>
             <Text style={styles.statLabel}>CHÍNH DIỆN</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e05252' }]}>1</Text>
+            <Text style={[styles.statValue, { color: '#e05252' }]}>
+              {characters.filter((c) => c.role === 'PHẢN DIỆN').length}
+            </Text>
             <Text style={styles.statLabel}>PHẢN DIỆN</Text>
           </View>
         </View>

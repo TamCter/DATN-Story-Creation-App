@@ -668,7 +668,7 @@ export default function GraphScreen() {
                   {
                     num: '04',
                     title: 'Địa điểm',
-                    badge: '2',
+                    badge: `${currentProject.locations?.length ?? nodes.filter((n) => n.type === 'location').length}`,
                     onPress: () => {
                       setDrawerOpen(false);
                       router.push({
@@ -717,7 +717,7 @@ export default function GraphScreen() {
                     num: '08',
                     title: 'Mối liên kết',
                     sub: 'Tất cả cạnh',
-                    badge: `${links.length || 14}`,
+                    badge: `${links.length}`,
                     onPress: () => {
                       setDrawerOpen(false);
                       router.push({

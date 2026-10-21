@@ -228,7 +228,7 @@ export default function AuthScreen() {
               ]}
               onPress={handleEnterApp}>
               <Text style={styles.primaryBtnText}>
-                {tab === 'register' ? 'Tạo tài khoản' : 'Vào xưởng viết'}
+                {tab === 'register' ? 'Bắt đầu trải nghiệm' : 'Vào xưởng viết'}
               </Text>
             </Pressable>
 
