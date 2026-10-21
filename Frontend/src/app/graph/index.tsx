@@ -1,9 +1,8 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Dimensions,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -23,29 +22,78 @@ import Svg, {
 } from 'react-native-svg';
 
 import {
+  getProjectChapters,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
+  StoryChapter,
+  StoryLink,
   StoryNode,
-  StoryProject,
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
+// Precomputed static SVG path for the dot grid (replaces 646 separate Circle elements)
+const DOT_GRID_PATH = (() => {
+  let path = '';
+  for (let col = 0; col < 19; col++) {
+    for (let row = 0; row < 34; row++) {
+      const cx = col * 20 + 10;
+      const cy = row * 20 + 10;
+      path += `M${cx - 0.8},${cy}a0.8,0.8 0 1,0 1.6,0a0.8,0.8 0 1,0 -1.6,0 `;
+    }
+  }
+  return path;
+})();
+
 export default function GraphScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
 
-  const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
+  const currentProject = useMemo(() => {
     return (
       INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
     );
-  });
+  }, [projectId]);
 
-  const [nodes, setNodes] = useState<StoryNode[]>(currentProject.nodes);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
-    'trieu-vo-cuc'
+  const chapters = useMemo(() => {
+    return getProjectChapters(currentProject);
+  }, [currentProject]);
+
+  const [activeChapterId, setActiveChapterId] = useState<string>(
+    (params.chapterId as string) || (chapters[0]?.id ?? 'c1')
   );
+
+  useEffect(() => {
+    if (params.chapterId && typeof params.chapterId === 'string') {
+      setActiveChapterId(params.chapterId);
+    }
+  }, [params.chapterId]);
+
+  const activeChapter = useMemo(() => {
+    return chapters.find((c) => c.id === activeChapterId) || chapters[0];
+  }, [chapters, activeChapterId]);
+
+  const [nodes, setNodes] = useState<StoryNode[]>(activeChapter.nodes);
+  const [links, setLinks] = useState<StoryLink[]>(activeChapter.links);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+
+  const prevChapterRef = useRef<StoryChapter>(activeChapter);
+  const chapterNodesRef = useRef<Record<string, StoryNode[]>>({});
+  const nodesRef = useRef<StoryNode[]>(nodes);
+  nodesRef.current = nodes;
+
+  useEffect(() => {
+    if (prevChapterRef.current && prevChapterRef.current.id !== activeChapter.id) {
+      chapterNodesRef.current[prevChapterRef.current.id] = nodesRef.current;
+    }
+    prevChapterRef.current = activeChapter;
+
+    setNodes(chapterNodesRef.current[activeChapter.id] || activeChapter.nodes);
+    setLinks(activeChapter.links);
+    setSelectedNodeId(null);
+  }, [activeChapter]);
+
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
   const [drawerOpen, setDrawerOpen] = useState<boolean>(false);
@@ -65,10 +113,10 @@ export default function GraphScreen() {
   // Determine connected links for selected node
   const connectedLinks = useMemo(() => {
     if (!selectedNodeId) return [];
-    return currentProject.links.filter(
+    return links.filter(
       (link) => link.source === selectedNodeId || link.target === selectedNodeId
     );
-  }, [currentProject.links, selectedNodeId]);
+  }, [links, selectedNodeId]);
 
   const connectedNodeIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
@@ -84,9 +132,6 @@ export default function GraphScreen() {
     if (!activeFilter) return nodes;
     return nodes.filter((n) => n.type === activeFilter);
   }, [nodes, activeFilter]);
-
-  // Pan responder for dragging nodes
-  const [draggedNodeId, setDraggedNodeId] = useState<string | null>(null);
 
   const handleZoomIn = () => {
     setZoomLevel((prev) => Math.min(prev + 0.15, 1.8));
@@ -115,7 +160,11 @@ export default function GraphScreen() {
       x: 180 + (Math.random() * 80 - 40),
       y: 350 + (Math.random() * 80 - 40),
     };
-    setNodes((prev) => [...prev, newNode]);
+    setNodes((prev) => {
+      const next = [...prev, newNode];
+      chapterNodesRef.current[activeChapter.id] = next;
+      return next;
+    });
     setSelectedNodeId(newNode.id);
     setAddModalOpen(false);
     setNewNodeName('');
@@ -315,7 +364,7 @@ export default function GraphScreen() {
         <View style={styles.topBarTitleCenter}>
           <Text style={styles.topBarTitle}>{currentProject.title}</Text>
           <Text style={styles.topBarSub}>
-            {nodes.length} NODE · {currentProject.links.length} LIÊN KẾT
+            CHƯƠNG {activeChapter.chapterNumber} · {filteredNodes.length} NODE · {links.length} LIÊN KẾT
           </Text>
         </View>
 
@@ -372,17 +421,51 @@ export default function GraphScreen() {
         </ScrollView>
       </View>
 
+      {/* Chapter Tabs Bar (Image 1) */}
+      <View style={styles.chapterTabBar}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chapterTabScroll}>
+          {chapters.map((ch) => {
+            const isActive = ch.id === activeChapter.id;
+            return (
+              <Pressable
+                key={ch.id}
+                style={[
+                  styles.chapterTab,
+                  isActive && styles.chapterTabActive,
+                ]}
+                onPress={() => {
+                  setActiveChapterId(ch.id);
+                  setActiveFilter(null);
+                }}>
+                <Text
+                  style={[
+                    styles.chapterTabText,
+                    isActive && styles.chapterTabTextActive,
+                  ]}>
+                  {ch.shortTitle}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+
       {/* Canvas Area */}
       <View style={styles.canvasContainer}>
-        {/* Floating Controls */}
+        {/* Floating Top Left Watermark (Image 1) */}
         <View style={styles.floatingTopLeft} pointerEvents="none">
-          <Text style={styles.panHintText}>KÉO ĐỂ DI CHUYỂN</Text>
+          <Text style={styles.watermarkText}>{activeChapter.watermark}</Text>
         </View>
 
+        {/* Unified Vertical Zoom Controls (Image 1) */}
         <View style={styles.zoomControls}>
           <Pressable style={styles.zoomBtn} onPress={handleZoomIn}>
             <Text style={styles.zoomBtnText}>+</Text>
           </Pressable>
+          <View style={styles.zoomDivider} />
           <Pressable style={styles.zoomBtn} onPress={handleZoomOut}>
             <Text style={styles.zoomBtnText}>−</Text>
           </Pressable>
@@ -400,23 +483,11 @@ export default function GraphScreen() {
             width={SCREEN_WIDTH}
             height={SCREEN_HEIGHT * 0.72}
             viewBox="0 0 380 720">
-            {/* Dot Grid Background */}
-            <G opacity={0.25}>
-              {Array.from({ length: 19 }).map((_, col) =>
-                Array.from({ length: 34 }).map((__, row) => (
-                  <Circle
-                    key={`dot-${col}-${row}`}
-                    cx={col * 20 + 10}
-                    cy={row * 20 + 10}
-                    r={0.8}
-                    fill="#e5a93c"
-                  />
-                ))
-              )}
-            </G>
+            {/* Dot Grid Background (Single Native Node) */}
+            <Path d={DOT_GRID_PATH} fill="#e5a93c" opacity={0.25} />
 
             {/* Connecting Links / Edges */}
-            {currentProject.links.map((link) => {
+            {links.map((link) => {
               const src = nodes.find((n) => n.id === link.source);
               const tgt = nodes.find((n) => n.id === link.target);
               if (!src || !tgt) return null;
@@ -431,10 +502,9 @@ export default function GraphScreen() {
 
               const strokeColor = isHighlighted
                 ? '#f0b84c'
-                : 'rgba(229, 169, 60, 0.28)';
-              const strokeW = isHighlighted ? 1.6 : 1;
-              const strokeDash =
-                link.type === 'dashed' || !isHighlighted ? '4,4' : undefined;
+                : 'rgba(229, 169, 60, 0.38)';
+              const strokeW = isHighlighted ? 1.6 : 1.2;
+              const strokeDash = '3,3';
 
               const midX = (src.x + tgt.x) / 2;
               const midY = (src.y + tgt.y) / 2;
@@ -581,27 +651,89 @@ export default function GraphScreen() {
                   {
                     num: '02',
                     title: 'Chi tiết node',
-                    sub: 'Node đang chọn',
+                    sub: 'Danh sách các node',
+                    badge: `${currentProject.nodes.length}`,
                     onPress: () => {
                       setDrawerOpen(false);
-                      if (selectedNode) setDetailModalOpen(true);
+                      router.push({
+                        pathname: '/graph/nodes' as any,
+                        params: { projectId: currentProject.id },
+                      });
                     },
                   },
                   {
                     num: '03',
-                    title: 'Chi tiết sự kiện',
-                    sub: 'Dòng thời gian',
-                    badge: '2',
+                    title: 'Chi tiết chương',
+                    sub: 'Dòng thời gian & sự kiện',
+                    badge: `${chapters.length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/events' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
                   },
-                  { num: '04', title: 'Địa điểm', badge: '2' },
-                  { num: '05', title: 'Nhân vật', badge: '3' },
-                  { num: '06', title: 'Phe phái', badge: '2' },
-                  { num: '07', title: 'Vật phẩm', badge: '1' },
+                  {
+                    num: '04',
+                    title: 'Địa điểm',
+                    badge: `${currentProject.locations?.length ?? nodes.filter((n) => n.type === 'location').length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/locations' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
+                  },
+                  {
+                    num: '05',
+                    title: 'Nhân vật',
+                    badge: `${nodes.filter((n) => n.type === 'character').length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/characters' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
+                  },
+                  {
+                    num: '06',
+                    title: 'Phe phái',
+                    badge: `${nodes.filter((n) => n.type === 'faction').length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/factions' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
+                  },
+                  {
+                    num: '07',
+                    title: 'Vật phẩm',
+                    badge: `${nodes.filter((n) => n.type === 'item').length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/items' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
+                  },
                   {
                     num: '08',
                     title: 'Mối liên kết',
                     sub: 'Tất cả cạnh',
-                    badge: '12',
+                    badge: `${links.length}`,
+                    onPress: () => {
+                      setDrawerOpen(false);
+                      router.push({
+                        pathname: '/graph/links' as any,
+                        params: { projectId: currentProject.id },
+                      });
+                    },
                   },
                   {
                     num: '09',
@@ -843,15 +975,15 @@ const styles = StyleSheet.create({
     width: 38,
     height: 38,
     borderWidth: 1,
-    borderColor: '#363126',
-    borderRadius: 6,
-    backgroundColor: '#151310',
+    borderColor: '#2d271e',
+    borderRadius: 4,
+    backgroundColor: '#14120e',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 4,
   },
   menuIconBar: {
-    width: 18,
+    width: 16,
     height: 2,
     backgroundColor: '#ded5c7',
     borderRadius: 1,
@@ -862,32 +994,34 @@ const styles = StyleSheet.create({
   topBarTitle: {
     color: '#ded5c7',
     fontFamily: AppFonts.serif,
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '600',
   },
   topBarSub: {
-    color: '#8c7746',
-    fontSize: 10,
+    color: '#8f887b',
+    fontSize: 10.5,
     letterSpacing: 1.5,
-    fontFamily: AppFonts.mono,
+    fontFamily: AppFonts.sans,
+    fontWeight: '600',
     marginTop: 2,
+    textTransform: 'uppercase',
   },
   addNodeBtn: {
     width: 38,
     height: 38,
-    borderRadius: 6,
-    backgroundColor: '#db9d33',
+    borderRadius: 4,
+    backgroundColor: '#d19839',
     alignItems: 'center',
     justifyContent: 'center',
   },
   addNodeBtnText: {
-    color: '#15130e',
-    fontSize: 22,
-    fontWeight: '700',
-    lineHeight: 24,
+    color: '#0e0d0b',
+    fontSize: 24,
+    fontWeight: '400',
+    lineHeight: 26,
   },
   filterBar: {
-    paddingVertical: 10,
+    paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#1d1b16',
   },
@@ -898,12 +1032,12 @@ const styles = StyleSheet.create({
   filterChip: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 11,
     paddingVertical: 6,
-    borderRadius: 6,
+    borderRadius: 4,
     borderWidth: 1,
     borderColor: '#29251e',
-    backgroundColor: '#161411',
+    backgroundColor: '#13110d',
     gap: 6,
   },
   filterChipSymbol: {
@@ -915,6 +1049,37 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.sans,
     fontWeight: '500',
   },
+  chapterTabBar: {
+    paddingVertical: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#1c1a15',
+  },
+  chapterTabScroll: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  chapterTab: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#29251e',
+    backgroundColor: '#12100d',
+  },
+  chapterTabActive: {
+    borderColor: '#e5a93c',
+    backgroundColor: '#17140f',
+  },
+  chapterTabText: {
+    fontSize: 12.5,
+    color: '#8f887b',
+    fontFamily: AppFonts.sans,
+    fontWeight: '500',
+  },
+  chapterTabTextActive: {
+    color: '#e5a93c',
+    fontWeight: '600',
+  },
   canvasContainer: {
     flex: 1,
     position: 'relative',
@@ -924,8 +1089,16 @@ const styles = StyleSheet.create({
   floatingTopLeft: {
     position: 'absolute',
     top: 14,
-    left: 16,
+    left: 18,
     zIndex: 10,
+  },
+  watermarkText: {
+    fontSize: 11.5,
+    letterSpacing: 2.5,
+    color: '#6e6350',
+    fontFamily: AppFonts.sans,
+    fontWeight: '700',
+    textTransform: 'uppercase',
   },
   panHintText: {
     fontSize: 10,
@@ -935,26 +1108,31 @@ const styles = StyleSheet.create({
   },
   zoomControls: {
     position: 'absolute',
-    top: 14,
+    top: 12,
     right: 16,
     zIndex: 10,
-    gap: 6,
+    width: 36,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#2d271e',
+    backgroundColor: '#14120e',
+    overflow: 'hidden',
   },
   zoomBtn: {
-    width: 32,
+    width: 34,
     height: 32,
-    backgroundColor: '#151310',
-    borderWidth: 1,
-    borderColor: '#2f2a20',
-    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  zoomDivider: {
+    height: 1,
+    backgroundColor: '#242019',
   },
   zoomBtnText: {
     color: '#ded5c7',
     fontSize: 18,
     lineHeight: 20,
-    fontWeight: '600',
+    fontWeight: '400',
   },
   svgWrapper: {
     flex: 1,

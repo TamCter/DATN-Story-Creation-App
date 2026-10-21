@@ -1,7 +1,9 @@
 import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -165,47 +167,53 @@ export default function ProjectsScreen() {
         </View>
       </ScrollView>
 
-      {/* New Project Modal */}
+      {/* New Project Modal (Bottom Sheet - Screenshot 2) */}
       <Modal visible={modalVisible} transparent animationType="slide">
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <Text style={styles.modalTitle}>Tạo dự án truyện mới</Text>
+          <Pressable
+            style={styles.modalDismissArea}
+            onPress={() => setModalVisible(false)}
+          />
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+            style={styles.modalKeyboardAvoiding}
+          >
+            <View style={styles.modalCard}>
+              <Text style={styles.modalTitle}>Khai sinh một thế giới</Text>
 
-            <View style={styles.modalInputGroup}>
-              <Text style={styles.modalInputLabel}>Tên tác phẩm</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={newTitle}
-                onChangeText={setNewTitle}
-                placeholder="Ví dụ: Vạn Cổ Kiếm Tông"
-                placeholderTextColor="#665f52"
-              />
-            </View>
+              <View style={styles.modalInputGroup}>
+                <TextInput
+                  style={[styles.modalInput, styles.modalInputTitle]}
+                  value={newTitle}
+                  onChangeText={setNewTitle}
+                  placeholder="Tên truyện"
+                  placeholderTextColor="#665f52"
+                  autoFocus
+                />
 
-            <View style={styles.modalInputGroup}>
-              <Text style={styles.modalInputLabel}>Thể loại</Text>
-              <TextInput
-                style={styles.modalInput}
-                value={newGenre}
-                onChangeText={setNewGenre}
-                placeholder="Ví dụ: Tiên hiệp · Thần thoại"
-                placeholderTextColor="#665f52"
-              />
-            </View>
+                <TextInput
+                  style={styles.modalInput}
+                  value={newGenre}
+                  onChangeText={setNewGenre}
+                  placeholder="Thể loại (vd. Kiếm hiệp, Trinh thám...)"
+                  placeholderTextColor="#665f52"
+                />
+              </View>
 
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={styles.modalCancelBtn}
-                onPress={() => setModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Hủy</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalConfirmBtn}
-                onPress={handleCreateProject}>
-                <Text style={styles.modalConfirmText}>Tạo dự án</Text>
-              </Pressable>
+              <View style={styles.modalActionRow}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setModalVisible(false)}>
+                  <Text style={styles.modalCancelText}>Hủy</Text>
+                </Pressable>
+                <Pressable
+                  style={styles.modalConfirmBtn}
+                  onPress={handleCreateProject}>
+                  <Text style={styles.modalConfirmText}>Tạo dự án</Text>
+                </Pressable>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </SafeAreaView>
@@ -379,68 +387,80 @@ const styles = StyleSheet.create({
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
+    backgroundColor: 'rgba(0, 0, 0, 0.65)',
+    justifyContent: 'flex-end',
+  },
+  modalDismissArea: {
+    flex: 1,
+  },
+  modalKeyboardAvoiding: {
+    width: '100%',
   },
   modalCard: {
     width: '100%',
-    maxWidth: 420,
-    backgroundColor: '#191713',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#383226',
-    padding: 24,
-    gap: 18,
+    backgroundColor: '#15130f',
+    borderTopWidth: 1.5,
+    borderTopColor: '#c99632',
+    paddingHorizontal: 22,
+    paddingTop: 24,
+    paddingBottom: 36,
+    gap: 22,
   },
   modalTitle: {
-    fontSize: 20,
-    color: '#e5a93c',
+    fontSize: 23,
+    fontStyle: 'italic',
+    color: '#f5eee6',
     fontFamily: AppFonts.serif,
-    fontWeight: '600',
   },
   modalInputGroup: {
-    gap: 6,
-  },
-  modalInputLabel: {
-    fontSize: 12.5,
-    color: '#8f887b',
-    fontFamily: AppFonts.sans,
+    gap: 16,
   },
   modalInput: {
-    borderWidth: 1,
-    borderColor: '#2d281f',
-    backgroundColor: '#12110e',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#363025',
+    paddingVertical: 12,
+    paddingHorizontal: 0,
     color: '#f5eee6',
-    fontSize: 14,
+    fontSize: 15,
+    fontFamily: AppFonts.sans,
+  },
+  modalInputTitle: {
+    borderBottomColor: '#c99632',
+    borderBottomWidth: 1.5,
   },
   modalActionRow: {
     flexDirection: 'row',
-    justifyContent: 'flex-end',
     gap: 12,
-    marginTop: 8,
+    marginTop: 6,
   },
   modalCancelBtn: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
+    flex: 1,
+    backgroundColor: '#15130f',
+    borderWidth: 1,
+    borderColor: '#383226',
+    borderRadius: 4,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalCancelText: {
-    color: '#8f887b',
-    fontSize: 14,
+    color: '#f5eee6',
+    fontSize: 14.5,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
   },
   modalConfirmBtn: {
-    backgroundColor: '#db9d33',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 18,
+    flex: 1,
+    backgroundColor: '#dca13c',
+    borderRadius: 4,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   modalConfirmText: {
     color: '#15130e',
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 14.5,
+    fontFamily: AppFonts.sans,
   },
 });
