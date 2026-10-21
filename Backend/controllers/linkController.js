@@ -82,7 +82,7 @@ async function createLink(req, res, next) {
     category = '',
     contextNote = '',
     tone = 'loyalty',
-  } = req.body;
+  } = req.body || {};
 
   if (!source || !target) {
     return res.status(400).json({
@@ -164,7 +164,7 @@ async function createLink(req, res, next) {
  */
 async function updateLink(req, res, next) {
   const { id } = req.params;
-  const { label, type, category, contextNote, tone } = req.body;
+  const { label, type, category, contextNote, tone } = req.body || {};
 
   try {
     const query = `

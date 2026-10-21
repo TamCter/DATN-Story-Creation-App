@@ -57,7 +57,7 @@ NEO4J_DATABASE=neo4j
 
 > **Mẹo chạy nhanh Neo4j bằng Docker (nếu chưa cài Neo4j Desktop):**
 > ```bash
-> docker run --name story-neo4j -p 7474:7474 -p 7687:7687 -d -e NEO4J_AUTH=neo4j/password neo4j:latest
+> docker run --name story-neo4j -p 127.0.0.1:7474:7474 -p 127.0.0.1:7687:7687 -d -e NEO4J_AUTH=neo4j/password neo4j:latest
 > ```
 > Giao diện trực quan **Neo4j Browser** sẽ khả dụng tại: `http://localhost:7474`
 

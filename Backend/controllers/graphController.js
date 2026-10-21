@@ -77,6 +77,13 @@ async function getShortestPath(req, res, next) {
     });
   }
 
+  if (source === target) {
+    return res.status(400).json({
+      success: false,
+      message: 'Node nguồn (source) và node đích (target) không được trùng nhau',
+    });
+  }
+
   try {
     const query = `
       MATCH (s:StoryNode { id: $source })
@@ -122,20 +129,13 @@ async function getShortestPath(req, res, next) {
  */
 async function getNodeNeighborhood(req, res, next) {
   const { id } = req.params;
-  const depth = Math.min(Number(req.query.depth) || 1, 3); // giới hạn tối đa 3 hops
+  const rawDepth = parseInt(req.query.depth, 10);
+  const depth = Number.isInteger(rawDepth) ? Math.min(Math.max(rawDepth, 1), 3) : 1;
 
   try {
     const query = `
       MATCH (center:StoryNode { id: $id })
-      CALL apoc.path.subgraphAll(center, { maxLevel: $depth })
-      YIELD nodes, relationships
-      RETURN nodes, relationships
-    `;
-
-    // Nếu không có APOC, dùng Cypher tiêu chuẩn:
-    const fallbackQuery = `
-      MATCH (center:StoryNode { id: $id })
-      OPTIONAL MATCH path = (center)-[:RELATES_TO*1..2]-(neighbor:StoryNode)
+      OPTIONAL MATCH path = (center)-[:RELATES_TO*1..${depth}]-(neighbor:StoryNode)
       WITH center, collect(path) AS paths
       UNWIND (CASE WHEN size(paths) = 0 THEN [null] ELSE paths END) AS p
       RETURN center,
@@ -143,7 +143,11 @@ async function getNodeNeighborhood(req, res, next) {
              collect(DISTINCT CASE WHEN p IS NOT NULL THEN relationships(p) END) AS rels
     `;
 
-    const records = await runQuery(fallbackQuery, { id, depth }, 'READ');
+    const records = await runQuery(query, { id }, 'READ');
+    if (!records.length || !records[0] || !records[0].center) {
+      return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
+    }
+
     return res.json({ success: true, data: records[0] });
   } catch (error) {
     next(error);

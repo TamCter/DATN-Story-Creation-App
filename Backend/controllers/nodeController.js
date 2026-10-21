@@ -99,11 +99,41 @@ async function getNodeById(req, res, next) {
   }
 }
 
+const ALLOWED_NODE_SCALARS = new Set([
+  'name',
+  'type',
+  'role',
+  'desc',
+  'subType',
+  'x',
+  'y',
+  'weapon',
+  'sect',
+  'status',
+  'personality',
+  'region',
+]);
+
 /**
  * Tạo mới một StoryNode trong Project
  */
 async function createNode(req, res, next) {
   const { projectId } = req.params;
+  const body = req.body || {};
+
+  // Reject invalid keys or non-scalar / nested values
+  for (const [key, value] of Object.entries(body)) {
+    if (key === 'createdAt') {
+      return res.status(400).json({ success: false, message: 'Trường createdAt không được phép truyền thủ công' });
+    }
+    if (key !== 'id' && !ALLOWED_NODE_SCALARS.has(key)) {
+      return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
+    }
+    if (value !== null && typeof value === 'object') {
+      return res.status(400).json({ success: false, message: `Giá trị của trường '${key}' phải là kiểu dữ liệu vô hướng (scalar), không được lồng object/array` });
+    }
+  }
+
   const {
     id,
     name,
@@ -113,17 +143,33 @@ async function createNode(req, res, next) {
     subType = '',
     x = 100,
     y = 100,
-    ...extraProps
-  } = req.body;
+    weapon,
+    sect,
+    status,
+    personality,
+    region,
+  } = body;
 
-  if (!name) {
-    return res.status(400).json({ success: false, message: 'Tên node (name) là bắt buộc' });
+  if (!name || typeof name !== 'string' || !name.trim()) {
+    return res.status(400).json({ success: false, message: 'Tên node (name) là bắt buộc và phải là chuỗi hợp lệ' });
   }
 
-  const validTypes = ['character', 'item', 'faction', 'event', 'location'];
-  const normalizedType = validTypes.includes(type.toLowerCase()) ? type.toLowerCase() : 'character';
-  const nodeId = id || `${normalizedType}-${crypto.randomUUID().slice(0, 8)}`;
-  const secondaryLabel = TYPE_LABELS[normalizedType] || 'Entity';
+  if (typeof type !== 'string' || !TYPE_LABELS[type.toLowerCase()]) {
+    return res.status(400).json({
+      success: false,
+      message: `Loại node (type) không hợp lệ. Phải là một trong các giá trị: ${Object.keys(TYPE_LABELS).join(', ')}`,
+    });
+  }
+  const normalizedType = type.toLowerCase();
+  const secondaryLabel = TYPE_LABELS[normalizedType];
+
+  const parsedX = Number(x);
+  const parsedY = Number(y);
+  if (!Number.isFinite(parsedX) || !Number.isFinite(parsedY)) {
+    return res.status(400).json({ success: false, message: 'Tọa độ x và y phải là số hợp lệ' });
+  }
+
+  const nodeId = id && typeof id === 'string' ? id.trim() : `${normalizedType}-${crypto.randomUUID().slice(0, 8)}`;
 
   try {
     // Kiểm tra xem Project có tồn tại không
@@ -135,17 +181,22 @@ async function createNode(req, res, next) {
 
     const nodeProperties = {
       id: nodeId,
-      name,
+      name: name.trim(),
       type: normalizedType,
-      role: role || '',
-      desc: desc || '',
-      subType: subType || '',
-      x: Number(x) || 100,
-      y: Number(y) || 100,
+      role: role ? String(role) : '',
+      desc: desc ? String(desc) : '',
+      subType: subType ? String(subType) : '',
+      x: parsedX,
+      y: parsedY,
       createdAt: Date.now(),
       updatedAt: Date.now(),
-      ...extraProps,
     };
+
+    if (weapon !== undefined) nodeProperties.weapon = String(weapon);
+    if (sect !== undefined) nodeProperties.sect = String(sect);
+    if (status !== undefined) nodeProperties.status = String(status);
+    if (personality !== undefined) nodeProperties.personality = String(personality);
+    if (region !== undefined) nodeProperties.region = String(region);
 
     const createQuery = `
       MATCH (p:Project { id: $projectId })
@@ -174,19 +225,86 @@ async function createNode(req, res, next) {
  */
 async function updateNode(req, res, next) {
   const { id } = req.params;
-  const updates = { ...req.body };
-  delete updates.id; // không cho sửa id
+  const body = req.body || {};
+
+  if (body.id !== undefined) {
+    return res.status(400).json({ success: false, message: 'Không được phép cập nhật trường id của Node' });
+  }
+  if (body.createdAt !== undefined) {
+    return res.status(400).json({ success: false, message: 'Không được phép cập nhật trường createdAt của Node' });
+  }
+
+  for (const [key, value] of Object.entries(body)) {
+    if (!ALLOWED_NODE_SCALARS.has(key)) {
+      return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
+    }
+    if (value !== null && typeof value === 'object') {
+      return res.status(400).json({ success: false, message: `Giá trị của trường '${key}' phải là kiểu dữ liệu vô hướng (scalar), không được lồng object/array` });
+    }
+  }
+
+  const updates = {};
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string' || !body.name.trim()) {
+      return res.status(400).json({ success: false, message: 'Tên node (name) không được để trống' });
+    }
+    updates.name = body.name.trim();
+  }
+
+  let newSecondaryLabel = null;
+  if (body.type !== undefined) {
+    if (typeof body.type !== 'string' || !TYPE_LABELS[body.type.toLowerCase()]) {
+      return res.status(400).json({
+        success: false,
+        message: `Loại node (type) không hợp lệ. Phải là một trong các giá trị: ${Object.keys(TYPE_LABELS).join(', ')}`,
+      });
+    }
+    const normalizedType = body.type.toLowerCase();
+    updates.type = normalizedType;
+    newSecondaryLabel = TYPE_LABELS[normalizedType];
+  }
+
+  if (body.x !== undefined) {
+    const parsedX = Number(body.x);
+    if (!Number.isFinite(parsedX)) {
+      return res.status(400).json({ success: false, message: 'Tọa độ x phải là số hợp lệ' });
+    }
+    updates.x = parsedX;
+  }
+
+  if (body.y !== undefined) {
+    const parsedY = Number(body.y);
+    if (!Number.isFinite(parsedY)) {
+      return res.status(400).json({ success: false, message: 'Tọa độ y phải là số hợp lệ' });
+    }
+    updates.y = parsedY;
+  }
+
+  const optionalStrings = ['role', 'desc', 'subType', 'weapon', 'sect', 'status', 'personality', 'region'];
+  for (const field of optionalStrings) {
+    if (body[field] !== undefined) {
+      updates[field] = body[field] !== null ? String(body[field]) : '';
+    }
+  }
+
   updates.updatedAt = Date.now();
 
-  if (updates.x !== undefined) updates.x = Number(updates.x);
-  if (updates.y !== undefined) updates.y = Number(updates.y);
-
   try {
-    const query = `
-      MATCH (n:StoryNode { id: $id })
-      SET n += $updates
-      RETURN n
-    `;
+    let query;
+    if (newSecondaryLabel) {
+      query = `
+        MATCH (n:StoryNode { id: $id })
+        REMOVE n:Character:Item:Faction:Event:Location
+        SET n:${newSecondaryLabel}, n += $updates
+        RETURN n
+      `;
+    } else {
+      query = `
+        MATCH (n:StoryNode { id: $id })
+        SET n += $updates
+        RETURN n
+      `;
+    }
 
     const records = await runQuery(query, { id, updates });
     if (!records.length || !records[0].n) {

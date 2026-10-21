@@ -147,11 +147,7 @@ async function initConstraints() {
   ];
 
   for (const q of constraints) {
-    try {
-      await runQuery(q);
-    } catch {
-      // Bỏ qua lỗi nếu phiên bản Neo4j cũ hơn hoặc constraint đã tồn tại với cú pháp khác
-    }
+    await runQuery(q);
   }
 }
 

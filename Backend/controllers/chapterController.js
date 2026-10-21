@@ -86,20 +86,28 @@ async function createChapter(req, res, next) {
   const { projectId } = req.params;
   const {
     id,
-    chapterNumber = 1,
+    chapterNumber,
     code,
     title,
     shortTitle,
     watermark,
     desc = '',
     events = [],
-  } = req.body;
+  } = req.body || {};
 
   if (!title) {
     return res.status(400).json({ success: false, message: 'Tiêu đề chương (title) là bắt buộc' });
   }
 
-  const num = Number(chapterNumber) || 1;
+  let num = 1;
+  if (chapterNumber !== undefined) {
+    const parsed = Number(chapterNumber);
+    if (!Number.isFinite(parsed)) {
+      return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
+    }
+    num = parsed;
+  }
+
   const chapterId = id || `c-${num}-${crypto.randomUUID().slice(0, 6)}`;
   const chapterCode = code || `C${num}`;
   const eventsJson = Array.isArray(events) ? JSON.stringify(events) : JSON.stringify([]);
@@ -159,7 +167,15 @@ async function createChapter(req, res, next) {
  */
 async function updateChapter(req, res, next) {
   const { id } = req.params;
-  const { chapterNumber, code, title, shortTitle, watermark, desc, events } = req.body;
+  const { chapterNumber, code, title, shortTitle, watermark, desc, events } = req.body || {};
+
+  let parsedChapterNumber = null;
+  if (chapterNumber !== undefined) {
+    parsedChapterNumber = Number(chapterNumber);
+    if (!Number.isFinite(parsedChapterNumber)) {
+      return res.status(400).json({ success: false, message: 'Số thứ tự chương (chapterNumber) không hợp lệ' });
+    }
+  }
 
   try {
     const query = `
@@ -177,7 +193,7 @@ async function updateChapter(req, res, next) {
 
     const records = await runQuery(query, {
       id,
-      chapterNumber: chapterNumber !== undefined ? Number(chapterNumber) : null,
+      chapterNumber: parsedChapterNumber,
       code: code ?? null,
       title: title ?? null,
       shortTitle: shortTitle ?? null,

@@ -9,13 +9,16 @@ async function getAllProjects(req, res, next) {
     const query = `
       MATCH (p:Project)
       OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+      WITH p, count(DISTINCT n) AS nodeCount
       OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (n1:StoryNode)-[r:RELATES_TO]->(n2:StoryNode)
-      WHERE (n1)-[:BELONGS_TO]->(p)
+      WITH p, nodeCount, count(DISTINCT c) AS chapterCount
+      OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
+      OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
+      WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
       RETURN p,
-             count(DISTINCT n) AS nodeCount,
-             count(DISTINCT r) AS linkCount,
-             count(DISTINCT c) AS chapterCount
+             nodeCount,
+             linkCount,
+             chapterCount
       ORDER BY p.createdAt DESC
     `;
 
@@ -42,13 +45,16 @@ async function getProjectById(req, res, next) {
     const query = `
       MATCH (p:Project { id: $id })
       OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+      WITH p, count(DISTINCT n) AS nodeCount
       OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (n1:StoryNode)-[r:RELATES_TO]->(n2:StoryNode)
-      WHERE (n1)-[:BELONGS_TO]->(p)
+      WITH p, nodeCount, count(DISTINCT c) AS chapterCount
+      OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
+      OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
+      WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
       RETURN p,
-             count(DISTINCT n) AS nodeCount,
-             count(DISTINCT r) AS linkCount,
-             count(DISTINCT c) AS chapterCount
+             nodeCount,
+             linkCount,
+             chapterCount
     `;
 
     const records = await runQuery(query, { id }, 'READ');
@@ -74,7 +80,7 @@ async function getProjectById(req, res, next) {
  * Tạo một Project mới
  */
 async function createProject(req, res, next) {
-  const { id, title, genre, number, desc } = req.body;
+  const { id, title, genre, number, desc } = req.body || {};
 
   if (!title) {
     return res.status(400).json({ success: false, message: 'Tiêu đề dự án (title) là bắt buộc' });
@@ -122,7 +128,7 @@ async function createProject(req, res, next) {
  */
 async function updateProject(req, res, next) {
   const { id } = req.params;
-  const { title, genre, number, desc } = req.body;
+  const { title, genre, number, desc } = req.body || {};
 
   try {
     const query = `

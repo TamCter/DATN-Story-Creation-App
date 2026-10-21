@@ -69,7 +69,6 @@ app.get('/', (req, res) => {
 // Health check endpoint
 app.get('/api/health', async (req, res) => {
   let neo4jStatus = 'disconnected';
-  let neo4jError = null;
 
   try {
     const result = await runQuery('RETURN "healthy" AS status', {}, 'READ');
@@ -77,18 +76,18 @@ app.get('/api/health', async (req, res) => {
       neo4jStatus = 'connected';
     }
   } catch (error) {
-    neo4jError = error.message;
+    console.error('[Health Check] Kiểm tra kết nối Neo4j thất bại:', error);
   }
 
-  res.json({
-    status: 'ok',
+  const isConnected = neo4jStatus === 'connected';
+  const httpStatus = isConnected ? 200 : 503;
+
+  res.status(httpStatus).json({
+    status: isConnected ? 'ok' : 'unhealthy',
     uptime: process.uptime(),
     timestamp: new Date().toISOString(),
     neo4j: {
       status: neo4jStatus,
-      error: neo4jError,
-      uri: process.env.NEO4J_URI || 'bolt://localhost:7687',
-      database: process.env.NEO4J_DATABASE || 'neo4j',
     },
   });
 });

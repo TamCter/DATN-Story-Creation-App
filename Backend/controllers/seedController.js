@@ -194,6 +194,13 @@ const SEED_CHAPTERS = [
  * Nạp dữ liệu mẫu ban đầu (Hoàng Hôn Kiếm Vương) vào Neo4j
  */
 async function seedDatabase(req, res, next) {
+  if (process.env.ENABLE_SEED_ROUTES !== 'true') {
+    return res.status(403).json({
+      success: false,
+      message: 'Các endpoint nạp dữ liệu mẫu (Seed routes) đang bị vô hiệu hóa. Thiết lập ENABLE_SEED_ROUTES=true trong file .env để kích hoạt.',
+    });
+  }
+
   try {
     // 1. Tạo hoặc cập nhật Project
     const projectCypher = `
@@ -291,16 +298,24 @@ async function seedDatabase(req, res, next) {
  * Xóa sạch toàn bộ dữ liệu mẫu trong cơ sở dữ liệu
  */
 async function clearDatabase(req, res, next) {
+  if (process.env.ENABLE_SEED_ROUTES !== 'true') {
+    return res.status(403).json({
+      success: false,
+      message: 'Chức năng xóa dữ liệu bị vô hiệu hóa',
+    });
+  }
+
   try {
     const query = `
       MATCH (n)
+      WHERE n:Project OR n:StoryNode OR n:Chapter
       DETACH DELETE n
     `;
     await runQuery(query);
 
     return res.json({
       success: true,
-      message: 'Đã xóa toàn bộ dữ liệu (Nodes, Relationships, Projects) trong Neo4j.',
+      message: 'Đã xóa toàn bộ dữ liệu (StoryNode, Chapter, Project) trong Neo4j.',
     });
   } catch (error) {
     next(error);
