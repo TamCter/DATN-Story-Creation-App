@@ -593,12 +593,7 @@ export default function GraphScreen() {
 
             <Pressable
               style={styles.viewDetailLink}
-              onPress={() =>
-                router.push({
-                  pathname: '/graph/nodes' as any,
-                  params: { projectId: currentProject.id },
-                })
-              }>
+              onPress={() => setDetailModalOpen(true)}>
               <Text style={styles.viewDetailText}>Xem chi tiết →</Text>
             </Pressable>
           </View>
@@ -643,7 +638,7 @@ export default function GraphScreen() {
                     num: '02',
                     title: 'Chi tiết node',
                     sub: 'Danh sách các node',
-                    badge: `${nodes.length}`,
+                    badge: `${currentProject.nodes.length}`,
                     onPress: () => {
                       setDrawerOpen(false);
                       router.push({
