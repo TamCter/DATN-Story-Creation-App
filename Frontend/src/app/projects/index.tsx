@@ -12,16 +12,28 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Line } from 'react-native-svg';
+import Svg, { Circle, Line, Path } from 'react-native-svg';
 
 import { INITIAL_PROJECTS, StoryProject } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 
 export default function ProjectsScreen() {
+  const { user, logout } = useAuth();
   const [projects, setProjects] = useState<StoryProject[]>(INITIAL_PROJECTS);
   const [modalVisible, setModalVisible] = useState(false);
+  const [userModalVisible, setUserModalVisible] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('');
+
+  const displayName = user?.penName || 'Tác giả';
+  const displayInitial = displayName.charAt(0).toUpperCase();
+
+  const handleLogout = async () => {
+    setUserModalVisible(false);
+    await logout();
+    router.replace('/' as any);
+  };
 
   const totalProjects = projects.length;
   const totalNodes = projects.reduce((acc, p) => acc + p.nodeCount, 0);
@@ -69,12 +81,48 @@ export default function ProjectsScreen() {
         showsVerticalScrollIndicator={false}>
         {/* Top Header */}
         <View style={styles.headerRow}>
-          <View>
+          <Pressable onPress={() => setUserModalVisible(true)} style={styles.headerUserPressable}>
             <Text style={styles.greetingSub}>XIN CHÀO,</Text>
-            <Text style={styles.userName}>Tam</Text>
-          </View>
-          <View style={styles.avatarCircle}>
-            <Text style={styles.avatarText}>T</Text>
+            <Text style={styles.userName} numberOfLines={1}>
+              {displayName}
+            </Text>
+          </Pressable>
+          <View style={styles.headerRightActions}>
+            <Pressable
+              style={styles.avatarCircle}
+              onPress={() => setUserModalVisible(true)}>
+              <Text style={styles.avatarText}>{displayInitial}</Text>
+            </Pressable>
+            <Pressable
+              style={styles.logoutIconBtn}
+              onPress={handleLogout}
+              accessibilityLabel="Đăng xuất">
+              <Svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                <Path
+                  d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
+                  stroke="#8f887b"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <Path
+                  d="M16 17l5-5-5-5"
+                  stroke="#8f887b"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+                <Line
+                  x1="21"
+                  y1="12"
+                  x2="9"
+                  y2="12"
+                  stroke="#8f887b"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                />
+              </Svg>
+            </Pressable>
           </View>
         </View>
 
@@ -215,6 +263,39 @@ export default function ProjectsScreen() {
             </View>
           </KeyboardAvoidingView>
         </View>
+      </Modal>
+
+      {/* Modal Thông tin tác giả & Đăng xuất */}
+      <Modal
+        visible={userModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setUserModalVisible(false)}>
+        <Pressable
+          style={styles.modalOverlay}
+          onPress={() => setUserModalVisible(false)}>
+          <Pressable style={styles.userModalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.userModalAvatar}>
+              <Text style={styles.userModalAvatarText}>{displayInitial}</Text>
+            </View>
+            <Text style={styles.userModalName}>{displayName}</Text>
+            <Text style={styles.userModalEmail}>
+              {user?.email || 'Tài khoản mẫu (Khách)'}
+            </Text>
+
+            <View style={styles.userModalDivider} />
+
+            <Pressable style={styles.userModalLogoutBtn} onPress={handleLogout}>
+              <Text style={styles.userModalLogoutText}>Đăng xuất khỏi thiết bị</Text>
+            </Pressable>
+
+            <Pressable
+              style={styles.userModalCloseBtn}
+              onPress={() => setUserModalVisible(false)}>
+              <Text style={styles.userModalCloseText}>Đóng</Text>
+            </Pressable>
+          </Pressable>
+        </Pressable>
       </Modal>
     </SafeAreaView>
   );
@@ -461,6 +542,99 @@ const styles = StyleSheet.create({
     color: '#15130e',
     fontWeight: '700',
     fontSize: 14.5,
+    fontFamily: AppFonts.sans,
+  },
+  headerUserPressable: {
+    flex: 1,
+    marginRight: 12,
+  },
+  headerRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  logoutIconBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#1b1914',
+    borderWidth: 1,
+    borderColor: '#2e2a22',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userModalCard: {
+    width: '100%',
+    maxWidth: 380,
+    backgroundColor: '#15130e',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#3a3224',
+    padding: 24,
+    alignItems: 'center',
+  },
+  userModalAvatar: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    borderWidth: 2,
+    borderColor: '#c99632',
+    backgroundColor: '#1b1914',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 14,
+  },
+  userModalAvatarText: {
+    color: '#e5a93c',
+    fontSize: 26,
+    fontWeight: '700',
+    fontFamily: AppFonts.serif,
+  },
+  userModalName: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: ThemeColors.textPrimary,
+    fontFamily: AppFonts.serif,
+    marginBottom: 4,
+    textAlign: 'center',
+  },
+  userModalEmail: {
+    fontSize: 13,
+    color: '#8f887b',
+    fontFamily: AppFonts.sans,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  userModalDivider: {
+    width: '100%',
+    height: 1,
+    backgroundColor: '#26231c',
+    marginBottom: 16,
+  },
+  userModalLogoutBtn: {
+    width: '100%',
+    backgroundColor: 'rgba(217, 90, 56, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 90, 56, 0.4)',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  userModalLogoutText: {
+    color: '#f09880',
+    fontSize: 14,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
+  },
+  userModalCloseBtn: {
+    width: '100%',
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  userModalCloseText: {
+    color: '#8f887b',
+    fontSize: 14,
     fontFamily: AppFonts.sans,
   },
 });
