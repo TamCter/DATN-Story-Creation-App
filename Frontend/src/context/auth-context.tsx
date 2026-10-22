@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import React, {
   createContext,
   useCallback,
@@ -6,11 +7,35 @@ import React, {
   useEffect,
   useState,
 } from 'react';
+import { Platform } from 'react-native';
 
-import { api, AuthUser } from '@/services/api';
+import { api, ApiError, AuthUser } from '@/services/api';
 
 const TOKEN_KEY = '@story_app_auth_token';
 const USER_KEY = '@story_app_auth_user';
+
+async function getStoredToken(): Promise<string | null> {
+  if (Platform.OS === 'web') {
+    return AsyncStorage.getItem(TOKEN_KEY);
+  }
+  return SecureStore.getItemAsync(TOKEN_KEY);
+}
+
+async function setStoredToken(token: string): Promise<void> {
+  if (Platform.OS === 'web') {
+    await AsyncStorage.setItem(TOKEN_KEY, token);
+  } else {
+    await SecureStore.setItemAsync(TOKEN_KEY, token);
+  }
+}
+
+async function removeStoredToken(): Promise<void> {
+  if (Platform.OS === 'web') {
+    await AsyncStorage.removeItem(TOKEN_KEY);
+  } else {
+    await SecureStore.deleteItemAsync(TOKEN_KEY);
+  }
+}
 
 interface AuthContextType {
   user: AuthUser | null;
@@ -42,7 +67,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     async function restoreSession() {
       try {
         const [savedToken, savedUserJson] = await Promise.all([
-          AsyncStorage.getItem(TOKEN_KEY),
+          getStoredToken(),
           AsyncStorage.getItem(USER_KEY),
         ]);
 
@@ -59,9 +84,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
               setUser(meRes.data.user);
               await AsyncStorage.setItem(USER_KEY, JSON.stringify(meRes.data.user));
             }
-          } catch {
-            // Nếu token hết hạn hoặc máy chủ từ chối, xóa session
-            // Nhưng nếu do mất mạng thì giữ tạm phiên làm việc ngoại tuyến
+          } catch (err: any) {
+            // Chỉ xóa token và thông tin phiên khi nhận mã lỗi 401 hoặc 403 (token hết hạn / không hợp lệ).
+            // Nếu do lỗi mạng hoặc timeout, giữ lại phiên ngoại tuyến đã khôi phục.
+            const status = err?.status;
+            if (status === 401 || status === 403) {
+              setToken(null);
+              setUser(null);
+              api.setToken(null);
+              await Promise.all([
+                removeStoredToken(),
+                AsyncStorage.removeItem(USER_KEY),
+              ]);
+            }
           }
         }
       } catch (err) {
@@ -80,11 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     api.setToken(newToken);
     try {
       await Promise.all([
-        AsyncStorage.setItem(TOKEN_KEY, newToken),
+        setStoredToken(newToken),
         AsyncStorage.setItem(USER_KEY, JSON.stringify(newUser)),
       ]);
     } catch (err) {
-      console.warn('Lỗi lưu phiên vào AsyncStorage:', err);
+      console.warn('Lỗi lưu phiên vào Storage:', err);
     }
   };
 
@@ -158,11 +193,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setError(null);
     try {
       await Promise.all([
-        AsyncStorage.removeItem(TOKEN_KEY),
+        removeStoredToken(),
         AsyncStorage.removeItem(USER_KEY),
       ]);
     } catch (err) {
-      console.warn('Lỗi xóa session khỏi AsyncStorage:', err);
+      console.warn('Lỗi xóa session:', err);
     }
   };
 

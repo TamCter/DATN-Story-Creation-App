@@ -43,8 +43,8 @@ async function register(req, res, next) {
       });
     }
 
-    // Băm mật khẩu (dùng 8 rounds để xử lý cực nhanh và tối ưu hiệu năng)
-    const passwordHash = await bcrypt.hash(password, 8);
+    // Băm mật khẩu với bcrypt cost factor tối thiểu 10
+    const passwordHash = await bcrypt.hash(password, 10);
     const userId = `user-${crypto.randomUUID().slice(0, 8)}`;
     const cleanPenName = penName.trim();
     const now = Date.now();

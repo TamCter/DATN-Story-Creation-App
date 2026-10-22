@@ -1,15 +1,32 @@
 import Constants from 'expo-constants';
 import { Platform } from 'react-native';
 
+export class ApiError extends Error {
+  status?: number;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.name = 'ApiError';
+    this.status = status;
+  }
+}
+
 /**
  * Tự động xác định địa chỉ IP máy chủ Backend phù hợp với từng môi trường:
  * - Web: http://localhost:5000/api
  * - Thiết bị thật (Expo Go qua WiFi): http://<IP_MÁY_TÍNH>:5000/api
- * - Android Emulator: http://10.0.2.2:5000/api
+ * - Android Emulator (chỉ khi __DEV__): http://10.0.2.2:5000/api
  */
 export function getApiBaseUrl(): string {
   if (process.env.EXPO_PUBLIC_API_URL) {
     return process.env.EXPO_PUBLIC_API_URL;
+  }
+
+  // Trong môi trường Release / Production, yêu cầu cấu hình rõ ràng EXPO_PUBLIC_API_URL
+  if (!__DEV__) {
+    throw new Error(
+      'Biến môi trường EXPO_PUBLIC_API_URL chưa được cấu hình cho bản Release.'
+    );
   }
 
   // Nếu đang mở trên Web trình duyệt trên máy tính
@@ -17,7 +34,7 @@ export function getApiBaseUrl(): string {
     return 'http://localhost:5000/api';
   }
 
-  // Lấy IP của máy chủ chạy Expo (máy tính của bạn trên mạng WiFi)
+  // Lấy IP của máy chủ chạy Expo (máy tính trên mạng WiFi khi phát triển)
   const hostUri =
     Constants.expoConfig?.hostUri ||
     (Constants as any).manifest2?.extra?.expoClient?.hostUri ||
@@ -30,12 +47,12 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  // Fallback cho Android Emulator
+  // Fallback cho Android Emulator trong môi trường phát triển (__DEV__)
   if (Platform.OS === 'android') {
     return 'http://10.0.2.2:5000/api';
   }
 
-  return 'http://192.168.1.189:5000/api';
+  return 'http://localhost:5000/api';
 }
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -111,7 +128,7 @@ class ApiService {
         const errorMsg =
           data?.message ||
           `Yêu cầu thất bại với mã lỗi HTTP ${response.status}`;
-        throw new Error(errorMsg);
+        throw new ApiError(errorMsg, response.status);
       }
 
       return data as T;

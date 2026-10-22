@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React, { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -158,20 +159,23 @@ export default function ProjectsScreen() {
       });
 
       if (res.success && res.data) {
-        setProjects([
-          {
-            ...sample,
-            id: res.data.id,
-            userId: user?.id,
-          },
-          ...projects,
-        ]);
+        const created: StoryProject = {
+          ...res.data,
+          nodeCount: 0,
+          linkCount: 0,
+          updatedAt: res.data.updatedAt || 'Vừa xong',
+          nodes: [],
+          links: [],
+        };
+        setProjects([created, ...projects]);
       } else {
-        setProjects([sample, ...projects]);
+        const msg = res.message || 'Không thể tạo dự án mẫu trên máy chủ.';
+        Alert.alert('Lỗi tạo dự án', msg);
       }
-    } catch (err) {
+    } catch (err: any) {
       console.warn('Lỗi nạp dự án mẫu:', err);
-      setProjects([INITIAL_PROJECTS[0], ...projects]);
+      const msg = err.message || 'Không thể kết nối đến máy chủ để tạo dự án mẫu.';
+      Alert.alert('Lỗi nạp dự án mẫu', msg);
     } finally {
       setIsCreating(false);
     }
