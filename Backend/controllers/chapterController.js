@@ -116,12 +116,6 @@ async function createChapter(req, res, next) {
   const eventsJson = Array.isArray(events) ? JSON.stringify(events) : JSON.stringify([]);
 
   try {
-    const checkQuery = `MATCH (p:Project { id: $projectId }) RETURN p`;
-    const checkResult = await runQuery(checkQuery, { projectId }, 'READ');
-    if (!checkResult.length) {
-      return res.status(404).json({ success: false, message: `Không tìm thấy project với ID: ${projectId}` });
-    }
-
     const userId = req.user?.id;
     const projCheckQuery = `
       MATCH (p:Project { id: $projectId })

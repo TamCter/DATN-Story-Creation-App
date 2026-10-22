@@ -206,20 +206,6 @@ async function createNode(req, res, next) {
     if (personality !== undefined) nodeProperties.personality = personality !== null ? String(personality) : '';
     if (region !== undefined) nodeProperties.region = region !== null ? String(region) : '';
 
-    const userId = req.user?.id;
-    const projCheckQuery = `
-      MATCH (p:Project { id: $projectId })
-      OPTIONAL MATCH (owner:User)-[:OWNS]->(p)
-      RETURN p, owner.id AS ownerId
-    `;
-    const projRecords = await runQuery(projCheckQuery, { projectId }, 'READ');
-    if (!projRecords.length) {
-      return res.status(404).json({ success: false, message: `Không tìm thấy dự án với ID: ${projectId}` });
-    }
-    if (projRecords[0].ownerId && projRecords[0].ownerId !== userId) {
-      return res.status(403).json({ success: false, message: 'Bạn không có quyền thêm nút vào dự án này' });
-    }
-
     const createQuery = `
       MATCH (p:Project { id: $projectId })
       CREATE (n:StoryNode:${secondaryLabel} $props)

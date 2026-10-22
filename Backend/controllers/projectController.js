@@ -246,12 +246,9 @@ async function deleteProject(req, res, next) {
   }
 
   try {
-    // Xóa qua liên kết OWNS của user, hoặc nếu là dự án mẫu không ai sở hữu thì cho phép xóa
+    // Chỉ cho phép xóa dự án thuộc quyền sở hữu của user đã đăng nhập
     const query = `
-      MATCH (p:Project { id: $id })
-      OPTIONAL MATCH (u:User)-[:OWNS]->(p)
-      WITH p, u
-      WHERE (u IS NOT NULL AND u.id = $userId) OR (u IS NULL)
+      MATCH (u:User { id: $userId })-[:OWNS]->(p:Project { id: $id })
       OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
       OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
       DETACH DELETE n, c, p
