@@ -7,6 +7,11 @@ const linkController = require('../controllers/linkController');
 const graphController = require('../controllers/graphController');
 const chapterController = require('../controllers/chapterController');
 
+const { optionalAuth } = require('../middlewares/authMiddleware');
+
+// Áp dụng middleware nhận diện User từ JWT Token
+router.use(optionalAuth);
+
 // Quản lý Project CRUD
 router.get('/', projectController.getAllProjects);
 router.get('/:id', projectController.getProjectById);

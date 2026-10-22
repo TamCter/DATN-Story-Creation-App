@@ -169,6 +169,31 @@ class ApiService {
       method: 'GET',
     });
   }
+
+  // Projects APIs
+  async getProjects(): Promise<{ success: boolean; data: any[]; count: number }> {
+    return this.request<{ success: boolean; data: any[]; count: number }>('/projects', {
+      method: 'GET',
+    });
+  }
+
+  async createProject(payload: {
+    title: string;
+    genre?: string;
+    number?: string;
+    desc?: string;
+  }): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>('/projects', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteProject(id: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/projects/${id}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const api = new ApiService();

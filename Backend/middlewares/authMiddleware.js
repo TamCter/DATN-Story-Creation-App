@@ -36,7 +36,31 @@ function verifyToken(req, res, next) {
   }
 }
 
+/**
+ * Middleware tùy chọn: Nếu có Token thì gắn req.user, không có vẫn cho qua
+ */
+function optionalAuth(req, res, next) {
+  const authHeader = req.headers.authorization;
+
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    req.user = null;
+    return next();
+  }
+
+  const token = authHeader.split(' ')[1];
+
+  try {
+    const decoded = jwt.verify(token, JWT_SECRET);
+    req.user = decoded;
+  } catch {
+    req.user = null;
+  }
+
+  next();
+}
+
 module.exports = {
   verifyToken,
+  optionalAuth,
   JWT_SECRET,
 };

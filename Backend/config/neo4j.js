@@ -4,7 +4,7 @@ require('dotenv').config();
 const uri = process.env.NEO4J_URI || 'bolt://localhost:7687';
 const user = process.env.NEO4J_USER || 'neo4j';
 const password = process.env.NEO4J_PASSWORD || 'password';
-const database = process.env.NEO4J_DATABASE || 'neo4j';
+const database = process.env.NEO4J_DATABASE || undefined;
 
 let driver;
 

@@ -2,6 +2,7 @@ import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -12,10 +13,12 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, { Circle, Line, Path } from 'react-native-svg';
+import Svg, { Circle, Line } from 'react-native-svg';
 
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
+
+type ActiveField = 'penName' | 'email' | 'password' | 'confirmPassword' | null;
 
 export default function AuthScreen() {
   const {
@@ -39,11 +42,39 @@ export default function AuthScreen() {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [localError, setLocalError] = useState<string | null>(null);
 
+  // Trạng thái bàn phím ảo & Hộp xem trước văn bản trên bàn phím
+  const [focusedField, setFocusedField] = useState<ActiveField>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showPreviewPassword, setShowPreviewPassword] = useState(false);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardVisible(true);
+      setKeyboardHeight(e.endCoordinates.height);
+    });
+
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardVisible(false);
+      setKeyboardHeight(0);
+      setFocusedField(null);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   // Xóa thông báo lỗi khi chuyển tab hoặc đổi input
   const handleTabChange = (newTab: 'login' | 'register') => {
     setTab(newTab);
     setLocalError(null);
     clearError();
+    setFocusedField(null);
   };
 
   const handleFieldChange = (setter: (val: string) => void, val: string) => {
@@ -54,8 +85,44 @@ export default function AuthScreen() {
 
   const activeError = localError || authError;
 
+  // Lấy nhãn và nội dung của ô đang nhập để hiển thị trên hộp xem trước bàn phím
+  const getFieldLabel = (field: ActiveField): string => {
+    switch (field) {
+      case 'penName':
+        return 'BÚT DANH TÁC GIẢ';
+      case 'email':
+        return 'ĐỊA CHỈ EMAIL';
+      case 'password':
+        return 'MẬT KHẨU';
+      case 'confirmPassword':
+        return 'NHẬP LẠI MẬT KHẨU';
+      default:
+        return '';
+    }
+  };
+
+  const getFieldValue = (field: ActiveField): string => {
+    switch (field) {
+      case 'penName':
+        return penName;
+      case 'email':
+        return email;
+      case 'password':
+        return password;
+      case 'confirmPassword':
+        return confirmPassword;
+      default:
+        return '';
+    }
+  };
+
+  const isPasswordField = (field: ActiveField): boolean => {
+    return field === 'password' || field === 'confirmPassword';
+  };
+
   // Validate và gửi form
   const handleSubmit = async () => {
+    Keyboard.dismiss();
     setLocalError(null);
     clearError();
 
@@ -109,6 +176,7 @@ export default function AuthScreen() {
   };
 
   const handleGuestLogin = async () => {
+    Keyboard.dismiss();
     setLocalError(null);
     clearError();
     const result = await guestLogin();
@@ -121,13 +189,20 @@ export default function AuthScreen() {
     router.replace('/projects' as any);
   };
 
+  const currentVal = getFieldValue(focusedField);
+  const isPwd = isPasswordField(focusedField);
+
   return (
     <SafeAreaView style={styles.safeArea}>
       <KeyboardAvoidingView
         style={styles.flex}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}>
         <ScrollView
-          contentContainerStyle={styles.scrollContent}
+          contentContainerStyle={[
+            styles.scrollContent,
+            keyboardVisible && styles.scrollContentWithKeyboard,
+          ]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled">
           {/* Top Decorative Constellation */}
@@ -210,7 +285,7 @@ export default function AuthScreen() {
             </Text>
           </View>
 
-          {/* Phiên đăng nhập đang sẵn có (nếu đã lưu session trước đó) */}
+          {/* Phiên đăng nhập đang sẵn có */}
           {isAuthenticated && user && (
             <View style={styles.sessionBanner}>
               <View style={styles.sessionInfo}>
@@ -277,11 +352,12 @@ export default function AuthScreen() {
           <View style={styles.formContainer}>
             {tab === 'register' ? (
               <>
-                <View style={styles.inputWrapper}>
+                <View style={[styles.inputWrapper, focusedField === 'penName' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInput}
                     value={penName}
                     onChangeText={(val) => handleFieldChange(setPenName, val)}
+                    onFocus={() => setFocusedField('penName')}
                     placeholder="Bút danh (tên hiển thị tác giả)"
                     placeholderTextColor="#685f50"
                     autoCapitalize="words"
@@ -289,11 +365,12 @@ export default function AuthScreen() {
                   />
                 </View>
 
-                <View style={styles.inputWrapper}>
+                <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInput}
                     value={email}
                     onChangeText={(val) => handleFieldChange(setEmail, val)}
+                    onFocus={() => setFocusedField('email')}
                     placeholder="Email của bạn"
                     placeholderTextColor="#685f50"
                     keyboardType="email-address"
@@ -302,11 +379,12 @@ export default function AuthScreen() {
                   />
                 </View>
 
-                <View style={styles.inputWrapperWithIcon}>
+                <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}
+                    onFocus={() => setFocusedField('password')}
                     placeholder="Mật khẩu (ít nhất 6 ký tự)"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showPassword}
@@ -321,13 +399,14 @@ export default function AuthScreen() {
                   </Pressable>
                 </View>
 
-                <View style={styles.inputWrapperWithIcon}>
+                <View style={[styles.inputWrapperWithIcon, focusedField === 'confirmPassword' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInputWithIcon}
                     value={confirmPassword}
                     onChangeText={(val) =>
                       handleFieldChange(setConfirmPassword, val)
                     }
+                    onFocus={() => setFocusedField('confirmPassword')}
                     placeholder="Nhập lại mật khẩu"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showConfirmPassword}
@@ -346,11 +425,12 @@ export default function AuthScreen() {
               </>
             ) : (
               <>
-                <View style={styles.inputWrapper}>
+                <View style={[styles.inputWrapper, focusedField === 'email' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInput}
                     value={email}
                     onChangeText={(val) => handleFieldChange(setEmail, val)}
+                    onFocus={() => setFocusedField('email')}
                     placeholder="Email đăng nhập"
                     placeholderTextColor="#685f50"
                     keyboardType="email-address"
@@ -359,11 +439,12 @@ export default function AuthScreen() {
                   />
                 </View>
 
-                <View style={styles.inputWrapperWithIcon}>
+                <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}
+                    onFocus={() => setFocusedField('password')}
                     placeholder="Mật khẩu"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showPassword}
@@ -445,6 +526,58 @@ export default function AuthScreen() {
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
+
+      {/* 🚀 HỘP XEM TRƯỚC VĂN BẢN TRÊN BÀN PHÍM (KEYBOARD ACCESSORY VIEW) */}
+      {keyboardVisible && !!focusedField && (
+        <View
+          style={[
+            styles.keyboardAccessoryBar,
+            {
+              bottom: Platform.OS === 'ios' ? keyboardHeight : 0,
+            },
+          ]}>
+          <View style={styles.accessoryHeaderRow}>
+            <View style={styles.accessoryLabelBadge}>
+              <Text style={styles.accessoryLabelText}>
+                ✍️ {getFieldLabel(focusedField)}
+              </Text>
+            </View>
+
+            <Pressable
+              style={styles.accessoryDismissBtn}
+              onPress={() => Keyboard.dismiss()}>
+              <Text style={styles.accessoryDismissText}>✕ Thu gọn bàn phím</Text>
+            </Pressable>
+          </View>
+
+          <View style={styles.accessoryContentRow}>
+            <Text
+              style={[
+                styles.accessoryValueText,
+                !currentVal && styles.accessoryValueTextEmpty,
+              ]}
+              numberOfLines={2}>
+              {currentVal
+                ? isPwd
+                  ? showPreviewPassword
+                    ? currentVal
+                    : '•'.repeat(Math.min(currentVal.length, 30))
+                  : currentVal
+                : '(Chưa nhập ký tự nào...)'}
+            </Text>
+
+            {isPwd && (
+              <Pressable
+                style={styles.accessoryToggleBtn}
+                onPress={() => setShowPreviewPassword(!showPreviewPassword)}>
+                <Text style={styles.accessoryToggleText}>
+                  {showPreviewPassword ? 'Ẩn 🙈' : 'Hiện 👁'}
+                </Text>
+              </Pressable>
+            )}
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -466,6 +599,9 @@ const styles = StyleSheet.create({
     maxWidth: 520,
     width: '100%',
     alignSelf: 'center',
+  },
+  scrollContentWithKeyboard: {
+    paddingBottom: 160,
   },
   constellationContainer: {
     position: 'absolute',
@@ -617,18 +753,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#28241c',
   },
+  inputWrapperWithIcon: {
+    borderBottomWidth: 1,
+    borderBottomColor: '#28241c',
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  inputWrapperFocused: {
+    borderBottomColor: ThemeColors.gold,
+  },
   textInput: {
     fontSize: 15.5,
     color: ThemeColors.textPrimary,
     paddingVertical: 12,
     paddingHorizontal: 0,
     fontFamily: AppFonts.sans,
-  },
-  inputWrapperWithIcon: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#28241c',
-    flexDirection: 'row',
-    alignItems: 'center',
   },
   textInputWithIcon: {
     flex: 1,
@@ -729,5 +868,88 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     fontFamily: AppFonts.sans,
     textAlign: 'center',
+  },
+
+  // 🌟 Hộp xem trước văn bản trên bàn phím (Keyboard Accessory View)
+  keyboardAccessoryBar: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    backgroundColor: '#191612',
+    borderTopWidth: 2,
+    borderTopColor: ThemeColors.gold,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.5,
+    shadowRadius: 8,
+    elevation: 20,
+    zIndex: 99999,
+  },
+  accessoryHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  accessoryLabelBadge: {
+    backgroundColor: 'rgba(229, 169, 60, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.3)',
+  },
+  accessoryLabelText: {
+    color: ThemeColors.gold,
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    fontFamily: AppFonts.sans,
+  },
+  accessoryDismissBtn: {
+    backgroundColor: '#28241c',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  accessoryDismissText: {
+    color: '#c4baa9',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
+  },
+  accessoryContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  accessoryValueText: {
+    flex: 1,
+    color: ThemeColors.textPrimary,
+    fontSize: 16,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
+  },
+  accessoryValueTextEmpty: {
+    color: '#6e6556',
+    fontStyle: 'italic',
+    fontSize: 14,
+  },
+  accessoryToggleBtn: {
+    backgroundColor: '#2b261d',
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.4)',
+    paddingHorizontal: 12,
+    paddingVertical: 5,
+    borderRadius: 8,
+  },
+  accessoryToggleText: {
+    color: ThemeColors.gold,
+    fontSize: 12.5,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
   },
 });

@@ -2,27 +2,54 @@ const crypto = require('crypto');
 const { runQuery } = require('../config/neo4j');
 
 /**
- * Lấy danh sách tất cả Project kèm số lượng node, link, chapter
+ * Lấy danh sách Project thuộc về User hiện tại (hoặc public nếu chưa đăng nhập)
  */
 async function getAllProjects(req, res, next) {
   try {
-    const query = `
-      MATCH (p:Project)
-      OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
-      WITH p, count(DISTINCT n) AS nodeCount
-      OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      WITH p, nodeCount, count(DISTINCT c) AS chapterCount
-      OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
-      WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
-      RETURN p,
-             nodeCount,
-             linkCount,
-             chapterCount
-      ORDER BY p.createdAt DESC
-    `;
+    const userId = req.user?.id || req.query.userId;
 
-    const records = await runQuery(query, {}, 'READ');
+    let query;
+    let params = {};
+
+    if (userId) {
+      // Phân tách dự án: Chỉ lấy các dự án thuộc quyền sở hữu của User này
+      query = `
+        MATCH (u:User { id: $userId })-[:OWNS]->(p:Project)
+        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+        WITH p, count(DISTINCT n) AS nodeCount
+        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
+        WITH p, nodeCount, count(DISTINCT c) AS chapterCount
+        OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
+        OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
+        WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
+        RETURN p,
+               nodeCount,
+               linkCount,
+               chapterCount
+        ORDER BY p.createdAt DESC
+      `;
+      params = { userId };
+    } else {
+      // Nếu chưa có token hoặc là khách vãng lai, chỉ xem các dự án mẫu chung (không bị user nào sở hữu riêng)
+      query = `
+        MATCH (p:Project)
+        WHERE NOT (p)<-[:OWNS]-(:User)
+        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+        WITH p, count(DISTINCT n) AS nodeCount
+        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
+        WITH p, nodeCount, count(DISTINCT c) AS chapterCount
+        OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
+        OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
+        WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
+        RETURN p,
+               nodeCount,
+               linkCount,
+               chapterCount
+        ORDER BY p.createdAt DESC
+      `;
+    }
+
+    const records = await runQuery(query, params, 'READ');
     const projects = records.map((row) => ({
       ...row.p,
       nodeCount: row.nodeCount || 0,
@@ -77,10 +104,11 @@ async function getProjectById(req, res, next) {
 }
 
 /**
- * Tạo một Project mới
+ * Tạo một Project mới và gắn quyền sở hữu cho User hiện tại
  */
 async function createProject(req, res, next) {
   const { id, title, genre, number, desc } = req.body || {};
+  const userId = req.user?.id || req.body.userId;
 
   if (!title) {
     return res.status(400).json({ success: false, message: 'Tiêu đề dự án (title) là bắt buộc' });
@@ -90,20 +118,8 @@ async function createProject(req, res, next) {
   const now = Date.now();
 
   try {
-    const query = `
-      CREATE (p:Project {
-        id: $id,
-        title: $title,
-        genre: $genre,
-        number: $number,
-        desc: $desc,
-        createdAt: $createdAt,
-        updatedAt: $updatedAt
-      })
-      RETURN p
-    `;
-
-    const records = await runQuery(query, {
+    let query;
+    let params = {
       id: projectId,
       title: title || 'Dự án chưa đặt tên',
       genre: genre || 'Chưa phân loại',
@@ -111,7 +127,45 @@ async function createProject(req, res, next) {
       desc: desc || '',
       createdAt: now,
       updatedAt: now,
-    });
+    };
+
+    if (userId) {
+      // Tạo node Project và liên kết OWNS với User tương ứng
+      query = `
+        MATCH (u:User { id: $userId })
+        CREATE (u)-[:OWNS]->(p:Project {
+          id: $id,
+          title: $title,
+          genre: $genre,
+          number: $number,
+          desc: $desc,
+          userId: $userId,
+          createdAt: $createdAt,
+          updatedAt: $updatedAt
+        })
+        RETURN p
+      `;
+      params.userId = userId;
+    } else {
+      query = `
+        CREATE (p:Project {
+          id: $id,
+          title: $title,
+          genre: $genre,
+          number: $number,
+          desc: $desc,
+          createdAt: $createdAt,
+          updatedAt: $updatedAt
+        })
+        RETURN p
+      `;
+    }
+
+    const records = await runQuery(query, params, 'WRITE');
+
+    if (!records.length || !records[0]?.p) {
+      return res.status(500).json({ success: false, message: 'Không thể tạo dự án' });
+    }
 
     return res.status(201).json({
       success: true,
@@ -133,20 +187,20 @@ async function updateProject(req, res, next) {
   try {
     const query = `
       MATCH (p:Project { id: $id })
-      SET p.title = COALESCE($title, p.title),
-          p.genre = COALESCE($genre, p.genre),
-          p.number = COALESCE($number, p.number),
-          p.desc = COALESCE($desc, p.desc),
+      SET p.title = coalesce($title, p.title),
+          p.genre = coalesce($genre, p.genre),
+          p.number = coalesce($number, p.number),
+          p.desc = coalesce($desc, p.desc),
           p.updatedAt = $updatedAt
       RETURN p
     `;
 
     const records = await runQuery(query, {
       id,
-      title: title ?? null,
-      genre: genre ?? null,
-      number: number ?? null,
-      desc: desc ?? null,
+      title,
+      genre,
+      number,
+      desc,
       updatedAt: Date.now(),
     });
 
@@ -169,18 +223,38 @@ async function updateProject(req, res, next) {
  */
 async function deleteProject(req, res, next) {
   const { id } = req.params;
-  try {
-    const query = `
-      MATCH (p:Project { id: $id })
-      OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      DETACH DELETE n, c, p
-      RETURN count(p) AS deleted
-    `;
+  const userId = req.user?.id;
 
-    const records = await runQuery(query, { id });
+  try {
+    let query;
+    let params = { id };
+
+    if (userId) {
+      // Chỉ cho phép xóa nếu dự án thuộc quyền sở hữu của user
+      query = `
+        MATCH (u:User { id: $userId })-[:OWNS]->(p:Project { id: $id })
+        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
+        DETACH DELETE n, c, p
+        RETURN count(p) AS deleted
+      `;
+      params.userId = userId;
+    } else {
+      query = `
+        MATCH (p:Project { id: $id })
+        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
+        DETACH DELETE n, c, p
+        RETURN count(p) AS deleted
+      `;
+    }
+
+    const records = await runQuery(query, params, 'WRITE');
     if (!records[0] || records[0].deleted === 0) {
-      return res.status(404).json({ success: false, message: `Không tìm thấy dự án với ID: ${id}` });
+      return res.status(404).json({
+        success: false,
+        message: `Không tìm thấy dự án hoặc bạn không có quyền xóa dự án ID: ${id}`,
+      });
     }
 
     return res.json({
