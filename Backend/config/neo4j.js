@@ -4,7 +4,7 @@ require('dotenv').config();
 const uri = process.env.NEO4J_URI || 'bolt://localhost:7687';
 const user = process.env.NEO4J_USER || 'neo4j';
 const password = process.env.NEO4J_PASSWORD || 'password';
-const database = process.env.NEO4J_DATABASE || 'neo4j';
+const database = process.env.NEO4J_DATABASE || undefined;
 
 let driver;
 
@@ -144,6 +144,8 @@ async function initConstraints() {
     'CREATE CONSTRAINT project_id_unique IF NOT EXISTS FOR (p:Project) REQUIRE p.id IS UNIQUE',
     'CREATE CONSTRAINT storynode_id_unique IF NOT EXISTS FOR (n:StoryNode) REQUIRE n.id IS UNIQUE',
     'CREATE CONSTRAINT chapter_id_unique IF NOT EXISTS FOR (c:Chapter) REQUIRE c.id IS UNIQUE',
+    'CREATE CONSTRAINT user_id_unique IF NOT EXISTS FOR (u:User) REQUIRE u.id IS UNIQUE',
+    'CREATE CONSTRAINT user_email_unique IF NOT EXISTS FOR (u:User) REQUIRE u.email IS UNIQUE',
   ];
 
   for (const q of constraints) {

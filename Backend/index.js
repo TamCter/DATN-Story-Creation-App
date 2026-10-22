@@ -5,6 +5,7 @@ require('dotenv').config();
 const { testConnection, runQuery } = require('./config/neo4j');
 const errorHandler = require('./middlewares/errorHandler');
 
+const authRoutes = require('./routes/authRoutes');
 const projectRoutes = require('./routes/projectRoutes');
 const nodeRoutes = require('./routes/nodeRoutes');
 const linkRoutes = require('./routes/linkRoutes');
@@ -26,6 +27,12 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     endpoints: {
       health: 'GET /api/health',
+      auth: {
+        register: 'POST /api/auth/register',
+        login: 'POST /api/auth/login',
+        guest: 'POST /api/auth/guest',
+        me: 'GET /api/auth/me',
+      },
       seed: {
         populateData: 'POST /api/seed',
         clearData: 'DELETE /api/seed/clear',
@@ -93,6 +100,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 // Đăng ký các Routes
+app.use('/api/auth', authRoutes);
 app.use('/api/projects', projectRoutes);
 app.use('/api/nodes', nodeRoutes);
 app.use('/api/links', linkRoutes);

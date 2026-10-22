@@ -11,6 +11,7 @@ Backend/
 ├── config/
 │   └── neo4j.js              # Khởi tạo driver Neo4j, helper truy vấn Cypher & chuẩn hóa kiểu dữ liệu
 ├── controllers/
+│   ├── authController.js     # Đăng ký, đăng nhập, lấy thông tin cá nhân và tài khoản mẫu
 │   ├── projectController.js  # CRUD dự án cốt truyện
 │   ├── nodeController.js     # CRUD các nút (Nhân vật, Vật phẩm, Phe phái, Sự kiện, Địa điểm)
 │   ├── linkController.js     # CRUD mối quan hệ giữa các nút (RELATES_TO)
@@ -18,8 +19,10 @@ Backend/
 │   ├── chapterController.js  # CRUD các chương truyện và sự kiện trong chương
 │   └── seedController.js     # Nạp / Xóa dữ liệu mẫu ban đầu (Hoàng Hôn Kiếm Vương)
 ├── middlewares/
+│   ├── authMiddleware.js     # Xác thực JWT Token bảo vệ các endpoint
 │   └── errorHandler.js       # Xử lý lỗi tập trung và thông báo thân thiện
 ├── routes/
+│   ├── authRoutes.js         # /api/auth
 │   ├── projectRoutes.js      # /api/projects
 │   ├── nodeRoutes.js         # /api/nodes
 │   ├── linkRoutes.js         # /api/links
@@ -79,7 +82,17 @@ Kiểm tra tình trạng kết nối: `http://localhost:5000/api/health`
 
 ## 📚 Danh sách API (API Reference)
 
-### 1. Dữ liệu mẫu (Seed Data)
+### 1. Xác thực người dùng (Authentication)
+| Method | Endpoint | Mô tả |
+|---|---|---|
+| `POST` | `/api/auth/register` | **Đăng ký tài khoản mới** (bút danh, email, mật khẩu) |
+| `POST` | `/api/auth/login` | **Đăng nhập** lấy JWT Bearer token và thông tin tác giả |
+| `POST` | `/api/auth/guest` | **Đăng nhập nhanh tài khoản mẫu** (tiện cho trải nghiệm ngay) |
+| `GET` | `/api/auth/me` | Lấy thông tin tài khoản hiện tại (yêu cầu Header `Authorization: Bearer <token>`) |
+
+---
+
+### 2. Dữ liệu mẫu (Seed Data)
 | Method | Endpoint | Mô tả |
 |---|---|---|
 | `POST` | `/api/seed` | **Nạp dữ liệu mẫu ban đầu** ("Hoàng Hôn Kiếm Vương" gồm 11 nút, 14 liên kết, 3 chương) |

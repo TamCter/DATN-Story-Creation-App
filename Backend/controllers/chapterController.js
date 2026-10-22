@@ -116,10 +116,18 @@ async function createChapter(req, res, next) {
   const eventsJson = Array.isArray(events) ? JSON.stringify(events) : JSON.stringify([]);
 
   try {
-    const checkQuery = `MATCH (p:Project { id: $projectId }) RETURN p`;
-    const checkResult = await runQuery(checkQuery, { projectId }, 'READ');
-    if (!checkResult.length) {
-      return res.status(404).json({ success: false, message: `Không tìm thấy project với ID: ${projectId}` });
+    const userId = req.user?.id;
+    const projCheckQuery = `
+      MATCH (p:Project { id: $projectId })
+      OPTIONAL MATCH (owner:User)-[:OWNS]->(p)
+      RETURN p, owner.id AS ownerId
+    `;
+    const projRecords = await runQuery(projCheckQuery, { projectId }, 'READ');
+    if (!projRecords.length) {
+      return res.status(404).json({ success: false, message: `Không tìm thấy dự án với ID: ${projectId}` });
+    }
+    if (projRecords[0].ownerId && projRecords[0].ownerId !== userId) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền thêm chương vào dự án này' });
     }
 
     const createQuery = `

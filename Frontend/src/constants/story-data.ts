@@ -60,6 +60,8 @@ export interface StoryLocationItem {
 
 export interface StoryProject {
   id: string;
+  userId?: string;
+  desc?: string;
   number: string;
   title: string;
   genre: string;
