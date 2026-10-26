@@ -11,12 +11,15 @@ import { Platform } from 'react-native';
 
 import { api, ApiError, AuthUser } from '@/services/api';
 
-const TOKEN_KEY = '@story_app_auth_token';
+const TOKEN_KEY = 'story_app_auth_token';
 const USER_KEY = '@story_app_auth_user';
 
 async function getStoredToken(): Promise<string | null> {
   if (Platform.OS === 'web') {
-    return AsyncStorage.getItem(TOKEN_KEY);
+    return (
+      (await AsyncStorage.getItem(TOKEN_KEY)) ||
+      (await AsyncStorage.getItem('@story_app_auth_token'))
+    );
   }
   return SecureStore.getItemAsync(TOKEN_KEY);
 }
@@ -31,7 +34,10 @@ async function setStoredToken(token: string): Promise<void> {
 
 async function removeStoredToken(): Promise<void> {
   if (Platform.OS === 'web') {
-    await AsyncStorage.removeItem(TOKEN_KEY);
+    await Promise.all([
+      AsyncStorage.removeItem(TOKEN_KEY),
+      AsyncStorage.removeItem('@story_app_auth_token'),
+    ]);
   } else {
     await SecureStore.deleteItemAsync(TOKEN_KEY);
   }
