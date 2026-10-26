@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -15,8 +15,10 @@ import {
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
+  StoryProject,
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
+import { projectStore } from '@/services/project-store';
 
 interface CharacterExtra {
   title: string;
@@ -72,10 +74,37 @@ export default function CharactersScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
 
-  const currentProject = useMemo(() => {
+  const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
+    const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
     return (
-      INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
+      match || {
+        id: projectId,
+        title: 'Đang tải...',
+        genre: '',
+        number: '№ 01',
+        nodeCount: 0,
+        linkCount: 0,
+        updatedAt: 'Vừa xong',
+        nodes: [],
+        links: [],
+      }
     );
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    async function load() {
+      try {
+        const proj = await projectStore.getProject(projectId);
+        if (isMounted) setCurrentProject(proj);
+      } catch (err) {
+        console.warn('Lỗi tải nhân vật:', err);
+      }
+    }
+    void load();
+    return () => {
+      isMounted = false;
+    };
   }, [projectId]);
 
   const characters = useMemo(() => {

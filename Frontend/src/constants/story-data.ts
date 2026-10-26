@@ -7,6 +7,38 @@ export interface StoryNode {
   x: number;
   y: number;
   subType?: string;
+  status?: string;
+  // Character fields
+  dob?: string;
+  gender?: string;
+  weapon?: string;
+  sect?: string;
+  personality?: string;
+  // Item fields
+  rarity?: string;
+  origin?: string;
+  element?: string;
+  power?: string;
+  holderOrLocation?: string;
+  // Location fields
+  region?: string;
+  climate?: string;
+  terrain?: string;
+  dangerLevel?: string;
+  ruler?: string;
+  // Faction fields
+  leader?: string;
+  headquarters?: string;
+  motto?: string;
+  alignment?: string;
+  influence?: string;
+  // Event fields
+  time?: string;
+  location?: string;
+  chapter?: string;
+  impact?: string;
+  createdAt?: number;
+  updatedAt?: number;
 }
 
 export interface StoryLink {

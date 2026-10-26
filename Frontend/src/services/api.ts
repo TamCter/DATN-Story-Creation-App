@@ -211,6 +211,88 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  // Node & Graph APIs
+  async getProject(projectId: string): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(`/projects/${projectId}`, {
+      method: 'GET',
+    });
+  }
+
+  async getProjectGraph(projectId: string): Promise<{
+    success: boolean;
+    data: {
+      project: any;
+      nodes: any[];
+      links: any[];
+      stats?: any;
+    };
+    message?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      data: {
+        project: any;
+        nodes: any[];
+        links: any[];
+        stats?: any;
+      };
+      message?: string;
+    }>(`/projects/${projectId}/graph`, {
+      method: 'GET',
+    });
+  }
+
+  async getProjectNodes(
+    projectId: string,
+    query?: { type?: string; search?: string }
+  ): Promise<{ success: boolean; data: any[]; count: number; message?: string }> {
+    const params = new URLSearchParams();
+    if (query?.type) params.append('type', query.type);
+    if (query?.search) params.append('search', query.search);
+    const queryString = params.toString() ? `?${params.toString()}` : '';
+    return this.request<{ success: boolean; data: any[]; count: number; message?: string }>(
+      `/projects/${projectId}/nodes${queryString}`,
+      {
+        method: 'GET',
+      }
+    );
+  }
+
+  async createNode(
+    projectId: string,
+    payload: any
+  ): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(
+      `/projects/${projectId}/nodes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async getNode(nodeId: string): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(`/nodes/${nodeId}`, {
+      method: 'GET',
+    });
+  }
+
+  async updateNode(
+    nodeId: string,
+    payload: any
+  ): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(`/nodes/${nodeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteNode(nodeId: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/nodes/${nodeId}`, {
+      method: 'DELETE',
+    });
+  }
 }
 
 export const api = new ApiService();

@@ -20,6 +20,7 @@ import { INITIAL_PROJECTS, StoryProject } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { api } from '@/services/api';
+import { projectStore } from '@/services/project-store';
 
 export default function ProjectsScreen() {
   const { user, logout } = useAuth();
@@ -34,27 +35,14 @@ export default function ProjectsScreen() {
   const displayName = user?.penName || 'Tác giả';
   const displayInitial = displayName.charAt(0).toUpperCase();
 
-  // Tải danh sách dự án thuộc về User hiện tại từ Backend (Neo4j)
+  // Tải danh sách dự án thuộc về User hiện tại từ Backend (Neo4j) hoặc Store
   const fetchUserProjects = useCallback(async () => {
     setIsLoading(true);
     try {
-      const res = await api.getProjects();
-      if (res.success && Array.isArray(res.data)) {
-        if (res.data.length > 0) {
-          setProjects(res.data as StoryProject[]);
-        } else if (user?.id === 'user-guest-demo') {
-          // Tài khoản khách mẫu mặc định có sẵn dự án mẫu
-          setProjects(INITIAL_PROJECTS);
-        } else {
-          // Tài khoản mới của user: bắt đầu với danh sách trống riêng biệt
-          setProjects([]);
-        }
-      } else {
-        setProjects([]);
-      }
+      const list = await projectStore.getProjects(user?.id);
+      setProjects(list);
     } catch (error) {
       console.warn('Lỗi lấy danh sách dự án từ máy chủ:', error);
-      // Nếu là tài khoản mẫu và không có mạng, dùng dữ liệu mẫu
       if (user?.id === 'user-guest-demo') {
         setProjects(INITIAL_PROJECTS);
       } else {
@@ -109,6 +97,7 @@ export default function ProjectsScreen() {
           nodes: [],
           links: [],
         };
+        await projectStore.saveProject(created);
         setProjects([created, ...projects]);
       } else {
         // Fallback lưu local nếu backend lỗi
@@ -117,22 +106,13 @@ export default function ProjectsScreen() {
           number: projNumber,
           title: newTitle.trim(),
           genre: genreText,
-          nodeCount: 1,
+          nodeCount: 0,
           linkCount: 0,
           updatedAt: 'Vừa xong',
-          nodes: [
-            {
-              id: 'root-1',
-              name: 'Khởi điểm',
-              type: 'character',
-              role: 'CHÍNH DIỆN',
-              desc: 'Nhân vật đầu tiên trong mạch truyện.',
-              x: 180,
-              y: 350,
-            },
-          ],
+          nodes: [],
           links: [],
         };
+        await projectStore.saveProject(fallbackProj);
         setProjects([fallbackProj, ...projects]);
       }
 

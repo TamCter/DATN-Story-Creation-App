@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -15,8 +15,10 @@ import {
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
+  StoryProject,
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
+import { projectStore } from '@/services/project-store';
 
 interface FactionExtendedData {
   leader?: string;
@@ -55,18 +57,45 @@ export default function FactionsScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
 
-  const currentProject = useMemo(() => {
+  const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
+    const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
     return (
-      INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
+      match || {
+        id: projectId,
+        title: 'Đang tải...',
+        genre: '',
+        number: '№ 01',
+        nodeCount: 0,
+        linkCount: 0,
+        updatedAt: 'Vừa xong',
+        nodes: [],
+        links: [],
+      }
     );
+  });
+
+  const [factions, setFactions] = useState<StoryNode[]>(() =>
+    currentProject.nodes.filter((n) => n.type === 'faction')
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    async function load() {
+      try {
+        const proj = await projectStore.getProject(projectId);
+        if (isMounted) {
+          setCurrentProject(proj);
+          setFactions(proj.nodes.filter((n) => n.type === 'faction'));
+        }
+      } catch (err) {
+        console.warn('Lỗi tải phe phái:', err);
+      }
+    }
+    void load();
+    return () => {
+      isMounted = false;
+    };
   }, [projectId]);
-
-  // Extract all faction nodes from project
-  const initialFactions = useMemo(() => {
-    return currentProject.nodes.filter((n) => n.type === 'faction');
-  }, [currentProject]);
-
-  const [factions, setFactions] = useState<StoryNode[]>(initialFactions);
   const [selectedAlignment, setSelectedAlignment] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeFactionDetail, setActiveFactionDetail] = useState<StoryNode | null>(null);
