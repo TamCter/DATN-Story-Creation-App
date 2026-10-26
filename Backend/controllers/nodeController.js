@@ -110,6 +110,7 @@ const ALLOWED_NODE_SCALARS = new Set([
   'status',
   // Character specific
   'dob',
+  'birthplace',
   'gender',
   'weapon',
   'sect',
@@ -236,11 +237,12 @@ async function createNode(req, res, next) {
   const { projectId } = req.params;
   const body = req.body || {};
 
+  // Strip server-managed fields if sent
+  delete body.createdAt;
+  delete body.updatedAt;
+
   // Reject invalid keys or non-scalar / nested values
   for (const [key, value] of Object.entries(body)) {
-    if (key === 'createdAt') {
-      return res.status(400).json({ success: false, message: 'Trường createdAt không được phép truyền thủ công' });
-    }
     if (key !== 'id' && !ALLOWED_NODE_SCALARS.has(key)) {
       return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
     }
@@ -362,12 +364,10 @@ async function updateNode(req, res, next) {
   const { id } = req.params;
   const body = req.body || {};
 
-  if (body.id !== undefined) {
-    return res.status(400).json({ success: false, message: 'Không được phép cập nhật trường id của Node' });
-  }
-  if (body.createdAt !== undefined) {
-    return res.status(400).json({ success: false, message: 'Không được phép cập nhật trường createdAt của Node' });
-  }
+  // Strip immutable fields if sent
+  delete body.id;
+  delete body.createdAt;
+  delete body.updatedAt;
 
   for (const [key, value] of Object.entries(body)) {
     if (!ALLOWED_NODE_SCALARS.has(key)) {

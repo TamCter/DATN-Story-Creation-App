@@ -161,6 +161,7 @@ export class ProjectStore {
       y: typeof nodeData.y === 'number' ? nodeData.y : 350 + (Math.random() * 80 - 40),
       status: nodeData.status?.trim() || defaultStatusByType[type] || 'Hoạt động',
       dob: nodeData.dob?.trim() || '',
+      birthplace: nodeData.birthplace?.trim() || '',
       gender: nodeData.gender?.trim() || '',
       weapon: nodeData.weapon?.trim() || '',
       sect: nodeData.sect?.trim() || '',
@@ -188,9 +189,10 @@ export class ProjectStore {
       updatedAt: Date.now(),
     };
 
-    // Thử gọi backend để lưu vào Neo4j
+    // Thử gọi backend để lưu vào Neo4j (không truyền createdAt / updatedAt thủ công)
     try {
-      const res = await api.createNode(projectId, newNode);
+      const { createdAt, updatedAt, ...payloadForBackend } = newNode;
+      const res = await api.createNode(projectId, payloadForBackend);
       if (res.success && res.data) {
         Object.assign(newNode, res.data);
       }
@@ -222,9 +224,10 @@ export class ProjectStore {
       updatedAt: Date.now(),
     };
 
-    // Thử gọi backend để cập nhật vào Neo4j
+    // Thử gọi backend để cập nhật vào Neo4j (không truyền id / createdAt / updatedAt)
     try {
-      const res = await api.updateNode(nodeId, updates);
+      const { id, createdAt, updatedAt, ...updatesForBackend } = updates;
+      const res = await api.updateNode(nodeId, updatesForBackend);
       if (res.success && res.data) {
         Object.assign(updatedNode, res.data);
       }

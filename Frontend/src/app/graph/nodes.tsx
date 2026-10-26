@@ -16,6 +16,8 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  CHARACTER_PROFESSIONS,
+  generateUniqueNodeId,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -23,6 +25,8 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { FormSelectField } from '@/components/ui/FormSelectField';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -70,10 +74,16 @@ export default function NodesDetailScreen() {
 
   // Specific fields
   const [formDob, setFormDob] = useState('');
+  const [formBirthplace, setFormBirthplace] = useState('');
   const [formGender, setFormGender] = useState('Nam');
   const [formWeapon, setFormWeapon] = useState('');
   const [formSect, setFormSect] = useState('');
   const [formPersonality, setFormPersonality] = useState('');
+
+  // Available node categories for relation selections
+  const itemNodes = useMemo(() => nodes.filter((n) => n.type === 'item'), [nodes]);
+  const factionNodes = useMemo(() => nodes.filter((n) => n.type === 'faction'), [nodes]);
+  const locationNodes = useMemo(() => nodes.filter((n) => n.type === 'location'), [nodes]);
 
   const [formRarity, setFormRarity] = useState('Quý hiếm');
   const [formOrigin, setFormOrigin] = useState('');
@@ -136,7 +146,7 @@ export default function NodesDetailScreen() {
   const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
     setIsEditing(false);
     setEditingNodeId(null);
-    setFormId('');
+    setFormId(generateUniqueNodeId(defaultType, nodes));
     setFormName('');
     setFormType(defaultType);
     setFormRole(
@@ -150,7 +160,7 @@ export default function NodesDetailScreen() {
         ? 'CHÍNH PHÁI'
         : 'BIẾN CỐ'
     );
-    setFormSubType('');
+    setFormSubType(defaultType === 'character' ? 'Kiếm khách / Đao khách' : '');
     setFormStatus(
       defaultType === 'character'
         ? 'Còn sống'
@@ -164,6 +174,7 @@ export default function NodesDetailScreen() {
     );
     setFormDesc('');
     setFormDob('');
+    setFormBirthplace('');
     setFormGender('Nam');
     setFormWeapon('');
     setFormSect('');
@@ -198,6 +209,7 @@ export default function NodesDetailScreen() {
     setFormStatus(node.status || '');
     setFormDesc(node.desc || '');
     setFormDob(node.dob || '');
+    setFormBirthplace(node.birthplace || '');
     setFormGender(node.gender || 'Nam');
     setFormWeapon(node.weapon || '');
     setFormSect(node.sect || '');
@@ -245,6 +257,7 @@ export default function NodesDetailScreen() {
 
     if (formType === 'character') {
       if (formDob.trim()) payload.dob = formDob.trim();
+      if (formBirthplace.trim()) payload.birthplace = formBirthplace.trim();
       if (formGender.trim()) payload.gender = formGender.trim();
       if (formWeapon.trim()) payload.weapon = formWeapon.trim();
       if (formSect.trim()) payload.sect = formSect.trim();
@@ -443,7 +456,10 @@ export default function NodesDetailScreen() {
                 {/* Differentiated Attributes Summary Box */}
                 <View style={styles.attributesGrid}>
                   <Text style={styles.attrTagMono}>ID: {node.id}</Text>
-                  {node.dob ? <Text style={styles.attrTag}>📅 Sinh/Tuổi: {node.dob}</Text> : null}
+                  {node.dob ? <Text style={styles.attrTag}>📅 Ngày sinh: {node.dob}</Text> : null}
+                  {node.birthplace ? (
+                    <Text style={styles.attrTag}>📍 Nơi sinh: {node.birthplace}</Text>
+                  ) : null}
                   {node.gender ? <Text style={styles.attrTag}>⚧ Giới tính: {node.gender}</Text> : null}
                   {node.weapon ? <Text style={styles.attrTag}>⚔️ Binh khí: {node.weapon}</Text> : null}
                   {node.sect ? <Text style={styles.attrTag}>🏛️ Môn phái: {node.sect}</Text> : null}
@@ -570,6 +586,12 @@ export default function NodesDetailScreen() {
                       onPress={() => {
                         setFormType(t);
                         if (!isEditing) {
+                          setFormId(generateUniqueNodeId(t, nodes));
+                          if (t === 'character') {
+                            setFormSubType('Kiếm khách / Đao khách');
+                          } else {
+                            setFormSubType('');
+                          }
                           setFormStatus(
                             t === 'character'
                               ? 'Còn sống'
@@ -599,15 +621,25 @@ export default function NodesDetailScreen() {
               {/* ID & Name in Row */}
               <View style={styles.formRow}>
                 <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                  <Text style={styles.modalInputLabel}>Mã ID (tùy chọn)</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={formId}
-                    onChangeText={setFormId}
-                    placeholder="Để trống tự động sinh"
-                    placeholderTextColor="#665f52"
-                    editable={!isEditing}
-                  />
+                  <View style={styles.inputLabelRow}>
+                    <Text style={styles.modalInputLabel}>Mã ID</Text>
+                    <Text style={styles.autoIdBadge}>AUTO UNIQUE</Text>
+                  </View>
+                  <View style={styles.autoIdRow}>
+                    <TextInput
+                      style={[styles.modalInput, styles.autoIdInput]}
+                      value={formId}
+                      editable={false}
+                    />
+                    {!isEditing && (
+                      <Pressable
+                        style={styles.refreshIdBtn}
+                        onPress={() => setFormId(generateUniqueNodeId(formType, nodes))}
+                        hitSlop={8}>
+                        <Text style={styles.refreshIdText}>🔄 Đổi</Text>
+                      </Pressable>
+                    )}
+                  </View>
                 </View>
 
                 <View style={[styles.modalInputGroup, { flex: 1.5 }]}>
@@ -636,14 +668,31 @@ export default function NodesDetailScreen() {
                 </View>
 
                 <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                  <Text style={styles.modalInputLabel}>Phân loại phụ</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={formSubType}
-                    onChangeText={setFormSubType}
-                    placeholder="Ví dụ: KIẾM KHÁCH"
-                    placeholderTextColor="#665f52"
-                  />
+                  <Text style={styles.modalInputLabel}>
+                    {formType === 'character' ? 'Phân loại phụ (Nghề nghiệp)' : 'Phân loại phụ'}
+                  </Text>
+                  {formType === 'character' ? (
+                    <FormSelectField
+                      value={formSubType}
+                      onChange={setFormSubType}
+                      options={CHARACTER_PROFESSIONS.map((p) => ({
+                        label: p,
+                        value: p,
+                        icon: '🎭',
+                      }))}
+                      allowCustom
+                      placeholder="-- Chọn nghề nghiệp --"
+                      customPlaceholder="Tự nhập nghề nghiệp khác..."
+                    />
+                  ) : (
+                    <TextInput
+                      style={styles.modalInput}
+                      value={formSubType}
+                      onChangeText={setFormSubType}
+                      placeholder="Ví dụ: KIẾM KHÁCH"
+                      placeholderTextColor="#665f52"
+                    />
+                  )}
                 </View>
               </View>
 
@@ -665,15 +714,30 @@ export default function NodesDetailScreen() {
                   <Text style={styles.dynamicSectionHeader}>THÔNG TIN NHÂN VẬT</Text>
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Ngày sinh / Tuổi (DOB)</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <Text style={styles.modalInputLabel}>Ngày sinh</Text>
+                      <DatePickerField
                         value={formDob}
-                        onChangeText={setFormDob}
-                        placeholder="Ví dụ: 24 tuổi / 15-08-1042"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormDob}
+                        placeholder="Chọn ngày sinh"
                       />
                     </View>
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Nơi sinh ra</Text>
+                      <FormSelectField
+                        value={formBirthplace}
+                        onChange={setFormBirthplace}
+                        options={locationNodes.map((loc) => ({
+                          label: loc.name,
+                          value: loc.name,
+                          subtitle: loc.region || loc.role || 'Địa danh',
+                          icon: '📍',
+                        }))}
+                        placeholder="-- Chọn địa điểm --"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Giới tính</Text>
                       <TextInput
@@ -684,40 +748,47 @@ export default function NodesDetailScreen() {
                         placeholderTextColor="#665f52"
                       />
                     </View>
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Binh khí / Vật phẩm</Text>
+                      <FormSelectField
+                        value={formWeapon}
+                        onChange={setFormWeapon}
+                        options={itemNodes.map((it) => ({
+                          label: it.name,
+                          value: it.name,
+                          subtitle: it.rarity || it.role || 'Vật phẩm',
+                          icon: '🗡️',
+                        }))}
+                        placeholder="-- Chọn vật phẩm --"
+                      />
+                    </View>
                   </View>
 
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Binh khí / Vũ khí</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formWeapon}
-                        onChangeText={setFormWeapon}
-                        placeholder="Ví dụ: Huyền Thiết Kiếm"
-                        placeholderTextColor="#665f52"
+                      <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
+                      <FormSelectField
+                        value={formSect}
+                        onChange={setFormSect}
+                        options={factionNodes.map((fac) => ({
+                          label: fac.name,
+                          value: fac.name,
+                          subtitle: fac.alignment || fac.role || 'Môn phái',
+                          icon: '🏛️',
+                        }))}
+                        placeholder="-- Chọn môn phái --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
+                      <Text style={styles.modalInputLabel}>Tính cách</Text>
                       <TextInput
                         style={styles.modalInput}
-                        value={formSect}
-                        onChangeText={setFormSect}
-                        placeholder="Ví dụ: Bạch Liên Cốc"
+                        value={formPersonality}
+                        onChangeText={setFormPersonality}
+                        placeholder="Ví dụ: Trầm mặc, kiên định"
                         placeholderTextColor="#665f52"
                       />
                     </View>
-                  </View>
-
-                  <View style={styles.modalInputGroup}>
-                    <Text style={styles.modalInputLabel}>Tính cách</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={formPersonality}
-                      onChangeText={setFormPersonality}
-                      placeholder="Ví dụ: Trầm mặc, kiên định"
-                      placeholderTextColor="#665f52"
-                    />
                   </View>
                 </View>
               )}
@@ -1336,6 +1407,51 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     color: '#f5eee6',
     fontSize: 13.5,
+  },
+  inputLabelRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  autoIdBadge: {
+    fontSize: 9,
+    fontWeight: '700',
+    color: '#e5a93c',
+    backgroundColor: '#e5a93c15',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#e5a93c40',
+  },
+  autoIdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  autoIdInput: {
+    flex: 1,
+    backgroundColor: '#1b1713',
+    borderColor: '#3d3328',
+    color: '#e5a93c',
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
+    fontSize: 12,
+  },
+  refreshIdBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 9,
+    backgroundColor: '#26201a',
+    borderWidth: 1,
+    borderColor: '#4d3f32',
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  refreshIdText: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '600',
   },
   formRow: {
     flexDirection: 'row',

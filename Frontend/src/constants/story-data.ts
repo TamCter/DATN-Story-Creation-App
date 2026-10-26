@@ -10,6 +10,7 @@ export interface StoryNode {
   status?: string;
   // Character fields
   dob?: string;
+  birthplace?: string;
   gender?: string;
   weapon?: string;
   sect?: string;
@@ -144,6 +145,38 @@ export const NODE_TYPE_CONFIG = {
     badgeText: 'ĐỊA ĐIỂM',
   },
 } as const;
+
+export const CHARACTER_PROFESSIONS = [
+  'Kiếm khách / Đao khách',
+  'Y sư / Dược sư',
+  'Sát thủ / Thích khách',
+  'Pháp sư / Thuật sĩ',
+  'Tướng quân / Chiến binh',
+  'Mưu sĩ / Quân sư',
+  'Đạo sĩ / Tu sĩ',
+  'Luyện khí sư / Thợ rèn',
+  'Thương nhân / Phú thương',
+  'Tiêu sư / Hộ vệ',
+  'Hoàng tộc / Vương hầu',
+  'Thợ săn / Du hiệp',
+  'Chưởng môn / Bang chủ',
+  'Ẩn sĩ / Thần y',
+  'Khác (Nhập tùy chỉnh)',
+] as const;
+
+export function generateUniqueNodeId(type: StoryNode['type'] | string, existingNodes: StoryNode[] = []): string {
+  const prefix = (type ? type.slice(0, 4) : 'node').toLowerCase();
+  const existingSet = new Set(existingNodes.map((n) => (n.id || '').toLowerCase()));
+  for (let i = 0; i < 100; i++) {
+    const timePart = Date.now().toString(36).slice(-4);
+    const randPart = Math.random().toString(36).slice(2, 6);
+    const candidate = `${prefix}-${timePart}-${randPart}`;
+    if (!existingSet.has(candidate)) {
+      return candidate;
+    }
+  }
+  return `${prefix}-${Date.now().toString(36)}`;
+}
 
 export const INITIAL_PROJECTS: StoryProject[] = [
   {

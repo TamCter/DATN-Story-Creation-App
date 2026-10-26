@@ -294,17 +294,34 @@ export default function CharactersScreen() {
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🗡 Binh khí:</Text>
-                    <Text style={styles.metaValueHighlight}>{extra.weapon}</Text>
+                    <Text style={styles.metaValueHighlight}>{char.weapon || extra.weapon}</Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🏛 Môn phái:</Text>
-                    <Text style={styles.metaValue}>{extra.sect}</Text>
+                    <Text style={styles.metaValue}>{char.sect || extra.sect}</Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>⚡ Trạng thái:</Text>
-                    <Text style={styles.metaValue}>{extra.status}</Text>
+                    <Text style={styles.metaValue}>{char.status || extra.status}</Text>
                   </View>
                 </View>
+
+                {(char.dob || char.birthplace) && (
+                  <View style={[styles.metaRow, { marginTop: 6 }]}>
+                    {char.dob ? (
+                      <View style={styles.metaItem}>
+                        <Text style={styles.metaLabel}>📅 Ngày sinh:</Text>
+                        <Text style={styles.metaValue}>{char.dob}</Text>
+                      </View>
+                    ) : null}
+                    {char.birthplace ? (
+                      <View style={styles.metaItem}>
+                        <Text style={styles.metaLabel}>📍 Nơi sinh:</Text>
+                        <Text style={styles.metaValueHighlight}>{char.birthplace}</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                )}
 
                 {/* Relationship Chips */}
                 {extra.connections && extra.connections.length > 0 && (
