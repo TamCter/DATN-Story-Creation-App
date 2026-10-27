@@ -225,6 +225,7 @@ class ApiService {
       project: any;
       nodes: any[];
       links: any[];
+      chapters?: any[];
       stats?: any;
     };
     message?: string;
@@ -235,6 +236,7 @@ class ApiService {
         project: any;
         nodes: any[];
         links: any[];
+        chapters?: any[];
         stats?: any;
       };
       message?: string;
@@ -290,6 +292,51 @@ class ApiService {
 
   async deleteNode(nodeId: string): Promise<{ success: boolean; message: string }> {
     return this.request<{ success: boolean; message: string }>(`/nodes/${nodeId}`, {
+      method: 'DELETE',
+    });
+  }
+
+  // Chapter APIs
+  async getChapters(projectId: string): Promise<{ success: boolean; data: any[]; count: number; message?: string }> {
+    return this.request<{ success: boolean; data: any[]; count: number; message?: string }>(
+      `/projects/${projectId}/chapters`,
+      { method: 'GET' }
+    );
+  }
+
+  async createChapter(
+    projectId: string,
+    payload: {
+      chapterNumber?: number;
+      title: string;
+      desc?: string;
+      events?: any[];
+    }
+  ): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(
+      `/projects/${projectId}/chapters`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async updateChapter(
+    chapterId: string,
+    payload: any
+  ): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>(
+      `/chapters/${chapterId}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async deleteChapter(chapterId: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/chapters/${chapterId}`, {
       method: 'DELETE',
     });
   }

@@ -105,17 +105,6 @@ export function FormSelectField({
         </View>
 
         <View style={styles.rightAction}>
-          {value ? (
-            <Pressable
-              hitSlop={8}
-              onPress={(e) => {
-                e.stopPropagation();
-                onChange('');
-                setCustomVal('');
-              }}>
-              <Text style={styles.clearBtnText}>✕</Text>
-            </Pressable>
-          ) : null}
           <Text style={styles.chevronIcon}>▼</Text>
         </View>
       </Pressable>
@@ -139,11 +128,15 @@ export function FormSelectField({
       {/* Selection Modal */}
       <Modal visible={modalVisible} transparent animationType="fade">
         <View style={styles.modalBackdrop}>
+          <Pressable
+            style={StyleSheet.absoluteFill}
+            onPress={() => setModalVisible(false)}
+          />
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Lựa chọn danh mục</Text>
               <Pressable onPress={() => setModalVisible(false)} hitSlop={10}>
-                <Text style={styles.closeBtn}>✕</Text>
+                <Text style={styles.closeBtn}>Đóng</Text>
               </Pressable>
             </View>
 
@@ -331,9 +324,15 @@ const styles = StyleSheet.create({
     color: '#e5a93c',
   },
   closeBtn: {
-    color: '#8c7d6b',
-    fontSize: 16,
-    fontWeight: 'bold',
+    color: '#e5a93c',
+    fontSize: 13,
+    fontWeight: '600',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+    backgroundColor: '#26201a',
+    borderWidth: 1,
+    borderColor: '#3d3328',
   },
   searchInput: {
     backgroundColor: '#26201a',

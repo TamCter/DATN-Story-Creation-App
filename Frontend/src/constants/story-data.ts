@@ -38,6 +38,7 @@ export interface StoryNode {
   location?: string;
   chapter?: string;
   impact?: string;
+  statusEvent?: string;
   createdAt?: number;
   updatedAt?: number;
 }
@@ -672,23 +673,70 @@ export function getProjectChapters(project: StoryProject): StoryChapter[] {
   if (project.chapters && project.chapters.length > 0) {
     return project.chapters;
   }
-  return [
-    {
-      id: 'c1',
-      chapterNumber: 1,
-      code: 'C1',
-      title: project.title,
-      shortTitle: 'C1 ' + project.title,
-      watermark: project.title.toUpperCase(),
-      desc: project.genre,
-      events: (project.events || []).map((e) => ({
-        id: e.id,
-        title: e.title,
-        desc: e.desc,
-      })),
-      nodes: project.nodes,
-      links: project.links,
-    },
-  ];
+  return [];
 }
+
+export const CHARACTER_STATUS_OPTIONS = [
+  { label: 'Còn sống', value: 'Còn sống', icon: '🟢' },
+  { label: 'Đã chết', value: 'Đã chết', icon: '💀' },
+  { label: 'Hồi sinh', value: 'Hồi sinh', icon: '✨' },
+];
+
+export const FACTION_STATUS_OPTIONS = [
+  { label: 'Hưng thịnh', value: 'Hưng thịnh', icon: '🔥' },
+  { label: 'Suy tàn', value: 'Suy tàn', icon: '🍂' },
+];
+
+export const FACTION_CLASSIFICATIONS = [
+  { label: 'Chính phái', value: 'Chính phái', icon: '⚪' },
+  { label: 'Tà phái', value: 'Tà phái', icon: '⚫' },
+  { label: 'Trung lập', value: 'Trung lập', icon: '🟡' },
+];
+
+export const ITEM_RARITY_OPTIONS = [
+  { label: 'Phổ thông', value: 'Phổ thông', icon: '⚪' },
+  { label: 'Hiếm', value: 'Hiếm', icon: '🔵' },
+  { label: 'Quý hiếm', value: 'Quý hiếm', icon: '🟣' },
+  { label: 'Cực phẩm', value: 'Cực phẩm', icon: '🟠' },
+  { label: 'Truyền thuyết', value: 'Truyền thuyết', icon: '🔴' },
+  { label: 'Thần vật', value: 'Thần vật', icon: '🌟' },
+  { label: 'Nghịch thiên', value: 'Nghịch thiên', icon: '👑' },
+];
+
+export const LOCATION_REGION_OPTIONS = [
+  'Đông Vực',
+  'Tây Vực',
+  'Nam Vực',
+  'Bắc Vực',
+  'Trung Châu',
+  'Hải Ngoại',
+  'Vùng biên cương',
+  'Bí cảnh viễn cổ',
+  'Hư không',
+].map((r) => ({ label: r, value: r, icon: '🧭' }));
+
+export const LOCATION_DANGER_OPTIONS = [
+  'Tuyệt đối an toàn',
+  'Bình thường',
+  'Nguy hiểm',
+  'Hiểm địa',
+  'Tuyệt địa / Cấm địa',
+].map((d) => ({ label: d, value: d, icon: '⚠️' }));
+
+export const LOCATION_CLIMATE_OPTIONS = [
+  'Ôn hòa',
+  'Băng giá tuyết phủ',
+  'Nóng bức sa mạc',
+  'Mưa ẩm đầm lầy',
+  'Sấm sét bão bùng',
+  'Hỗn độn linh khí',
+].map((c) => ({ label: c, value: c, icon: '🌤️' }));
+
+export const GENDER_OPTIONS = [
+  { label: 'Nam', value: 'Nam', icon: '♂️' },
+  { label: 'Nữ', value: 'Nữ', icon: '♀️' },
+  { label: 'Khác / Chưa rõ', value: 'Khác', icon: '⚧' },
+];
+
+
 

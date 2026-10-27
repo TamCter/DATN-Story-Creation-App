@@ -17,8 +17,17 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   CHARACTER_PROFESSIONS,
+  CHARACTER_STATUS_OPTIONS,
+  FACTION_CLASSIFICATIONS,
+  FACTION_STATUS_OPTIONS,
+  GENDER_OPTIONS,
   generateUniqueNodeId,
+  getProjectChapters,
   INITIAL_PROJECTS,
+  ITEM_RARITY_OPTIONS,
+  LOCATION_CLIMATE_OPTIONS,
+  LOCATION_DANGER_OPTIONS,
+  LOCATION_REGION_OPTIONS,
   NODE_TYPE_CONFIG,
   StoryNode,
   StoryProject,
@@ -81,9 +90,14 @@ export default function NodesDetailScreen() {
   const [formPersonality, setFormPersonality] = useState('');
 
   // Available node categories for relation selections
+  const characterNodes = useMemo(() => nodes.filter((n) => n.type === 'character'), [nodes]);
   const itemNodes = useMemo(() => nodes.filter((n) => n.type === 'item'), [nodes]);
   const factionNodes = useMemo(() => nodes.filter((n) => n.type === 'faction'), [nodes]);
   const locationNodes = useMemo(() => nodes.filter((n) => n.type === 'location'), [nodes]);
+  const eventNodes = useMemo(() => nodes.filter((n) => n.type === 'event'), [nodes]);
+  const chapters = useMemo(() => getProjectChapters(currentProject), [currentProject]);
+
+  const [formStatusEvent, setFormStatusEvent] = useState('');
 
   const [formRarity, setFormRarity] = useState('Quý hiếm');
   const [formOrigin, setFormOrigin] = useState('');
@@ -91,9 +105,10 @@ export default function NodesDetailScreen() {
   const [formPower, setFormPower] = useState('');
   const [formHolder, setFormHolder] = useState('');
 
-  const [formRegion, setFormRegion] = useState('');
+  const [formRegion, setFormRegion] = useState('Đông Vực');
   const [formTerrain, setFormTerrain] = useState('');
-  const [formDangerLevel, setFormDangerLevel] = useState('An toàn');
+  const [formDangerLevel, setFormDangerLevel] = useState('Tuyệt đối an toàn');
+  const [formClimate, setFormClimate] = useState('Ôn hòa');
   const [formRuler, setFormRuler] = useState('');
 
   const [formLeader, setFormLeader] = useState('');
@@ -101,6 +116,7 @@ export default function NodesDetailScreen() {
   const [formMotto, setFormMotto] = useState('');
   const [formAlignment, setFormAlignment] = useState<string>('CHÍNH PHÁI');
 
+  const [formChapter, setFormChapter] = useState('');
   const [formTime, setFormTime] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formImpact, setFormImpact] = useState('');
@@ -149,29 +165,24 @@ export default function NodesDetailScreen() {
     setFormId(generateUniqueNodeId(defaultType, nodes));
     setFormName('');
     setFormType(defaultType);
-    setFormRole(
+    setFormRole(defaultType === 'character' ? 'CHÍNH DIỆN' : defaultType === 'event' ? 'BIẾN CỐ' : '');
+    setFormSubType(
       defaultType === 'character'
-        ? 'CHÍNH DIỆN'
-        : defaultType === 'item'
-        ? 'BẢO VẬT'
-        : defaultType === 'location'
-        ? 'ĐỊA DANH'
+        ? 'Kiếm khách / Đao khách'
         : defaultType === 'faction'
-        ? 'CHÍNH PHÁI'
-        : 'BIẾN CỐ'
+        ? 'Chính phái'
+        : ''
     );
-    setFormSubType(defaultType === 'character' ? 'Kiếm khách / Đao khách' : '');
     setFormStatus(
       defaultType === 'character'
         ? 'Còn sống'
-        : defaultType === 'item'
-        ? 'Nguyên vẹn'
-        : defaultType === 'location'
-        ? 'Hoạt động'
         : defaultType === 'faction'
         ? 'Hưng thịnh'
-        : 'Đã diễn ra'
+        : defaultType === 'event'
+        ? 'Đã diễn ra'
+        : 'Hoạt động'
     );
+    setFormStatusEvent('');
     setFormDesc('');
     setFormDob('');
     setFormBirthplace('');
@@ -184,15 +195,17 @@ export default function NodesDetailScreen() {
     setFormElement('');
     setFormPower('');
     setFormHolder('');
-    setFormRegion('');
+    setFormRegion('Đông Vực');
     setFormTerrain('');
-    setFormDangerLevel('An toàn');
+    setFormDangerLevel('Tuyệt đối an toàn');
+    setFormClimate('Ôn hòa');
     setFormRuler('');
     setFormLeader('');
     setFormHeadquarters('');
     setFormMotto('');
     setFormAlignment('CHÍNH PHÁI');
-    setFormTime('');
+    setFormChapter(chapters[0]?.title || '');
+    setFormTime(chapters[0]?.title || '');
     setFormLocation('');
     setFormImpact('');
     setModalOpen(true);
@@ -205,8 +218,9 @@ export default function NodesDetailScreen() {
     setFormName(node.name || '');
     setFormType(node.type || 'character');
     setFormRole(node.role || '');
-    setFormSubType(node.subType || '');
-    setFormStatus(node.status || '');
+    setFormSubType(node.subType || (node.type === 'faction' ? 'Chính phái' : ''));
+    setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Hưng thịnh' : 'Hoạt động'));
+    setFormStatusEvent(node.statusEvent || '');
     setFormDesc(node.desc || '');
     setFormDob(node.dob || '');
     setFormBirthplace(node.birthplace || '');
@@ -219,15 +233,17 @@ export default function NodesDetailScreen() {
     setFormElement(node.element || '');
     setFormPower(node.power || '');
     setFormHolder(node.holderOrLocation || '');
-    setFormRegion(node.region || '');
+    setFormRegion(node.region || 'Đông Vực');
     setFormTerrain(node.terrain || '');
-    setFormDangerLevel(node.dangerLevel || 'An toàn');
+    setFormDangerLevel(node.dangerLevel || 'Tuyệt đối an toàn');
+    setFormClimate(node.climate || 'Ôn hòa');
     setFormRuler(node.ruler || '');
     setFormLeader(node.leader || '');
     setFormHeadquarters(node.headquarters || '');
     setFormMotto(node.motto || '');
     setFormAlignment(node.alignment || 'CHÍNH PHÁI');
-    setFormTime(node.time || '');
+    setFormChapter(node.chapter || node.time || '');
+    setFormTime(node.time || node.chapter || '');
     setFormLocation(node.location || '');
     setFormImpact(node.impact || '');
     setModalOpen(true);
@@ -247,15 +263,18 @@ export default function NodesDetailScreen() {
     const payload: Partial<StoryNode> = {
       name: formName.trim(),
       type: formType,
-      role: formRole.trim(),
-      subType: formSubType.trim(),
-      status: formStatus.trim(),
       desc: formDesc.trim(),
     };
 
     if (formId.trim()) payload.id = formId.trim();
 
     if (formType === 'character') {
+      payload.role = formRole.trim();
+      payload.subType = formSubType.trim();
+      payload.status = formStatus.trim() || 'Còn sống';
+      if ((formStatus === 'Đã chết' || formStatus === 'Hồi sinh') && formStatusEvent.trim()) {
+        payload.statusEvent = formStatusEvent.trim();
+      }
       if (formDob.trim()) payload.dob = formDob.trim();
       if (formBirthplace.trim()) payload.birthplace = formBirthplace.trim();
       if (formGender.trim()) payload.gender = formGender.trim();
@@ -263,25 +282,41 @@ export default function NodesDetailScreen() {
       if (formSect.trim()) payload.sect = formSect.trim();
       if (formPersonality.trim()) payload.personality = formPersonality.trim();
     } else if (formType === 'item') {
-      if (formRarity.trim()) payload.rarity = formRarity.trim();
+      payload.role = '';
+      payload.subType = '';
+      payload.status = 'Nguyên vẹn';
+      payload.rarity = formRarity.trim() || 'Quý hiếm';
       if (formOrigin.trim()) payload.origin = formOrigin.trim();
-      if (formElement.trim()) payload.element = formElement.trim();
-      if (formPower.trim()) payload.power = formPower.trim();
       if (formHolder.trim()) payload.holderOrLocation = formHolder.trim();
+      if (formElement.trim()) payload.element = formElement.trim();
     } else if (formType === 'location') {
-      if (formRegion.trim()) payload.region = formRegion.trim();
-      if (formTerrain.trim()) payload.terrain = formTerrain.trim();
-      if (formDangerLevel.trim()) payload.dangerLevel = formDangerLevel.trim();
+      payload.role = '';
+      payload.subType = '';
+      payload.status = 'Hoạt động';
+      payload.region = formRegion.trim() || 'Đông Vực';
+      payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
+      payload.climate = formClimate.trim() || 'Ôn hòa';
       if (formRuler.trim()) payload.ruler = formRuler.trim();
     } else if (formType === 'faction') {
+      payload.role = '';
+      payload.subType = formSubType.trim() || 'Chính phái';
+      payload.status = formStatus.trim() || 'Hưng thịnh';
+      if (formStatus === 'Suy tàn' && formStatusEvent.trim()) {
+        payload.statusEvent = formStatusEvent.trim();
+      }
       if (formLeader.trim()) payload.leader = formLeader.trim();
       if (formHeadquarters.trim()) payload.headquarters = formHeadquarters.trim();
       if (formMotto.trim()) payload.motto = formMotto.trim();
-      if (formAlignment.trim()) payload.alignment = formAlignment.trim();
     } else if (formType === 'event') {
-      if (formTime.trim()) payload.time = formTime.trim();
+      payload.role = formRole.trim() || 'BIẾN CỐ';
+      payload.subType = formSubType.trim();
+      payload.status = formStatus.trim() || 'Đã diễn ra';
+      const chVal = formChapter.trim() || formTime.trim();
+      if (chVal) {
+        payload.chapter = chVal;
+        payload.time = chVal;
+      }
       if (formLocation.trim()) payload.location = formLocation.trim();
-      if (formImpact.trim()) payload.impact = formImpact.trim();
     }
 
     try {
@@ -618,92 +653,14 @@ export default function NodesDetailScreen() {
                 </View>
               </View>
 
-              {/* ID & Name in Row */}
-              <View style={styles.formRow}>
-                <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                  <View style={styles.inputLabelRow}>
-                    <Text style={styles.modalInputLabel}>Mã ID</Text>
-                    <Text style={styles.autoIdBadge}>AUTO UNIQUE</Text>
-                  </View>
-                  <View style={styles.autoIdRow}>
-                    <TextInput
-                      style={[styles.modalInput, styles.autoIdInput]}
-                      value={formId}
-                      editable={false}
-                    />
-                    {!isEditing && (
-                      <Pressable
-                        style={styles.refreshIdBtn}
-                        onPress={() => setFormId(generateUniqueNodeId(formType, nodes))}
-                        hitSlop={8}>
-                        <Text style={styles.refreshIdText}>🔄 Đổi</Text>
-                      </Pressable>
-                    )}
-                  </View>
-                </View>
-
-                <View style={[styles.modalInputGroup, { flex: 1.5 }]}>
-                  <Text style={styles.modalInputLabel}>Tên thực thể *</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={formName}
-                    onChangeText={setFormName}
-                    placeholder="Nhập tên thực thể..."
-                    placeholderTextColor="#665f52"
-                  />
-                </View>
-              </View>
-
-              {/* Role & SubType */}
-              <View style={styles.formRow}>
-                <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                  <Text style={styles.modalInputLabel}>Vai trò / Nhãn</Text>
-                  <TextInput
-                    style={styles.modalInput}
-                    value={formRole}
-                    onChangeText={setFormRole}
-                    placeholder="Ví dụ: NHÂN VẬT CHÍNH"
-                    placeholderTextColor="#665f52"
-                  />
-                </View>
-
-                <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                  <Text style={styles.modalInputLabel}>
-                    {formType === 'character' ? 'Phân loại phụ (Nghề nghiệp)' : 'Phân loại phụ'}
-                  </Text>
-                  {formType === 'character' ? (
-                    <FormSelectField
-                      value={formSubType}
-                      onChange={setFormSubType}
-                      options={CHARACTER_PROFESSIONS.map((p) => ({
-                        label: p,
-                        value: p,
-                        icon: '🎭',
-                      }))}
-                      allowCustom
-                      placeholder="-- Chọn nghề nghiệp --"
-                      customPlaceholder="Tự nhập nghề nghiệp khác..."
-                    />
-                  ) : (
-                    <TextInput
-                      style={styles.modalInput}
-                      value={formSubType}
-                      onChangeText={setFormSubType}
-                      placeholder="Ví dụ: KIẾM KHÁCH"
-                      placeholderTextColor="#665f52"
-                    />
-                  )}
-                </View>
-              </View>
-
-              {/* Status */}
+              {/* Name Input (Single Clean Input, no Auto Unique ID) */}
               <View style={styles.modalInputGroup}>
-                <Text style={styles.modalInputLabel}>Trạng thái</Text>
+                <Text style={styles.modalInputLabel}>Tên thực thể *</Text>
                 <TextInput
                   style={styles.modalInput}
-                  value={formStatus}
-                  onChangeText={setFormStatus}
-                  placeholder="Còn sống / Hoạt động / Nguyên vẹn..."
+                  value={formName}
+                  onChangeText={setFormName}
+                  placeholder="Nhập tên thực thể..."
                   placeholderTextColor="#665f52"
                 />
               </View>
@@ -712,6 +669,70 @@ export default function NodesDetailScreen() {
               {formType === 'character' && (
                 <View style={styles.dynamicSectionBox}>
                   <Text style={styles.dynamicSectionHeader}>THÔNG TIN NHÂN VẬT</Text>
+
+                  {/* Role & Profession */}
+                  <View style={styles.formRow}>
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Vai trò / Nhãn</Text>
+                      <TextInput
+                        style={styles.modalInput}
+                        value={formRole}
+                        onChangeText={setFormRole}
+                        placeholder="Ví dụ: NHÂN VẬT CHÍNH"
+                        placeholderTextColor="#665f52"
+                      />
+                    </View>
+
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Phân loại phụ (Nghề nghiệp)</Text>
+                      <FormSelectField
+                        value={formSubType}
+                        onChange={setFormSubType}
+                        options={CHARACTER_PROFESSIONS.map((p) => ({
+                          label: p,
+                          value: p,
+                          icon: '🎭',
+                        }))}
+                        allowCustom
+                        placeholder="-- Chọn nghề nghiệp --"
+                        customPlaceholder="Tự nhập nghề nghiệp khác..."
+                      />
+                    </View>
+                  </View>
+
+                  {/* Status Dropdown (Còn sống / Đã chết / Hồi sinh) */}
+                  <View style={styles.formRow}>
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Trạng thái hiện tại</Text>
+                      <FormSelectField
+                        value={formStatus}
+                        onChange={setFormStatus}
+                        options={CHARACTER_STATUS_OPTIONS}
+                        placeholder="-- Chọn trạng thái --"
+                      />
+                    </View>
+
+                    {(formStatus === 'Đã chết' || formStatus === 'Hồi sinh') && (
+                      <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                        <Text style={styles.modalInputLabel}>
+                          Sự kiện {formStatus === 'Đã chết' ? 'tử nạn' : 'hồi sinh'}
+                        </Text>
+                        <FormSelectField
+                          value={formStatusEvent}
+                          onChange={setFormStatusEvent}
+                          options={eventNodes.map((e) => ({
+                            label: e.name,
+                            value: e.name,
+                            subtitle: e.chapter || 'Biến cố',
+                            icon: '⚡',
+                          }))}
+                          placeholder="-- Chọn sự kiện --"
+                        />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Dob & Birthplace */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Ngày sinh</Text>
@@ -737,15 +758,15 @@ export default function NodesDetailScreen() {
                     </View>
                   </View>
 
+                  {/* Gender & Weapon */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Giới tính</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formGender}
-                        onChangeText={setFormGender}
-                        placeholder="Nam / Nữ / Khác"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormGender}
+                        options={GENDER_OPTIONS}
+                        placeholder="-- Chọn giới tính --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -764,6 +785,7 @@ export default function NodesDetailScreen() {
                     </View>
                   </View>
 
+                  {/* Sect & Personality */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
@@ -802,58 +824,42 @@ export default function NodesDetailScreen() {
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Độ hiếm</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formRarity}
-                        onChangeText={setFormRarity}
-                        placeholder="Ví dụ: Thần binh thượng cổ · Chí tôn"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormRarity}
+                        options={ITEM_RARITY_OPTIONS}
+                        placeholder="-- Chọn độ hiếm --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Thuộc tính / Nguyên tố</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formElement}
-                        onChangeText={setFormElement}
-                        placeholder="Ví dụ: Sát khí · Băng tuyết"
-                        placeholderTextColor="#665f52"
+                      <Text style={styles.modalInputLabel}>Nguồn gốc xuất xứ</Text>
+                      <FormSelectField
+                        value={formOrigin}
+                        onChange={setFormOrigin}
+                        options={locationNodes.map((loc) => ({
+                          label: loc.name,
+                          value: loc.name,
+                          subtitle: loc.region || 'Địa danh',
+                          icon: '📍',
+                        }))}
+                        placeholder="-- Chọn nguồn gốc (Địa danh) --"
                       />
                     </View>
                   </View>
 
                   <View style={styles.modalInputGroup}>
-                    <Text style={styles.modalInputLabel}>Nguồn gốc / Xuất xứ</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={formOrigin}
-                      onChangeText={setFormOrigin}
-                      placeholder="Ví dụ: Rèn từ Thiên Ngoại Thần Thiết"
-                      placeholderTextColor="#665f52"
+                    <Text style={styles.modalInputLabel}>Người sở hữu / Nắm giữ</Text>
+                    <FormSelectField
+                      value={formHolder}
+                      onChange={setFormHolder}
+                      options={characterNodes.map((c) => ({
+                        label: c.name,
+                        value: c.name,
+                        subtitle: c.role || 'Nhân vật',
+                        icon: '👤',
+                      }))}
+                      placeholder="-- Chọn người sở hữu --"
                     />
-                  </View>
-
-                  <View style={styles.formRow}>
-                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Uy lực / Công năng</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formPower}
-                        onChangeText={setFormPower}
-                        placeholder="Ví dụ: Chém sắt như bùn"
-                        placeholderTextColor="#665f52"
-                      />
-                    </View>
-                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Người giữ / Nơi cất giấu</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formHolder}
-                        onChangeText={setFormHolder}
-                        placeholder="Ví dụ: Lăng Tiêu đang nắm giữ"
-                        placeholderTextColor="#665f52"
-                      />
-                    </View>
                   </View>
                 </View>
               )}
@@ -867,45 +873,46 @@ export default function NodesDetailScreen() {
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Khu vực / Phương hướng</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formRegion}
-                        onChangeText={setFormRegion}
-                        placeholder="Ví dụ: Phương Bắc"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormRegion}
+                        options={LOCATION_REGION_OPTIONS}
+                        placeholder="-- Chọn khu vực --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Mức độ nguy hiểm</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formDangerLevel}
-                        onChangeText={setFormDangerLevel}
-                        placeholder="An toàn / Hiểm địa / Cấm địa"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormDangerLevel}
+                        options={LOCATION_DANGER_OPTIONS}
+                        placeholder="-- Chọn mức độ nguy hiểm --"
                       />
                     </View>
                   </View>
 
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Địa thế / Khí hậu</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formTerrain}
-                        onChangeText={setFormTerrain}
-                        placeholder="Ví dụ: Núi đá tuyết phủ hiểm trở"
-                        placeholderTextColor="#665f52"
+                      <Text style={styles.modalInputLabel}>Khí hậu đặc trưng</Text>
+                      <FormSelectField
+                        value={formClimate}
+                        onChange={setFormClimate}
+                        options={LOCATION_CLIMATE_OPTIONS}
+                        placeholder="-- Chọn khí hậu --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Thế lực cai quản</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formRuler}
-                        onChangeText={setFormRuler}
-                        placeholder="Ví dụ: Thiên Hạ Minh"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormRuler}
+                        options={factionNodes.map((fac) => ({
+                          label: fac.name,
+                          value: fac.name,
+                          subtitle: fac.alignment || 'Môn phái',
+                          icon: '🏛️',
+                        }))}
+                        placeholder="-- Chọn thế lực cai quản --"
                       />
                     </View>
                   </View>
@@ -918,38 +925,76 @@ export default function NodesDetailScreen() {
                   <Text style={[styles.dynamicSectionHeader, { color: '#d95a38' }]}>
                     THÔNG TIN PHE PHÁI / MÔN PHÁI
                   </Text>
+                  <View style={styles.modalInputGroup}>
+                    <Text style={styles.modalInputLabel}>Phân loại môn phái (Chính / Tà)</Text>
+                    <FormSelectField
+                      value={formSubType}
+                      onChange={setFormSubType}
+                      options={FACTION_CLASSIFICATIONS}
+                      placeholder="-- Chọn chính hoặc tà --"
+                    />
+                  </View>
+
+                  {/* Status Dropdown (Hưng thịnh / Suy tàn) */}
+                  <View style={styles.formRow}>
+                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                      <Text style={styles.modalInputLabel}>Trạng thái phe phái</Text>
+                      <FormSelectField
+                        value={formStatus}
+                        onChange={setFormStatus}
+                        options={FACTION_STATUS_OPTIONS}
+                        placeholder="-- Chọn trạng thái --"
+                      />
+                    </View>
+
+                    {formStatus === 'Suy tàn' && (
+                      <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                        <Text style={styles.modalInputLabel}>Sự kiện dẫn đến suy tàn</Text>
+                        <FormSelectField
+                          value={formStatusEvent}
+                          onChange={setFormStatusEvent}
+                          options={eventNodes.map((e) => ({
+                            label: e.name,
+                            value: e.name,
+                            subtitle: e.chapter || 'Biến cố',
+                            icon: '⚡',
+                          }))}
+                          placeholder="-- Chọn sự kiện --"
+                        />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Minh chủ & Căn cứ */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Minh chủ / Thủ lĩnh</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formLeader}
-                        onChangeText={setFormLeader}
-                        placeholder="Ví dụ: Triệu Vô Cực"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormLeader}
+                        options={characterNodes.map((c) => ({
+                          label: c.name,
+                          value: c.name,
+                          subtitle: c.role || 'Nhân vật',
+                          icon: '👤',
+                        }))}
+                        placeholder="-- Chọn thủ lĩnh --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Lập trường</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formAlignment}
-                        onChangeText={setFormAlignment}
-                        placeholder="CHÍNH PHÁI / TRUNG LẬP / TÀ PHÁI"
-                        placeholderTextColor="#665f52"
+                      <Text style={styles.modalInputLabel}>Tổng đàn / Căn cứ địa</Text>
+                      <FormSelectField
+                        value={formHeadquarters}
+                        onChange={setFormHeadquarters}
+                        options={locationNodes.map((l) => ({
+                          label: l.name,
+                          value: l.name,
+                          subtitle: l.region || 'Địa danh',
+                          icon: '📍',
+                        }))}
+                        placeholder="-- Chọn căn cứ --"
                       />
                     </View>
-                  </View>
-
-                  <View style={styles.modalInputGroup}>
-                    <Text style={styles.modalInputLabel}>Tổng đàn / Căn cứ địa</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={formHeadquarters}
-                      onChangeText={setFormHeadquarters}
-                      placeholder="Ví dụ: Hàn Nguyệt Thành · Tổng đàn"
-                      placeholderTextColor="#665f52"
-                    />
                   </View>
 
                   <View style={styles.modalInputGroup}>
@@ -958,7 +1003,7 @@ export default function NodesDetailScreen() {
                       style={styles.modalInput}
                       value={formMotto}
                       onChangeText={setFormMotto}
-                      placeholder="Ví dụ: Quy tụ võ lâm"
+                      placeholder="Ví dụ: Quy tụ võ lâm / Trảm yêu trừ ma..."
                       placeholderTextColor="#665f52"
                     />
                   </View>
@@ -973,36 +1018,32 @@ export default function NodesDetailScreen() {
                   </Text>
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Thời điểm / Chương</Text>
-                      <TextInput
-                        style={styles.modalInput}
-                        value={formTime}
-                        onChangeText={setFormTime}
-                        placeholder="Ví dụ: Chương 1"
-                        placeholderTextColor="#665f52"
+                      <Text style={styles.modalInputLabel}>Chương</Text>
+                      <FormSelectField
+                        value={formChapter}
+                        onChange={setFormChapter}
+                        options={chapters.map((ch) => ({
+                          label: `Chương ${ch.chapterNumber}: ${ch.title}`,
+                          value: ch.title,
+                          subtitle: ch.desc,
+                        }))}
+                        placeholder="-- Chọn chương --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Nơi diễn ra</Text>
-                      <TextInput
-                        style={styles.modalInput}
+                      <FormSelectField
                         value={formLocation}
-                        onChangeText={setFormLocation}
-                        placeholder="Ví dụ: Ngoại ô Hàn Nguyệt Thành"
-                        placeholderTextColor="#665f52"
+                        onChange={setFormLocation}
+                        options={locationNodes.map((loc) => ({
+                          label: loc.name,
+                          value: loc.name,
+                          subtitle: loc.region || 'Địa danh',
+                          icon: '📍',
+                        }))}
+                        placeholder="-- Chọn nơi diễn ra --"
                       />
                     </View>
-                  </View>
-
-                  <View style={styles.modalInputGroup}>
-                    <Text style={styles.modalInputLabel}>Mức độ ảnh hưởng</Text>
-                    <TextInput
-                      style={styles.modalInput}
-                      value={formImpact}
-                      onChangeText={setFormImpact}
-                      placeholder="Ví dụ: Diệt môn, biến chuyển võ lâm"
-                      placeholderTextColor="#665f52"
-                    />
                   </View>
                 </View>
               )}

@@ -39,10 +39,30 @@ async function getProjectGraph(req, res, next) {
     `;
     const linkRecords = await runQuery(linksQuery, { projectId }, 'READ');
 
+    // 3.5 Lấy chapters của dự án
+    const chaptersQuery = `
+      MATCH (c:Chapter)-[:BELONGS_TO]->(p:Project { id: $projectId })
+      RETURN c
+      ORDER BY c.chapterNumber ASC, c.createdAt ASC
+    `;
+    const chapterRecords = await runQuery(chaptersQuery, { projectId }, 'READ');
+    const chapters = chapterRecords.map((r) => {
+      const chapter = r.c;
+      if (typeof chapter.events === 'string') {
+        try {
+          chapter.events = JSON.parse(chapter.events);
+        } catch {
+          chapter.events = [];
+        }
+      }
+      return chapter;
+    });
+
     // 4. Thống kê theo node type
     const stats = {
       totalNodes: nodes.length,
       totalLinks: linkRecords.length,
+      totalChapters: chapters.length,
       characters: nodes.filter((n) => n.type === 'character').length,
       items: nodes.filter((n) => n.type === 'item').length,
       factions: nodes.filter((n) => n.type === 'faction').length,
@@ -56,6 +76,7 @@ async function getProjectGraph(req, res, next) {
         project: projectRecords[0].p,
         nodes,
         links: linkRecords,
+        chapters,
         stats,
       },
     });

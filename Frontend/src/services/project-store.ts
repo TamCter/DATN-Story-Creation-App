@@ -59,13 +59,14 @@ export class ProjectStore {
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
-        const { project, nodes = [], links = [] } = res.data;
+        const { project, nodes = [], links = [], chapters = [] } = res.data;
         const fullProject: StoryProject = {
           ...project,
           nodeCount: nodes.length,
           linkCount: links.length,
           nodes: nodes as StoryNode[],
           links: links as StoryLink[],
+          chapters: Array.isArray(chapters) && chapters.length > 0 ? (chapters as StoryChapter[]) : project.chapters,
         };
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject);
@@ -185,6 +186,7 @@ export class ProjectStore {
       location: nodeData.location?.trim() || '',
       chapter: nodeData.chapter?.trim() || '',
       impact: nodeData.impact?.trim() || '',
+      statusEvent: nodeData.statusEvent?.trim() || '',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
@@ -288,6 +290,104 @@ export class ProjectStore {
     } catch {
       return null;
     }
+  }
+
+  /**
+   * Lấy danh sách Chapter của một dự án
+   */
+  async getChapters(projectId: string): Promise<StoryChapter[]> {
+    try {
+      const res = await api.getChapters(projectId);
+      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+        return res.data as StoryChapter[];
+      }
+    } catch {}
+    const project = await this.getProject(projectId);
+    return project.chapters || [];
+  }
+
+  /**
+   * Tạo Chapter mới trong Project
+   */
+  async createChapter(
+    projectId: string,
+    chapterData: {
+      chapterNumber?: number;
+      title: string;
+      desc?: string;
+      events?: any[];
+    }
+  ): Promise<StoryChapter> {
+    const project = await this.getProject(projectId);
+    const existingChapters = project.chapters || [];
+    const num = chapterData.chapterNumber || existingChapters.length + 1;
+    const newChapter: StoryChapter = {
+      id: `c-${num}-${Date.now().toString(36)}`,
+      chapterNumber: num,
+      code: `C${num}`,
+      title: chapterData.title.trim(),
+      shortTitle: `C${num} ${chapterData.title.trim()}`,
+      watermark: chapterData.title.trim().toUpperCase(),
+      desc: chapterData.desc?.trim() || '',
+      events: chapterData.events || [],
+      nodes: [],
+      links: [],
+    };
+
+    try {
+      const res = await api.createChapter(projectId, {
+        chapterNumber: num,
+        title: newChapter.title,
+        desc: newChapter.desc,
+        events: newChapter.events,
+      });
+      if (res.success && res.data) {
+        Object.assign(newChapter, res.data);
+      }
+    } catch (err) {
+      console.warn('[ProjectStore] Không thể tạo chapter lên Backend, lưu local:', err);
+    }
+
+    project.chapters = [...existingChapters, newChapter];
+    await this.saveProject(project);
+    return newChapter;
+  }
+
+  /**
+   * Gán Node sự kiện vào Chapter (chỉ node sự kiện type === 'event' mới được gán)
+   */
+  async assignEventToChapter(
+    projectId: string,
+    chapterId: string,
+    eventNode: StoryNode
+  ): Promise<void> {
+    if (eventNode.type !== 'event') {
+      throw new Error('Chỉ node có phân loại là Sự kiện mới được gán vào chương');
+    }
+
+    const project = await this.getProject(projectId);
+    const chapters = project.chapters || [];
+    const chIdx = chapters.findIndex((c) => c.id === chapterId);
+    if (chIdx === -1) return;
+
+    const chapter = chapters[chIdx];
+    const exists = chapter.events?.some((e) => e.id === eventNode.id);
+    if (!exists) {
+      const updatedEvents = [
+        ...(chapter.events || []),
+        { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
+      ];
+      chapter.events = updatedEvents;
+      try {
+        await api.updateChapter(chapterId, { events: updatedEvents });
+      } catch {}
+    }
+
+    // Cập nhật trường chapter của node sự kiện
+    await this.updateNode(projectId, eventNode.id, {
+      chapter: chapter.title,
+    });
+    await this.saveProject(project);
   }
 }
 

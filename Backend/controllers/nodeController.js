@@ -138,6 +138,8 @@ const ALLOWED_NODE_SCALARS = new Set([
   'location',
   'chapter',
   'impact',
+  // Status Event cause
+  'statusEvent',
 ]);
 
 /**
