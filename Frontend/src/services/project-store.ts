@@ -265,6 +265,64 @@ export class ProjectStore {
     await this.saveProject(project);
   }
 
+  /**
+   * Tạo một Liên kết (Link) mới giữa 2 node trong Project
+   */
+  async createLink(projectId: string, linkData: Partial<StoryLink>): Promise<StoryLink> {
+    const project = await this.getProject(projectId);
+    const linkId = linkData.id && linkData.id.trim()
+      ? linkData.id.trim()
+      : `link-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+
+    const newLink: StoryLink = {
+      id: linkId,
+      source: linkData.source || '',
+      target: linkData.target || '',
+      label: linkData.label || 'liên hệ',
+      type: linkData.type || 'solid',
+    };
+
+    // Thử gọi backend để lưu quan hệ vào Neo4j
+    try {
+      const res = await api.createLink({
+        id: linkId,
+        source: newLink.source,
+        target: newLink.target,
+        label: newLink.label,
+        type: newLink.type,
+      });
+      if (res.success && res.data) {
+        Object.assign(newLink, res.data);
+      }
+    } catch (err) {
+      console.warn('[ProjectStore] Không thể lưu link lên Backend, lưu tạm local:', err);
+    }
+
+    project.links = [...project.links, newLink];
+    project.linkCount = project.links.length;
+    await this.saveProject(project);
+
+    return newLink;
+  }
+
+  /**
+   * Xóa một Liên kết (Link) khỏi Project
+   */
+  async deleteLink(projectId: string, linkId: string): Promise<void> {
+    const project = await this.getProject(projectId);
+
+    // Thử gọi backend để xóa quan hệ trên Neo4j
+    try {
+      await api.deleteLink(linkId);
+    } catch (err) {
+      console.warn('[ProjectStore] Không thể xóa link trên Backend, xóa local:', err);
+    }
+
+    project.links = project.links.filter((l) => l.id !== linkId);
+    project.linkCount = project.links.length;
+    await this.saveProject(project);
+  }
+
   private async getLocalProjects(): Promise<StoryProject[]> {
     try {
       const raw = await AsyncStorage.getItem(CUSTOM_PROJECTS_KEY);

@@ -256,13 +256,82 @@ async function runNewFeatureTests() {
     }
     console.log(`    ✅ Đã gán thành công sự kiện "${eventNode.name}" vào "${updatedCh1.title}"`);
 
-    // 12. Dọn dẹp dữ liệu test
-    console.log('\n[12] Dọn dẹp Dự án test trên Neo4j...');
+    // 12. Test Tự động kết nối đồ thị (Character -> Item, Character -> Location, Faction -> Event)
+    console.log('\n[12] Test Tự động kết nối đồ thị Neo4j khi gán Nhân vật với Vật phẩm và Địa điểm...');
+    // Tạo 1 node địa điểm "Hàn Nguyệt Thành" để kết nối
+    const hntRes = await apiCall(
+      'POST',
+      `/api/projects/${projectId}/nodes`,
+      {
+        name: 'Hàn Nguyệt Thành',
+        type: 'location',
+        region: 'Đông Vực',
+        dangerLevel: 'Tuyệt đối an toàn',
+      },
+      authHeaders
+    );
+    const hntNode = hntRes.body.data;
+
+    // Tạo 1 node vật phẩm "Tàn Hồng Kiếm" để kết nối với Liễu Thiên Hành (có weapon = 'Tàn Hồng Kiếm')
+    const thkRes = await apiCall(
+      'POST',
+      `/api/projects/${projectId}/nodes`,
+      {
+        name: 'Tàn Hồng Kiếm',
+        type: 'item',
+        rarity: 'Cực phẩm',
+        origin: 'Hàn Nguyệt Thành',
+        holderOrLocation: 'Liễu Thiên Hành',
+      },
+      authHeaders
+    );
+    const thkNode = thkRes.body.data;
+
+    // Kiểm tra getProjectGraph trả về các mối quan hệ (links) tự động trong Neo4j
+    const graphWithLinks = await apiCall('GET', `/api/projects/${projectId}/graph`, null, authHeaders);
+    const linksFound = graphWithLinks.body.data?.links || [];
+    console.log(`    Đồ thị hiện có: ${graphWithLinks.body.data?.nodes?.length} nodes và ${linksFound.length} links`);
+    if (linksFound.length === 0) {
+      throw new Error('Neo4j chưa nhận liên kết giữa các node!');
+    }
+    for (const l of linksFound) {
+      console.log(`    🔗 Link: [${l.source}] --(${l.label || l.category})--> [${l.target}]`);
+    }
+    console.log('    ✅ Neo4j ĐÃ TỰ ĐỘNG KẾT NỐI CÁC NODE VỚI NHAU THÀNH ĐỒ THỊ HOÀN CHỈNH!');
+
+    // 13. Test Tạo và Xóa Link thủ công (POST /api/links & DELETE /api/links/:id)
+    console.log('\n[13] Test API Link thủ công (POST & DELETE /api/links)...');
+    const manualLinkRes = await apiCall(
+      'POST',
+      '/api/links',
+      {
+        projectId,
+        source: autoNode.id,
+        target: hntNode.id,
+        label: 'Du ngoạn tới',
+        type: 'solid',
+      },
+      authHeaders
+    );
+    if (manualLinkRes.status !== 201) {
+      throw new Error('Tạo link thủ công qua API thất bại!');
+    }
+    const manualLink = manualLinkRes.body.data;
+    console.log(`    ✅ Đã tạo Link thủ công ID=${manualLink.id}: "${manualLink.label}"`);
+
+    const delLinkRes = await apiCall('DELETE', `/api/links/${manualLink.id}`, null, authHeaders);
+    if (delLinkRes.status !== 200) {
+      throw new Error('Xóa link qua API thất bại!');
+    }
+    console.log('    ✅ Đã xóa Link thủ công thành công!');
+
+    // 14. Dọn dẹp dữ liệu test
+    console.log('\n[14] Dọn dẹp Dự án test trên Neo4j...');
     await apiCall('DELETE', `/api/projects/${projectId}`, null, authHeaders);
     console.log('    ✅ Đã xóa dự án test thành công.');
 
     console.log('\n========================================================');
-    console.log('🎉 TẤT CẢ 12 BƯỚC KIỂM THỬ TÍNH NĂNG ĐỀU HOÀN TOÀN THÀNH CÔNG!');
+    console.log('🎉 TẤT CẢ CÁC BƯỚC KIỂM THỬ TÍNH NĂNG & LIÊN KẾT ĐỀU HOÀN TOÀN THÀNH CÔNG!');
     console.log('========================================================');
     process.exit(0);
   } catch (err) {

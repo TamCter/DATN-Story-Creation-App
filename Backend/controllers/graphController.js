@@ -22,6 +22,56 @@ async function getProjectGraph(req, res, next) {
     const nodeRecords = await runQuery(nodesQuery, { projectId }, 'READ');
     const nodes = nodeRecords.map((r) => r.n);
 
+    // 2.5 Tự động liên kết các node có quan hệ thuộc tính (Binh khí, Nơi sinh, Nguồn gốc, Nơi diễn ra...) nếu chưa có link
+    try {
+      const syncCypher = `
+        MATCH (p:Project { id: $projectId })
+        // Nhân vật -> Binh khí (Item)
+        OPTIONAL MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p), (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p)
+        WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
+        FOREACH (_ IN CASE WHEN c IS NOT NULL AND item IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (c)-[r1:RELATES_TO { category: 'EQUIPPED' }]->(item)
+          ON CREATE SET r1.id = 'link-' + c.id + '-' + item.id + '-weapon', r1.label = 'Binh khí', r1.type = 'solid', r1.tone = 'possession', r1.createdAt = timestamp()
+        )
+        // Nhân vật -> Nơi sinh (Location)
+        WITH p
+        OPTIONAL MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p), (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+        WHERE (c.birthplace = loc.name OR c.birthplace = loc.id) AND c.birthplace IS NOT NULL AND c.birthplace <> ''
+        FOREACH (_ IN CASE WHEN c IS NOT NULL AND loc IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (c)-[r2:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
+          ON CREATE SET r2.id = 'link-' + c.id + '-' + loc.id + '-birthplace', r2.label = 'Nơi sinh', r2.type = 'dashed', r2.tone = 'location', r2.createdAt = timestamp()
+        )
+        // Nhân vật -> Môn phái (Faction)
+        WITH p
+        OPTIONAL MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p), (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
+        WHERE (c.sect = fac.name OR c.sect = fac.id) AND c.sect IS NOT NULL AND c.sect <> ''
+        FOREACH (_ IN CASE WHEN c IS NOT NULL AND fac IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (c)-[r3:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
+          ON CREATE SET r3.id = 'link-' + c.id + '-' + fac.id + '-sect', r3.label = 'Môn phái', r3.type = 'solid', r3.tone = 'sect', r3.createdAt = timestamp()
+        )
+        // Vật phẩm -> Nguồn gốc (Location)
+        WITH p
+        OPTIONAL MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p), (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+        WHERE (item.origin = loc.name OR item.origin = loc.id) AND item.origin IS NOT NULL AND item.origin <> ''
+        FOREACH (_ IN CASE WHEN item IS NOT NULL AND loc IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (item)-[r4:RELATES_TO { category: 'ORIGIN' }]->(loc)
+          ON CREATE SET r4.id = 'link-' + item.id + '-' + loc.id + '-origin', r4.label = 'Nguồn gốc', r4.type = 'dashed', r4.tone = 'location', r4.createdAt = timestamp()
+        )
+        // Sự kiện -> Nơi diễn ra (Location)
+        WITH p
+        OPTIONAL MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p), (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+        WHERE (ev.location = loc.name OR ev.location = loc.id) AND ev.location IS NOT NULL AND ev.location <> ''
+        FOREACH (_ IN CASE WHEN ev IS NOT NULL AND loc IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (ev)-[r5:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
+          ON CREATE SET r5.id = 'link-' + ev.id + '-' + loc.id + '-location', r5.label = 'Nơi diễn ra', r5.type = 'solid', r5.tone = 'event', r5.createdAt = timestamp()
+        )
+        RETURN count(p) AS synced
+      `;
+      await runQuery(syncCypher, { projectId });
+    } catch (e) {
+      console.warn('[getProjectGraph] Lỗi auto-heal links:', e.message);
+    }
+
     // 3. Lấy toàn bộ links giữa các nodes trong dự án
     const linksQuery = `
       MATCH (p:Project { id: $projectId })

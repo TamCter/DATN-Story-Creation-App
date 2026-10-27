@@ -838,8 +838,8 @@ export default function GraphScreen() {
                   {NODE_TYPE_CONFIG[selectedNode.type]?.symbol || '●'}
                 </Text>
                 <Text style={styles.nodeDetailBadge}>
-                  {NODE_TYPE_CONFIG[selectedNode.type]?.badgeText || 'THỰC THỂ'} ·{' '}
-                  {selectedNode.role || 'CHƯA ĐẶT'}
+                  {NODE_TYPE_CONFIG[selectedNode.type]?.badgeText || 'THỰC THỂ'}
+                  {selectedNode.type === 'character' && selectedNode.role ? ` · ${selectedNode.role}` : ''}
                 </Text>
                 {selectedNode.status ? (
                   <View style={styles.statusBadge}>
@@ -1596,8 +1596,8 @@ export default function GraphScreen() {
                     {NODE_TYPE_CONFIG[selectedNode.type]?.symbol || '●'}
                   </Text>
                   <Text style={styles.nodeDetailBadge}>
-                    {NODE_TYPE_CONFIG[selectedNode.type]?.badgeText || 'THỰC THỂ'} ·{' '}
-                    {selectedNode.role || 'CHƯA ĐẶT'}
+                    {NODE_TYPE_CONFIG[selectedNode.type]?.badgeText || 'THỰC THỂ'}
+                    {selectedNode.type === 'character' && selectedNode.role ? ` · ${selectedNode.role}` : ''}
                   </Text>
                   {selectedNode.status ? (
                     <View style={styles.statusBadge}>
@@ -1625,10 +1625,6 @@ export default function GraphScreen() {
                 {/* Thuộc tính riêng biệt theo phân loại */}
                 <View style={styles.detailsGridBox}>
                   <Text style={styles.detailsGridTitle}>THUỘC TÍNH CHI TIẾT</Text>
-                  <View style={styles.detailRowItem}>
-                    <Text style={styles.detailItemKey}>Mã định danh (ID):</Text>
-                    <Text style={styles.detailItemValMono}>{selectedNode.id}</Text>
-                  </View>
                   {selectedNode.subType ? (
                     <View style={styles.detailRowItem}>
                       <Text style={styles.detailItemKey}>Phân loại phụ:</Text>

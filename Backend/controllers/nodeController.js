@@ -349,10 +349,13 @@ async function createNode(req, res, next) {
       props: nodeProperties,
     });
 
+    const createdNode = records[0].n;
+    await syncNodeRelationships(createdNode.id, projectId, createdNode);
+
     return res.status(201).json({
       success: true,
       message: 'Tạo Node thành công',
-      data: records[0].n,
+      data: createdNode,
     });
   } catch (error) {
     next(error);
@@ -432,7 +435,7 @@ async function updateNode(req, res, next) {
       MATCH (n:StoryNode { id: $id })
       OPTIONAL MATCH (n)-[:BELONGS_TO]->(p:Project)
       OPTIONAL MATCH (owner:User)-[:OWNS]->(p)
-      RETURN n, owner.id AS ownerId
+      RETURN n, p.id AS projectId, owner.id AS ownerId
     `;
     const checkResult = await runQuery(checkQuery, { id }, 'READ');
     if (!checkResult.length || !checkResult[0]?.n) {
@@ -464,10 +467,16 @@ async function updateNode(req, res, next) {
       return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
     }
 
+    const updatedNode = records[0].n;
+    const targetProjectId = checkResult[0].projectId;
+    if (targetProjectId) {
+      await syncNodeRelationships(id, targetProjectId, updatedNode);
+    }
+
     return res.json({
       success: true,
       message: 'Cập nhật Node thành công',
-      data: records[0].n,
+      data: updatedNode,
     });
   } catch (error) {
     next(error);
@@ -517,10 +526,338 @@ async function deleteNode(req, res, next) {
   }
 }
 
+/**
+ * Tự động đồng bộ các mối quan hệ (edges) trong Neo4j đồ thị:
+ * - Nhân vật gán Binh khí (Item), Nơi sinh (Location), Môn phái (Faction), Sự kiện tử nạn/hồi sinh (Event)
+ * - Vật phẩm gán Nguồn gốc (Location), Người giữ (Character)
+ * - Phe phái gán Minh chủ (Character), Căn cứ (Location), Biến cố suy tàn (Event)
+ * - Sự kiện gán Nơi diễn ra (Location)
+ * - Địa điểm gán Thế lực cai quản (Faction)
+ */
+async function syncNodeRelationships(nodeId, projectId, nodeData) {
+  if (!nodeId || !projectId || !nodeData) return;
+
+  try {
+    const nodeType = nodeData.type;
+
+    // 1. NHÂN VẬT (Character)
+    if (nodeType === 'character') {
+      // Binh khí -> Item
+      if (nodeData.weapon && String(nodeData.weapon).trim()) {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p)
+          WHERE item.name = $weapon OR item.id = $weapon
+          MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
+                        r.label = 'Binh khí',
+                        r.type = 'solid',
+                        r.tone = 'possession',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Binh khí',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, weapon: String(nodeData.weapon).trim() });
+      } else {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Nơi sinh -> Location
+      if (nodeData.birthplace && String(nodeData.birthplace).trim()) {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+          WHERE loc.name = $birthplace OR loc.id = $birthplace
+          MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
+                        r.label = 'Nơi sinh',
+                        r.type = 'dashed',
+                        r.tone = 'location',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Nơi sinh',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, birthplace: String(nodeData.birthplace).trim() });
+      } else {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Môn phái -> Faction
+      if (nodeData.sect && String(nodeData.sect).trim()) {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
+          WHERE fac.name = $sect OR fac.id = $sect
+          MERGE (c)-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-sect',
+                        r.label = 'Môn phái',
+                        r.type = 'solid',
+                        r.tone = 'sect',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Môn phái',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, sect: String(nodeData.sect).trim() });
+      } else {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Biến cố tử nạn / hồi sinh -> Event
+      if (nodeData.statusEvent && String(nodeData.statusEvent).trim() && (nodeData.status === 'Đã chết' || nodeData.status === 'Hồi sinh')) {
+        const evLabel = nodeData.status === 'Đã chết' ? 'Tử nạn tại' : 'Hồi sinh tại';
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p)
+          WHERE ev.name = $statusEvent OR ev.id = $statusEvent
+          MERGE (c)-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-event',
+                        r.label = $evLabel,
+                        r.type = 'solid',
+                        r.tone = 'event',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = $evLabel,
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, statusEvent: String(nodeData.statusEvent).trim(), evLabel });
+      } else {
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+    }
+
+    // 2. VẬT PHẨM (Item)
+    if (nodeType === 'item') {
+      // Người sở hữu -> Character
+      if (nodeData.holderOrLocation && String(nodeData.holderOrLocation).trim()) {
+        await runQuery(`
+          MATCH (item:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p)
+          WHERE c.name = $holder OR c.id = $holder
+          MERGE (c)-[r:RELATES_TO { category: 'OWNS' }]->(item)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-holder',
+                        r.label = 'Sở hữu',
+                        r.type = 'solid',
+                        r.tone = 'possession',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Sở hữu',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, holder: String(nodeData.holderOrLocation).trim() });
+      } else {
+        await runQuery(`
+          MATCH (:StoryNode)-[r:RELATES_TO { category: 'OWNS' }]->(item:StoryNode { id: $nodeId })
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Nguồn gốc -> Location
+      if (nodeData.origin && String(nodeData.origin).trim()) {
+        await runQuery(`
+          MATCH (item:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+          WHERE loc.name = $origin OR loc.id = $origin
+          MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
+          ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
+                        r.label = 'Nguồn gốc',
+                        r.type = 'dashed',
+                        r.tone = 'location',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Nguồn gốc',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, origin: String(nodeData.origin).trim() });
+      } else {
+        await runQuery(`
+          MATCH (item:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'ORIGIN' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+    }
+
+    // 3. PHE PHÁI (Faction)
+    if (nodeType === 'faction') {
+      // Minh chủ / Thủ lĩnh -> Character
+      if (nodeData.leader && String(nodeData.leader).trim()) {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p)
+          WHERE c.name = $leader OR c.id = $leader
+          MERGE (c)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-leader',
+                        r.label = 'Minh chủ / Thủ lĩnh',
+                        r.type = 'solid',
+                        r.tone = 'loyalty',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Minh chủ / Thủ lĩnh',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, leader: String(nodeData.leader).trim() });
+      } else {
+        await runQuery(`
+          MATCH (:StoryNode)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac:StoryNode { id: $nodeId })
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Căn cứ -> Location
+      if (nodeData.headquarters && String(nodeData.headquarters).trim()) {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+          WHERE loc.name = $headquarters OR loc.id = $headquarters
+          MERGE (fac)-[r:RELATES_TO { category: 'HEADQUARTERS' }]->(loc)
+          ON CREATE SET r.id = 'link-' + fac.id + '-' + loc.id + '-hq',
+                        r.label = 'Căn cứ địa',
+                        r.type = 'solid',
+                        r.tone = 'location',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Căn cứ địa',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, headquarters: String(nodeData.headquarters).trim() });
+      } else {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'HEADQUARTERS' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Biến cố suy tàn -> Event
+      if (nodeData.statusEvent && String(nodeData.statusEvent).trim() && nodeData.status === 'Suy tàn') {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p)
+          WHERE ev.name = $statusEvent OR ev.id = $statusEvent
+          MERGE (fac)-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev)
+          ON CREATE SET r.id = 'link-' + fac.id + '-' + ev.id + '-event',
+                        r.label = 'Suy tàn bởi',
+                        r.type = 'solid',
+                        r.tone = 'event',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Suy tàn bởi',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, statusEvent: String(nodeData.statusEvent).trim() });
+      } else {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+    }
+
+    // 4. ĐỊA ĐIỂM (Location)
+    if (nodeType === 'location') {
+      // Thế lực cai quản -> Faction
+      if (nodeData.ruler && String(nodeData.ruler).trim()) {
+        await runQuery(`
+          MATCH (loc:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
+          WHERE fac.name = $ruler OR fac.id = $ruler
+          MERGE (fac)-[r:RELATES_TO { category: 'RULER_OF' }]->(loc)
+          ON CREATE SET r.id = 'link-' + fac.id + '-' + loc.id + '-ruler',
+                        r.label = 'Cai quản',
+                        r.type = 'solid',
+                        r.tone = 'sect',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Cai quản',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, ruler: String(nodeData.ruler).trim() });
+      } else {
+        await runQuery(`
+          MATCH (:StoryNode)-[r:RELATES_TO { category: 'RULER_OF' }]->(loc:StoryNode { id: $nodeId })
+          DELETE r
+        `, { nodeId });
+      }
+    }
+
+    // 5. BIẾN CỐ / SỰ KIỆN (Event)
+    if (nodeType === 'event') {
+      // Nơi diễn ra -> Location
+      if (nodeData.location && String(nodeData.location).trim()) {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+          WHERE loc.name = $location OR loc.id = $location
+          MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
+                        r.label = 'Nơi diễn ra',
+                        r.type = 'solid',
+                        r.tone = 'event',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Nơi diễn ra',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, location: String(nodeData.location).trim() });
+      } else {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(:StoryNode)
+          DELETE r
+        `, { nodeId });
+      }
+    }
+
+    // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
+    if (nodeType === 'item') {
+      await runQuery(`
+        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (item:StoryNode { id: $nodeId })
+        WHERE c.weapon = item.name OR c.weapon = item.id
+        MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
+        ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
+                      r.label = 'Binh khí',
+                      r.type = 'solid',
+                      r.tone = 'possession',
+                      r.createdAt = timestamp()
+      `, { nodeId, projectId });
+    } else if (nodeType === 'location') {
+      await runQuery(`
+        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (loc:StoryNode { id: $nodeId })
+        WHERE c.birthplace = loc.name OR c.birthplace = loc.id
+        MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
+        ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
+                      r.label = 'Nơi sinh',
+                      r.type = 'dashed',
+                      r.tone = 'location',
+                      r.createdAt = timestamp()
+      `, { nodeId, projectId });
+
+      await runQuery(`
+        MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (loc:StoryNode { id: $nodeId })
+        WHERE item.origin = loc.name OR item.origin = loc.id
+        MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
+        ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
+                      r.label = 'Nguồn gốc',
+                      r.type = 'dashed',
+                      r.tone = 'location',
+                      r.createdAt = timestamp()
+      `, { nodeId, projectId });
+
+      await runQuery(`
+        MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (loc:StoryNode { id: $nodeId })
+        WHERE ev.location = loc.name OR ev.location = loc.id
+        MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
+        ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
+                      r.label = 'Nơi diễn ra',
+                      r.type = 'solid',
+                      r.tone = 'event',
+                      r.createdAt = timestamp()
+      `, { nodeId, projectId });
+    }
+  } catch (syncErr) {
+    console.warn('[syncNodeRelationships] Lỗi đồng bộ quan hệ tự động:', syncErr.message);
+  }
+}
+
 module.exports = {
   getNodesByProject,
   getNodeById,
   createNode,
   updateNode,
   deleteNode,
+  syncNodeRelationships,
 };

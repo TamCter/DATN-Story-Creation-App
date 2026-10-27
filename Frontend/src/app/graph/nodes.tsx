@@ -473,13 +473,15 @@ export default function NodesDetailScreen() {
                   </View>
 
                   <View style={styles.badgeCol}>
-                    <View
-                      style={[
-                        styles.nodeRoleBadge,
-                        { borderColor: `${config.color}60`, backgroundColor: `${config.color}12` },
-                      ]}>
-                      <Text style={[styles.nodeRoleText, { color: config.color }]}>{node.role}</Text>
-                    </View>
+                    {node.type === 'character' && node.role ? (
+                      <View
+                        style={[
+                          styles.nodeRoleBadge,
+                          { borderColor: `${config.color}60`, backgroundColor: `${config.color}12` },
+                        ]}>
+                        <Text style={[styles.nodeRoleText, { color: config.color }]}>{node.role}</Text>
+                      </View>
+                    ) : null}
                     {node.status ? (
                       <View style={styles.statusBadge}>
                         <Text style={styles.statusBadgeText}>{node.status}</Text>
@@ -490,7 +492,6 @@ export default function NodesDetailScreen() {
 
                 {/* Differentiated Attributes Summary Box */}
                 <View style={styles.attributesGrid}>
-                  <Text style={styles.attrTagMono}>ID: {node.id}</Text>
                   {node.dob ? <Text style={styles.attrTag}>📅 Ngày sinh: {node.dob}</Text> : null}
                   {node.birthplace ? (
                     <Text style={styles.attrTag}>📍 Nơi sinh: {node.birthplace}</Text>

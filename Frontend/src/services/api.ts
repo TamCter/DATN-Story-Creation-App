@@ -296,6 +296,29 @@ class ApiService {
     });
   }
 
+  // Link APIs
+  async createLink(payload: {
+    id?: string;
+    source: string;
+    target: string;
+    label?: string;
+    type?: string;
+    category?: string;
+    contextNote?: string;
+    tone?: string;
+  }): Promise<{ success: boolean; data: any; message?: string }> {
+    return this.request<{ success: boolean; data: any; message?: string }>('/links', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async deleteLink(linkId: string): Promise<{ success: boolean; message: string }> {
+    return this.request<{ success: boolean; message: string }>(`/links/${linkId}`, {
+      method: 'DELETE',
+    });
+  }
+
   // Chapter APIs
   async getChapters(projectId: string): Promise<{ success: boolean; data: any[]; count: number; message?: string }> {
     return this.request<{ success: boolean; data: any[]; count: number; message?: string }>(

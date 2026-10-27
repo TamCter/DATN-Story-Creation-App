@@ -212,26 +212,37 @@ export default function LinksScreen() {
     });
   }, [links, nodeMap, selectedEntityFilter, selectedCategory, searchQuery]);
 
-  const handleCreateLink = () => {
+  const handleCreateLink = async () => {
     if (!sourceNodeId || !targetNodeId || sourceNodeId === targetNodeId) return;
-    const newId = `link-${Date.now()}`;
-    const newLink: StoryLink = {
-      id: newId,
-      source: sourceNodeId,
-      target: targetNodeId,
-      label: newLinkLabel.trim() || 'liên hệ',
-      type: newLinkType,
-    };
+    try {
+      const created = await projectStore.createLink(projectId, {
+        source: sourceNodeId,
+        target: targetNodeId,
+        label: newLinkLabel.trim() || 'liên hệ',
+        type: newLinkType,
+      });
 
-    LINK_METAS[newId] = {
-      category: 'MỐI LIÊN HỆ MỚI',
-      contextNote: 'Liên kết được thiết lập trực tiếp trong đồ thị cốt truyện.',
-      tone: 'loyalty',
-    };
+      LINK_METAS[created.id] = {
+        category: 'MỐI LIÊN HỆ MỚI',
+        contextNote: 'Liên kết được thiết lập trực tiếp trong đồ thị cốt truyện.',
+        tone: 'loyalty',
+      };
 
-    setLinks((prev) => [...prev, newLink]);
-    setAddModalOpen(false);
-    setNewLinkLabel('');
+      setLinks((prev) => [...prev, created]);
+      setAddModalOpen(false);
+      setNewLinkLabel('');
+    } catch (err: any) {
+      console.warn('Lỗi tạo liên kết:', err);
+    }
+  };
+
+  const handleDeleteLink = async (linkId: string) => {
+    try {
+      await projectStore.deleteLink(projectId, linkId);
+      setLinks((prev) => prev.filter((l) => l.id !== linkId));
+    } catch (err: any) {
+      console.warn('Lỗi xóa liên kết:', err);
+    }
   };
 
   const getToneColor = (tone?: string) => {
@@ -501,6 +512,16 @@ export default function LinksScreen() {
                     <Text style={styles.viewOnGraphText}>
                       Xem trên đồ thị →
                     </Text>
+                  </Pressable>
+
+                  <Pressable
+                    hitSlop={8}
+                    style={({ pressed }) => [
+                      styles.deleteLinkBtn,
+                      pressed && { opacity: 0.6 },
+                    ]}
+                    onPress={() => handleDeleteLink(link.id)}>
+                    <Text style={styles.deleteLinkText}>🗑️ Xóa</Text>
                   </Pressable>
                 </View>
               </View>
@@ -981,6 +1002,19 @@ const styles = StyleSheet.create({
     color: '#e5a93c',
     fontWeight: '600',
     fontFamily: AppFonts.sans,
+  },
+  deleteLinkBtn: {
+    paddingVertical: 3,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    backgroundColor: '#261715',
+    borderWidth: 1,
+    borderColor: '#4d221c',
+  },
+  deleteLinkText: {
+    color: '#e05252',
+    fontSize: 11,
+    fontWeight: '600',
   },
   emptyContainer: {
     alignItems: 'center',
