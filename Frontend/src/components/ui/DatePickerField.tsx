@@ -51,12 +51,12 @@ export function DatePickerField({
       };
     }
 
-    const match = value.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,2})$/);
+    const match = value.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
     if (match) {
       const p1 = parseInt(match[1], 10);
       const p2 = parseInt(match[2], 10);
       const p3 = parseInt(match[3], 10);
-      if (p1 > 31) {
+      if (match[1].length === 4 || p1 > 31) {
         return {
           year: p1,
           month: Math.min(12, Math.max(1, p2)),
@@ -133,7 +133,7 @@ export function DatePickerField({
 
   const handleSetToday = () => {
     const now = new Date();
-    const yStr = String(now.getFullYear());
+    const yStr = String(now.getFullYear()).padStart(4, '0');
     const mStr = String(now.getMonth() + 1).padStart(2, '0');
     const dStr = String(now.getDate()).padStart(2, '0');
     onChange(`${yStr}-${mStr}-${dStr}`);
