@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useMemo } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -12,28 +13,62 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import {
   INITIAL_PROJECTS,
   StoryLocationItem,
+  StoryProject,
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
+import { projectStore } from '@/services/project-store';
 
 export default function LocationsScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
 
-  const currentProject = useMemo(() => {
+  const [currentProject, setCurrentProject] = React.useState<StoryProject>(() => {
+    const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
     return (
-      INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
+      match || {
+        id: projectId,
+        title: 'Đang tải...',
+        genre: '',
+        number: '№ 01',
+        nodeCount: 0,
+        linkCount: 0,
+        updatedAt: 'Vừa xong',
+        nodes: [],
+        links: [],
+      }
     );
+  });
+
+  const [isLoading, setIsLoading] = React.useState(true);
+
+  React.useEffect(() => {
+    let isMounted = true;
+    async function load() {
+      try {
+        const proj = await projectStore.getProject(projectId);
+        if (isMounted) setCurrentProject(proj);
+      } catch (err) {
+        console.warn('Lỗi tải địa điểm:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
+      }
+    }
+    void load();
+    return () => {
+      isMounted = false;
+    };
   }, [projectId]);
 
-  const locations: StoryLocationItem[] = currentProject.locations || 
-    currentProject.nodes
+  const locations: StoryLocationItem[] = React.useMemo(() => {
+    return (currentProject.nodes || [])
       .filter((n) => n.type === 'location')
       .map((n) => ({
         id: n.id,
         name: n.name,
-        region: n.role,
+        region: n.region || n.role || 'Chưa xác định',
         desc: n.desc,
       }));
+  }, [currentProject]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -68,6 +103,24 @@ export default function LocationsScreen() {
             <Text style={styles.locDesc}>{loc.desc}</Text>
           </View>
         ))}
+
+        {isLoading && locations.length === 0 && (
+          <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+            <ActivityIndicator size="large" color="#d4a373" />
+          </View>
+        )}
+
+        {!isLoading && locations.length === 0 && (
+          <View style={{ alignItems: 'center', paddingVertical: 48, gap: 8 }}>
+            <Text style={{ fontSize: 28, color: '#3d372b' }}>▲</Text>
+            <Text style={{ color: '#ded5c7', fontFamily: AppFonts.serif, fontSize: 16, fontWeight: '600' }}>
+              Chưa có địa điểm nào
+            </Text>
+            <Text style={{ color: '#736a5c', fontSize: 12.5, textAlign: 'center' }}>
+              Dự án này chưa có địa điểm được tạo. Hãy quay lại bản đồ đồ thị để thêm địa danh đầu tiên.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
