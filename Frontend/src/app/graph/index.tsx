@@ -358,21 +358,23 @@ export default function GraphScreen() {
       payload.status = formStatus.trim() || 'Còn sống';
       if ((formStatus === 'Đã chết' || formStatus === 'Hồi sinh') && formStatusEvent.trim()) {
         payload.statusEvent = formStatusEvent.trim();
+      } else {
+        payload.statusEvent = '';
       }
-      if (formDob.trim()) payload.dob = formDob.trim();
-      if (formBirthplace.trim()) payload.birthplace = formBirthplace.trim();
-      if (formGender.trim()) payload.gender = formGender.trim();
-      if (formWeapon.trim()) payload.weapon = formWeapon.trim();
-      if (formSect.trim()) payload.sect = formSect.trim();
-      if (formPersonality.trim()) payload.personality = formPersonality.trim();
+      payload.dob = formDob.trim();
+      payload.birthplace = formBirthplace.trim();
+      payload.gender = formGender.trim() || 'Nam';
+      payload.weapon = formWeapon.trim();
+      payload.sect = formSect.trim();
+      payload.personality = formPersonality.trim();
     } else if (formType === 'item') {
       payload.role = '';
       payload.subType = '';
       payload.status = 'Nguyên vẹn';
       payload.rarity = formRarity.trim() || 'Quý hiếm';
-      if (formOrigin.trim()) payload.origin = formOrigin.trim();
-      if (formHolder.trim()) payload.holderOrLocation = formHolder.trim();
-      if (formElement.trim()) payload.element = formElement.trim();
+      payload.origin = formOrigin.trim();
+      payload.holderOrLocation = formHolder.trim();
+      payload.element = formElement.trim();
     } else if (formType === 'location') {
       payload.role = '';
       payload.subType = '';
@@ -380,27 +382,27 @@ export default function GraphScreen() {
       payload.region = formRegion.trim() || 'Đông Vực';
       payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
       payload.climate = formClimate.trim() || 'Ôn hòa';
-      if (formRuler.trim()) payload.ruler = formRuler.trim();
+      payload.ruler = formRuler.trim();
     } else if (formType === 'faction') {
       payload.role = '';
       payload.subType = formSubType.trim() || 'Chính phái';
       payload.status = formStatus.trim() || 'Hưng thịnh';
       if (formStatus === 'Suy tàn' && formStatusEvent.trim()) {
         payload.statusEvent = formStatusEvent.trim();
+      } else {
+        payload.statusEvent = '';
       }
-      if (formLeader.trim()) payload.leader = formLeader.trim();
-      if (formHeadquarters.trim()) payload.headquarters = formHeadquarters.trim();
-      if (formMotto.trim()) payload.motto = formMotto.trim();
+      payload.leader = formLeader.trim();
+      payload.headquarters = formHeadquarters.trim();
+      payload.motto = formMotto.trim();
     } else if (formType === 'event') {
       payload.role = formRole.trim() || 'BIẾN CỐ';
       payload.subType = formSubType.trim();
       payload.status = formStatus.trim() || 'Đã diễn ra';
       const chVal = formChapter.trim() || formTime.trim();
-      if (chVal) {
-        payload.chapter = chVal;
-        payload.time = chVal;
-      }
-      if (formLocation.trim()) payload.location = formLocation.trim();
+      payload.chapter = chVal;
+      payload.time = chVal;
+      payload.location = formLocation.trim();
     }
 
     try {

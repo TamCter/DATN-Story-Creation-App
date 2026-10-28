@@ -866,10 +866,18 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
     if (nodeType === 'item') {
+      // Xóa các link EQUIPPED cũ thuộc dự án này trỏ tới item này mà c.weapon không còn khớp
+      await runQuery(`
+        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode { id: $nodeId })
+        WHERE coalesce(c.weapon, '') <> item.name AND coalesce(c.weapon, '') <> item.id
+        DELETE r
+      `, { nodeId, projectId });
+
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (item:StoryNode { id: $nodeId })
-        WHERE c.weapon = item.name OR c.weapon = item.id
+        WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
         MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
         ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
                       r.label = 'Binh khí',
@@ -878,10 +886,18 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                       r.createdAt = timestamp()
       `, { nodeId, projectId });
     } else if (nodeType === 'location') {
+      // Xóa các link BIRTHPLACE cũ thuộc dự án này trỏ tới location này mà c.birthplace không còn khớp
+      await runQuery(`
+        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc:StoryNode { id: $nodeId })
+        WHERE coalesce(c.birthplace, '') <> loc.name AND coalesce(c.birthplace, '') <> loc.id
+        DELETE r
+      `, { nodeId, projectId });
+
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE c.birthplace = loc.name OR c.birthplace = loc.id
+        WHERE (c.birthplace = loc.name OR c.birthplace = loc.id) AND c.birthplace IS NOT NULL AND c.birthplace <> ''
         MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
         ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
                       r.label = 'Nơi sinh',
@@ -890,10 +906,18 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                       r.createdAt = timestamp()
       `, { nodeId, projectId });
 
+      // Xóa các link ORIGIN cũ thuộc dự án này trỏ tới location này mà item.origin không còn khớp
+      await runQuery(`
+        MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc:StoryNode { id: $nodeId })
+        WHERE coalesce(item.origin, '') <> loc.name AND coalesce(item.origin, '') <> loc.id
+        DELETE r
+      `, { nodeId, projectId });
+
       await runQuery(`
         MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE item.origin = loc.name OR item.origin = loc.id
+        WHERE (item.origin = loc.name OR item.origin = loc.id) AND item.origin IS NOT NULL AND item.origin <> ''
         MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
         ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
                       r.label = 'Nguồn gốc',
@@ -902,10 +926,18 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                       r.createdAt = timestamp()
       `, { nodeId, projectId });
 
+      // Xóa các link EVENT_LOCATION cũ thuộc dự án này trỏ tới location này mà ev.location không còn khớp
+      await runQuery(`
+        MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode { id: $nodeId })
+        WHERE coalesce(ev.location, '') <> loc.name AND coalesce(ev.location, '') <> loc.id
+        DELETE r
+      `, { nodeId, projectId });
+
       await runQuery(`
         MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE ev.location = loc.name OR ev.location = loc.id
+        WHERE (ev.location = loc.name OR ev.location = loc.id) AND ev.location IS NOT NULL AND ev.location <> ''
         MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
         ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
                       r.label = 'Nơi diễn ra',
