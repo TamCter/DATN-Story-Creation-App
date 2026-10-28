@@ -1,6 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { INITIAL_PROJECTS, StoryChapter, StoryLink, StoryNode, StoryProject } from '@/constants/story-data';
-import { api } from '@/services/api';
+import { api, ApiError } from '@/services/api';
 
 const CUSTOM_PROJECTS_KEY = '@story_app_custom_projects';
 const PROJECT_CACHE_PREFIX = '@story_app_project_cache_';
@@ -21,7 +21,7 @@ export class ProjectStore {
   async getProjects(userId?: string): Promise<StoryProject[]> {
     try {
       const res = await api.getProjects();
-      if (res.success && Array.isArray(res.data) && res.data.length > 0) {
+      if (res.success && Array.isArray(res.data)) {
         // Lưu cache các dự án từ server
         for (const item of res.data) {
           const existing = this.memoryProjects.get(item.id);
@@ -199,6 +199,9 @@ export class ProjectStore {
         Object.assign(newNode, res.data);
       }
     } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể lưu node lên Backend, lưu tạm local:', err);
     }
 
@@ -234,6 +237,9 @@ export class ProjectStore {
         Object.assign(updatedNode, res.data);
       }
     } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể cập nhật node lên Backend, cập nhật local:', err);
     }
 
@@ -253,6 +259,9 @@ export class ProjectStore {
     try {
       await api.deleteNode(nodeId);
     } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể xóa node trên Backend, xóa local:', err);
     }
 
@@ -442,9 +451,13 @@ export class ProjectStore {
     }
 
     // Cập nhật trường chapter của node sự kiện
-    await this.updateNode(projectId, eventNode.id, {
+    const updatedNode = await this.updateNode(projectId, eventNode.id, {
       chapter: chapter.title,
     });
+    const nodeIdx = project.nodes.findIndex((n) => n.id === eventNode.id);
+    if (nodeIdx !== -1) {
+      project.nodes[nodeIdx] = updatedNode;
+    }
     await this.saveProject(project);
   }
 }

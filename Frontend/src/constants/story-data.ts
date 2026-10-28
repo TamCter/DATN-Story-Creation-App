@@ -162,7 +162,6 @@ export const CHARACTER_PROFESSIONS = [
   'Thợ săn / Du hiệp',
   'Chưởng môn / Bang chủ',
   'Ẩn sĩ / Thần y',
-  'Khác (Nhập tùy chỉnh)',
 ] as const;
 
 export function generateUniqueNodeId(type: StoryNode['type'] | string, existingNodes: StoryNode[] = []): string {

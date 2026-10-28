@@ -34,17 +34,29 @@ function apiCall(method, path, body = null, headers = {}) {
   });
 }
 
+function assertSuccess(res, expectedStatus, label) {
+  if (res.status !== expectedStatus) {
+    throw new Error(`${label} thất bại! Status: ${res.status}, body: ${JSON.stringify(res.body)}`);
+  }
+  return res.body?.data;
+}
+
 async function runNewFeatureTests() {
   console.log('========================================================');
   console.log('🧪 TEST CHI TIẾT TẤT CẢ CÁC TÍNH NĂNG MỚI ĐƯỢC YÊU CẦU');
   console.log('========================================================\n');
 
+  let authHeaders = null;
+  let projectId = null;
+  let hasError = false;
+
   try {
     // 1. Login guest
     console.log('[1] Đăng nhập tài khoản...');
     const guest = await apiCall('POST', '/api/auth/guest');
-    const token = guest.body.data?.token;
-    const authHeaders = { Authorization: `Bearer ${token}` };
+    const guestData = assertSuccess(guest, 200, 'Đăng nhập Guest');
+    const token = guestData?.token;
+    authHeaders = { Authorization: `Bearer ${token}` };
     console.log('    ✅ Đăng nhập thành công!');
 
     // 2. Tạo dự án mới
@@ -59,7 +71,8 @@ async function runNewFeatureTests() {
       },
       authHeaders
     );
-    const projectId = projRes.body.data.id;
+    const projData = assertSuccess(projRes, 201, 'Tạo dự án test');
+    projectId = projData.id;
     console.log(`    ✅ Đã tạo Dự án ID: ${projectId}`);
 
     // 3. Test Tạo chương (Tạo chương & Tên chương)
@@ -297,6 +310,12 @@ async function runNewFeatureTests() {
     for (const l of linksFound) {
       console.log(`    🔗 Link: [${l.source}] --(${l.label || l.category})--> [${l.target}]`);
     }
+
+    const hasCharToThk = linksFound.some((l) => l.source === charDeceased.id && l.target === thkNode.id);
+    const hasCharToHnt = linksFound.some((l) => l.source === charDeceased.id && l.target === hntNode.id);
+    if (!hasCharToThk || !hasCharToHnt) {
+      throw new Error(`Thiếu liên kết tự động mong đợi! charDeceased -> thkNode: ${hasCharToThk}, charDeceased -> hntNode: ${hasCharToHnt}`);
+    }
     console.log('    ✅ Neo4j ĐÃ TỰ ĐỘNG KẾT NỐI CÁC NODE VỚI NHAU THÀNH ĐỒ THỊ HOÀN CHỈNH!');
 
     // 13. Test Tạo và Xóa Link thủ công (POST /api/links & DELETE /api/links/:id)
@@ -329,14 +348,25 @@ async function runNewFeatureTests() {
     console.log('\n[14] Dọn dẹp Dự án test trên Neo4j...');
     await apiCall('DELETE', `/api/projects/${projectId}`, null, authHeaders);
     console.log('    ✅ Đã xóa dự án test thành công.');
+    projectId = null;
 
     console.log('\n========================================================');
     console.log('🎉 TẤT CẢ CÁC BƯỚC KIỂM THỬ TÍNH NĂNG & LIÊN KẾT ĐỀU HOÀN TOÀN THÀNH CÔNG!');
     console.log('========================================================');
-    process.exit(0);
   } catch (err) {
     console.error('\n❌ TEST THẤT BẠI:', err.message);
-    process.exit(1);
+    hasError = true;
+  } finally {
+    if (authHeaders && projectId) {
+      console.log('\n[Cleanup] Dọn dẹp Dự án test còn sót lại sau lỗi...');
+      try {
+        await apiCall('DELETE', `/api/projects/${projectId}`, null, authHeaders);
+        console.log('    ✅ Đã dọn dẹp xong dự án test.');
+      } catch (cleanErr) {
+        console.warn(`    Không thể xóa project ${projectId}:`, cleanErr.message);
+      }
+    }
+    process.exit(hasError ? 1 : 0);
   }
 }
 

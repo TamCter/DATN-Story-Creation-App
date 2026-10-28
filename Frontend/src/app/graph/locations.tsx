@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useMemo } from 'react';
 import {
+  ActivityIndicator,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -38,6 +39,8 @@ export default function LocationsScreen() {
     );
   });
 
+  const [isLoading, setIsLoading] = React.useState(true);
+
   React.useEffect(() => {
     let isMounted = true;
     async function load() {
@@ -46,6 +49,8 @@ export default function LocationsScreen() {
         if (isMounted) setCurrentProject(proj);
       } catch (err) {
         console.warn('Lỗi tải địa điểm:', err);
+      } finally {
+        if (isMounted) setIsLoading(false);
       }
     }
     void load();
@@ -55,17 +60,14 @@ export default function LocationsScreen() {
   }, [projectId]);
 
   const locations: StoryLocationItem[] = React.useMemo(() => {
-    return (
-      currentProject.locations ||
-      currentProject.nodes
-        .filter((n) => n.type === 'location')
-        .map((n) => ({
-          id: n.id,
-          name: n.name,
-          region: n.region || n.role || 'Chưa xác định',
-          desc: n.desc,
-        }))
-    );
+    return (currentProject.nodes || [])
+      .filter((n) => n.type === 'location')
+      .map((n) => ({
+        id: n.id,
+        name: n.name,
+        region: n.region || n.role || 'Chưa xác định',
+        desc: n.desc,
+      }));
   }, [currentProject]);
 
   return (
@@ -102,7 +104,13 @@ export default function LocationsScreen() {
           </View>
         ))}
 
-        {locations.length === 0 && (
+        {isLoading && locations.length === 0 && (
+          <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+            <ActivityIndicator size="large" color="#d4a373" />
+          </View>
+        )}
+
+        {!isLoading && locations.length === 0 && (
           <View style={{ alignItems: 'center', paddingVertical: 48, gap: 8 }}>
             <Text style={{ fontSize: 28, color: '#3d372b' }}>▲</Text>
             <Text style={{ color: '#ded5c7', fontFamily: AppFonts.serif, fontSize: 16, fontWeight: '600' }}>

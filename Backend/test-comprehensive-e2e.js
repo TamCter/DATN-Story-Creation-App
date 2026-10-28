@@ -34,10 +34,21 @@ function apiCall(method, path, body = null, headers = {}) {
   });
 }
 
+function expectStatus(res, expectedStatus, label) {
+  if (res.status !== expectedStatus) {
+    throw new Error(`${label} thất bại! Status: ${res.status}, body: ${JSON.stringify(res.body)}`);
+  }
+  return res.body?.data;
+}
+
 async function runE2E() {
   console.log('====================================================');
   console.log('🚀 KIỂM THỬ E2E TOÀN BỘ CHỨC NĂNG DỰ ÁN VÀ NODE');
   console.log('====================================================\n');
+
+  let authHeaders = null;
+  const createdProjectIds = new Set();
+  let hasError = false;
 
   try {
     // 1. Health check
@@ -50,10 +61,11 @@ async function runE2E() {
     // 2. Guest Login
     console.log('\n[2] Đăng nhập Khách (Guest)...');
     const guest = await apiCall('POST', '/api/auth/guest');
-    const token = guest.body.data?.token;
-    const user = guest.body.data?.user;
+    const guestData = expectStatus(guest, 200, 'Đăng nhập Guest');
+    const token = guestData?.token;
+    const user = guestData?.user;
     console.log(`    Đăng nhập thành công: ${user?.penName} (${user?.id})`);
-    const authHeaders = { Authorization: `Bearer ${token}` };
+    authHeaders = { Authorization: `Bearer ${token}` };
 
     // 3. Lấy danh sách dự án ban đầu
     console.log('\n[3] Lấy danh sách dự án hiện tại...');
@@ -72,7 +84,8 @@ async function runE2E() {
       },
       authHeaders
     );
-    const p1 = proj1Res.body.data;
+    const p1 = expectStatus(proj1Res, 201, 'Tạo Dự án 1');
+    if (p1?.id) createdProjectIds.add(p1.id);
     console.log(`    Tạo thành công Dự án 1! ID: ${p1.id}, Title: "${p1.title}"`);
 
     // 5. Tạo dự án mới 2: "Ngân Hà Chiến Kỷ"
@@ -87,7 +100,8 @@ async function runE2E() {
       },
       authHeaders
     );
-    const p2 = proj2Res.body.data;
+    const p2 = expectStatus(proj2Res, 201, 'Tạo Dự án 2');
+    if (p2?.id) createdProjectIds.add(p2.id);
     console.log(`    Tạo thành công Dự án 2! ID: ${p2.id}, Title: "${p2.title}"`);
 
     // 6. KIỂM TRA QUAN TRỌNG: Kiểm tra Dự án 1 và 2 có bị hiển thị node của dự án khác không
@@ -265,17 +279,30 @@ async function runE2E() {
 
     // 16. DỌN DẸP DỰ ÁN TEST
     console.log('\n[16] Dọn dẹp Dự án 1 và Dự án 2...');
-    await apiCall('DELETE', `/api/projects/${p1.id}`, null, authHeaders);
-    await apiCall('DELETE', `/api/projects/${p2.id}`, null, authHeaders);
+    for (const pid of Array.from(createdProjectIds)) {
+      await apiCall('DELETE', `/api/projects/${pid}`, null, authHeaders);
+      createdProjectIds.delete(pid);
+    }
     console.log('    Đã xóa xong các dự án test trên Neo4j.');
 
     console.log('\n====================================================');
     console.log('🏆 TOÀN BỘ CÁC CHỨC NĂNG ĐÃ TEST VÀ HOẠT ĐỘNG HOÀN HẢO 100%!');
     console.log('====================================================');
-    process.exit(0);
   } catch (err) {
     console.error('\n❌ TEST THẤT BẠI:', err.message);
-    process.exit(1);
+    hasError = true;
+  } finally {
+    if (authHeaders && createdProjectIds.size > 0) {
+      console.log('\n[Cleanup] Dọn dẹp các dự án test còn sót lại sau lỗi...');
+      for (const pid of createdProjectIds) {
+        try {
+          await apiCall('DELETE', `/api/projects/${pid}`, null, authHeaders);
+        } catch (cleanErr) {
+          console.warn(`    Không thể xóa project ${pid}:`, cleanErr.message);
+        }
+      }
+    }
+    process.exit(hasError ? 1 : 0);
   }
 }
 

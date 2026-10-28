@@ -623,6 +623,7 @@ export default function NodesDetailScreen() {
                         setFormType(t);
                         if (!isEditing) {
                           setFormId(generateUniqueNodeId(t, nodes));
+                          setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                           if (t === 'character') {
                             setFormSubType('Kiếm khách / Đao khách');
                           } else {

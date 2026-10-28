@@ -92,19 +92,24 @@ export function DatePickerField({
   };
 
   const daysInMonth = useMemo(() => {
-    return new Date(activeYear, activeMonth, 0).getDate();
+    const d = new Date(activeYear, activeMonth, 0);
+    d.setFullYear(activeYear);
+    return d.getDate();
   }, [activeYear, activeMonth]);
 
   const firstDayOffset = useMemo(() => {
-    const day = new Date(activeYear, activeMonth - 1, 1).getDay();
+    const d = new Date(activeYear, activeMonth - 1, 1);
+    d.setFullYear(activeYear);
+    const day = d.getDay();
     return (day + 6) % 7;
   }, [activeYear, activeMonth]);
 
   // When user taps a day -> select date, close modal, button displays the date
   const handleSelectDay = (day: number) => {
+    const yStr = String(activeYear).padStart(4, '0');
     const mStr = String(activeMonth).padStart(2, '0');
     const dStr = String(day).padStart(2, '0');
-    onChange(`${activeYear}-${mStr}-${dStr}`);
+    onChange(`${yStr}-${mStr}-${dStr}`);
     setModalVisible(false);
   };
 

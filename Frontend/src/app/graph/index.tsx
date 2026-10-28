@@ -1107,6 +1107,7 @@ export default function GraphScreen() {
                         setFormType(t);
                         if (!isEditingNode) {
                           setFormId(generateUniqueNodeId(t, nodes));
+                          setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                           if (t === 'character') {
                             setFormSubType('Kiếm khách / Đao khách');
                           } else {

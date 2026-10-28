@@ -2,8 +2,8 @@
   "name": "frontend",
   "main": "expo-router/entry",
   "version": "1.0.0",
-  "imports": {
-    "@/*": "./src/*"
+  "engines": {
+    "node": ">=20.0.0"
   },
   "dependencies": {
     "@expo/ui": "~58.0.23",

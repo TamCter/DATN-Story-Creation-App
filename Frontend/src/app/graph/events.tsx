@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
   Modal,
   Platform,
@@ -44,7 +45,7 @@ export default function ChapterDetailScreen() {
     );
   });
 
-  const [isLoading, setIsLoading] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
 
   // Create Chapter Modal State
   const [createModalOpen, setCreateModalOpen] = useState(false);
@@ -177,6 +178,12 @@ export default function ChapterDetailScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
+        {isLoading && chapters.length === 0 && (
+          <View style={{ alignItems: 'center', paddingVertical: 48 }}>
+            <ActivityIndicator size="large" color="#d4a373" />
+          </View>
+        )}
+
         {chapters.length === 0 && !isLoading && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyIcon}>📖</Text>

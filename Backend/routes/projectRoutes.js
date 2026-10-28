@@ -55,7 +55,7 @@ router.get('/:projectId/graph', verifyProjectAccess, graphController.getProjectG
 
 // Quản lý Nodes trong Project
 router.get('/:projectId/nodes', verifyProjectAccess, nodeController.getNodesByProject);
-router.post('/:projectId/nodes', optionalAuth, nodeController.createNode);
+router.post('/:projectId/nodes', verifyToken, nodeController.createNode);
 
 // Quản lý Links trong Project
 router.get('/:projectId/links', verifyProjectAccess, linkController.getLinksByProject);
