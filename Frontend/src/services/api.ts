@@ -225,6 +225,7 @@ class ApiService {
       project: any;
       nodes: any[];
       links: any[];
+      edges?: any[];
       chapters?: any[];
       stats?: any;
     };
@@ -236,6 +237,7 @@ class ApiService {
         project: any;
         nodes: any[];
         links: any[];
+        edges?: any[];
         chapters?: any[];
         stats?: any;
       };

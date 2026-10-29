@@ -59,13 +59,15 @@ export class ProjectStore {
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
-        const { project, nodes = [], links = [], chapters = [] } = res.data;
+        const { project, nodes = [], links = [], edges, chapters = [] } = res.data;
+        const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
         const fullProject: StoryProject = {
           ...project,
           nodeCount: nodes.length,
-          linkCount: links.length,
+          linkCount: actualLinks.length,
           nodes: nodes as StoryNode[],
-          links: links as StoryLink[],
+          links: actualLinks,
+          edges: actualLinks,
           chapters: Array.isArray(chapters) && chapters.length > 0 ? (chapters as StoryChapter[]) : project.chapters,
         };
         this.memoryProjects.set(projectId, fullProject);
