@@ -22,6 +22,7 @@ export interface AIChatMessage {
   content: string;
   nodeData?: Partial<StoryNode> | null;
   timestamp: number;
+  canRetry?: boolean;
 }
 
 interface AIChatPanelProps {
@@ -90,36 +91,16 @@ export default function AIChatPanel({
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   }, []);
 
-  const handleSend = async () => {
-    const text = inputText.trim();
-    if (!text || isLoading) return;
-
-    Keyboard.dismiss();
-    setInputText('');
-
-    const userMsg: AIChatMessage = {
-      id: `u-${Date.now()}`,
-      role: 'user',
-      content: text,
-      timestamp: Date.now(),
-    };
-
-    const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
+  const sendMessagesToAI = async (currentHistory: AIChatMessage[]) => {
     setIsLoading(true);
     scrollToBottom();
 
     try {
       // Chuyển messages sang format API (bỏ message welcome system và các trường thừa)
-      const apiMessages = updatedMessages
+      const apiMessages = currentHistory
         .filter((m) => m.role === 'user' || m.role === 'assistant')
         .filter((m) => m.id !== 'welcome')
         .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }));
-
-      // Thêm user message vừa gửi nếu chưa có
-      if (!apiMessages.find((m) => m.content === text && m.role === 'user')) {
-        apiMessages.push({ role: 'user', content: text });
-      }
 
       const res = await api.chatWithAI({
         messages: apiMessages,
@@ -146,14 +127,42 @@ export default function AIChatPanel({
       const errMsg: AIChatMessage = {
         id: `e-${Date.now()}`,
         role: 'system',
-        content: `⚠️ ${err.message || 'Không thể kết nối AI. Hãy kiểm tra GEMINI_API_KEY trong Backend/.env'}`,
+        content: `⚠️ ${err.message || 'Không thể kết nối AI. Hãy kiểm tra lại kết nối mạng hoặc thử lại.'}`,
         timestamp: Date.now(),
+        canRetry: true,
       };
       setMessages((prev) => [...prev, errMsg]);
       scrollToBottom();
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const handleSend = async () => {
+    const text = inputText.trim();
+    if (!text || isLoading) return;
+
+    Keyboard.dismiss();
+    setInputText('');
+
+    const userMsg: AIChatMessage = {
+      id: `u-${Date.now()}`,
+      role: 'user',
+      content: text,
+      timestamp: Date.now(),
+    };
+
+    const updatedMessages = [...messages, userMsg];
+    setMessages(updatedMessages);
+    await sendMessagesToAI(updatedMessages);
+  };
+
+  const handleRetry = async () => {
+    if (isLoading) return;
+    // Bỏ qua các tin nhắn lỗi hệ thống gần nhất để gửi lại
+    const cleanedMessages = messages.filter((m) => m.role !== 'system');
+    setMessages(cleanedMessages);
+    await sendMessagesToAI(cleanedMessages);
   };
 
   const handleConfirmCreate = (nodeData: Partial<StoryNode>) => {
@@ -194,7 +203,13 @@ export default function AIChatPanel({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
         {messages.map((msg) => (
-          <MessageBubble key={msg.id} message={msg} onConfirmCreate={handleConfirmCreate} />
+          <MessageBubble
+            key={msg.id}
+            message={msg}
+            onConfirmCreate={handleConfirmCreate}
+            onRetry={handleRetry}
+            isLoading={isLoading}
+          />
         ))}
         {isLoading && (
           <View style={styles.loadingBubble}>
@@ -251,9 +266,13 @@ export default function AIChatPanel({
 function MessageBubble({
   message,
   onConfirmCreate,
+  onRetry,
+  isLoading,
 }: {
   message: AIChatMessage;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
+  onRetry?: () => void;
+  isLoading?: boolean;
 }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
@@ -265,7 +284,7 @@ function MessageBubble({
     <View style={[styles.messageBubbleRow, isUser && styles.messageBubbleRowUser]}>
       {!isUser && (
         <View style={styles.avatarIcon}>
-          <Text style={styles.avatarText}>✦</Text>
+          <Text style={styles.avatarText}>{isSystem ? '⚠️' : '✦'}</Text>
         </View>
       )}
       <View
@@ -278,21 +297,31 @@ function MessageBubble({
           {displayContent || message.content}
         </Text>
 
+        {/* Nút Thử Lại khi có lỗi kết nối / timeout */}
+        {isSystem && message.canRetry && onRetry && (
+          <Pressable
+            style={[styles.retryBtn, isLoading && { opacity: 0.5 }]}
+            onPress={onRetry}
+            disabled={isLoading}>
+            <Text style={styles.retryBtnText}>🔄 Thử lại yêu cầu</Text>
+          </Pressable>
+        )}
+
         {/* Nút tạo node nếu AI trả về dữ liệu */}
         {message.nodeData && (
           <View style={styles.nodePreview}>
             <View style={styles.nodePreviewHeader}>
               <Text style={styles.nodePreviewIcon}>
                 {message.nodeData.type === 'character' ? '●' :
-                 message.nodeData.type === 'item' ? '◆' :
-                 message.nodeData.type === 'faction' ? '⬡' :
-                 message.nodeData.type === 'event' ? '■' : '▲'}
+                  message.nodeData.type === 'item' ? '◆' :
+                    message.nodeData.type === 'faction' ? '⬡' :
+                      message.nodeData.type === 'event' ? '■' : '▲'}
               </Text>
               <Text style={styles.nodePreviewType}>
                 {message.nodeData.type === 'character' ? 'NHÂN VẬT' :
-                 message.nodeData.type === 'item' ? 'VẬT PHẨM' :
-                 message.nodeData.type === 'faction' ? 'PHE PHÁI' :
-                 message.nodeData.type === 'event' ? 'SỰ KIỆN' : 'ĐỊA ĐIỂM'}
+                  message.nodeData.type === 'item' ? 'VẬT PHẨM' :
+                    message.nodeData.type === 'faction' ? 'PHE PHÁI' :
+                      message.nodeData.type === 'event' ? 'SỰ KIỆN' : 'ĐỊA ĐIỂM'}
               </Text>
             </View>
             <Text style={styles.nodePreviewName}>{message.nodeData.name}</Text>
@@ -413,6 +442,22 @@ const styles = StyleSheet.create({
   },
   bubbleTextUser: { color: '#f3c76f' },
   bubbleTextSystem: { color: '#f87171', fontSize: 12 },
+  retryBtn: {
+    marginTop: 8,
+    backgroundColor: 'rgba(248,113,113,0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(248,113,113,0.4)',
+    borderRadius: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    alignSelf: 'flex-start',
+  },
+  retryBtnText: {
+    fontSize: 12,
+    color: '#fca5a5',
+    fontFamily: AppFonts.sans,
+    fontWeight: '700',
+  },
   nodePreview: {
     marginTop: 10,
     backgroundColor: 'rgba(18,16,13,0.9)',

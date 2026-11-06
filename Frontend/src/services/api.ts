@@ -94,7 +94,8 @@ class ApiService {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    timeoutMs: number = 15000
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     const headers: Record<string, string> = {
@@ -107,9 +108,9 @@ class ApiService {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    // Thiết lập timeout 12 giây để không bị treo màn hình nếu kết nối bị kẹt
+    // Thiết lập timeout (mặc định 15 giây, riêng AI có thể cấu hình tới 60 giây)
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       console.log(`[API] 📡 ${options.method || 'GET'} ${url}`);
@@ -137,7 +138,7 @@ class ApiService {
 
       if (error.name === 'AbortError') {
         throw new Error(
-          `Yêu cầu tới máy chủ quá thời gian chờ (12s). Vui lòng kiểm tra kết nối mạng hoặc thử lại.`
+          `Yêu cầu tới máy chủ bị quá thời gian chờ (${Math.round(timeoutMs / 1000)}s) hoặc đã bị hủy. Vui lòng thử lại.`
         );
       }
 
@@ -379,10 +380,14 @@ class ApiService {
       success: boolean;
       data: { message: string; nodeData: any | null };
       message?: string;
-    }>('/ai/chat', {
-      method: 'POST',
-      body: JSON.stringify(payload),
-    });
+    }>(
+      '/ai/chat',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      60000 // 60 giây để AI có đủ thời gian sinh văn bản kiếm hiệp và cấu trúc JSON
+    );
   }
 }
 
