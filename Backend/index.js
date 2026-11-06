@@ -12,6 +12,7 @@ const linkRoutes = require('./routes/linkRoutes');
 const chapterRoutes = require('./routes/chapterRoutes');
 const graphRoutes = require('./routes/graphRoutes');
 const seedRoutes = require('./routes/seedRoutes');
+const aiRoutes = require('./routes/aiRoutes');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -107,6 +108,7 @@ app.use('/api/links', linkRoutes);
 app.use('/api/chapters', chapterRoutes);
 app.use('/api/graph', graphRoutes);
 app.use('/api/seed', seedRoutes);
+app.use('/api/ai', aiRoutes);
 
 // Middleware xử lý 404
 app.use((req, res) => {

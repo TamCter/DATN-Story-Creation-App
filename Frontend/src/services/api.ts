@@ -365,6 +365,25 @@ class ApiService {
       method: 'DELETE',
     });
   }
+
+  // AI APIs
+  async chatWithAI(payload: {
+    messages: { role: 'user' | 'assistant'; content: string }[];
+    projectContext?: { nodes?: any[]; projectTitle?: string };
+  }): Promise<{
+    success: boolean;
+    data: { message: string; nodeData: any | null };
+    message?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      data: { message: string; nodeData: any | null };
+      message?: string;
+    }>('/ai/chat', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
 }
 
 export const api = new ApiService();

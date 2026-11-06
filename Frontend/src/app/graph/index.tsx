@@ -40,6 +40,7 @@ import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
+import AIChatPanel from '@/components/ui/AIChatPanel';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -138,6 +139,7 @@ export default function GraphScreen() {
   const [isEditingNode, setIsEditingNode] = useState<boolean>(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [aiChatOpen, setAiChatOpen] = useState<boolean>(false);
 
   // Form States (Đầy đủ và phân hóa theo từng loại Node)
   const [formId, setFormId] = useState('');
@@ -287,6 +289,41 @@ export default function GraphScreen() {
     setFormLocation('');
     setFormImpact('');
     setNodeModalOpen(true);
+  };
+
+  const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
+    const targetType = nodeData.type || 'character';
+    handleOpenAddModal(targetType);
+    if (nodeData.name) setFormName(nodeData.name);
+    if (nodeData.desc) setFormDesc(nodeData.desc);
+    if (nodeData.role) setFormRole(nodeData.role);
+    if (nodeData.subType) setFormSubType(nodeData.subType);
+    if (nodeData.status) setFormStatus(nodeData.status);
+    if (nodeData.gender) setFormGender(nodeData.gender);
+    if (nodeData.dob) setFormDob(nodeData.dob);
+    if (nodeData.birthplace) setFormBirthplace(nodeData.birthplace);
+    if (nodeData.weapon) setFormWeapon(nodeData.weapon);
+    if (nodeData.sect) setFormSect(nodeData.sect);
+    if (nodeData.personality) setFormPersonality(nodeData.personality);
+    if (nodeData.rarity) setFormRarity(nodeData.rarity);
+    if (nodeData.origin) setFormOrigin(nodeData.origin);
+    if (nodeData.element) setFormElement(nodeData.element);
+    if (nodeData.power) setFormPower(nodeData.power);
+    if (nodeData.holderOrLocation) setFormHolder(nodeData.holderOrLocation);
+    if (nodeData.region) setFormRegion(nodeData.region);
+    if (nodeData.terrain) setFormTerrain(nodeData.terrain);
+    if (nodeData.dangerLevel) setFormDangerLevel(nodeData.dangerLevel);
+    if (nodeData.climate) setFormClimate(nodeData.climate);
+    if (nodeData.ruler) setFormRuler(nodeData.ruler);
+    if (nodeData.leader) setFormLeader(nodeData.leader);
+    if (nodeData.headquarters) setFormHeadquarters(nodeData.headquarters);
+    if (nodeData.motto) setFormMotto(nodeData.motto);
+    if (nodeData.alignment) setFormAlignment(nodeData.alignment);
+    if (nodeData.chapter) setFormChapter(nodeData.chapter);
+    if (nodeData.time) setFormTime(nodeData.time);
+    if (nodeData.location) setFormLocation(nodeData.location);
+    if (nodeData.impact) setFormImpact(nodeData.impact);
+    setAiChatOpen(false);
   };
 
   // Mở modal chỉnh sửa Node
@@ -480,9 +517,14 @@ export default function GraphScreen() {
           </Text>
         </View>
 
-        <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
-          <Text style={styles.addNodeBtnText}>+</Text>
-        </Pressable>
+        <View style={styles.topBarRight}>
+          <Pressable style={styles.aiBtn} onPress={() => setAiChatOpen(true)}>
+            <Text style={styles.aiBtnText}>✨ AI</Text>
+          </Pressable>
+          <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
+            <Text style={styles.addNodeBtnText}>+</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Filter Chips Bar */}
@@ -1612,6 +1654,15 @@ export default function GraphScreen() {
           </View>
         </Modal>
       )}
+
+      {/* AI Assistant Chat Panel */}
+      <AIChatPanel
+        visible={aiChatOpen}
+        onClose={() => setAiChatOpen(false)}
+        onCreateNode={handleCreateNodeFromAI}
+        projectTitle={currentProject.title}
+        existingNodes={nodes}
+      />
     </SafeAreaView>
   );
 }
@@ -1666,6 +1717,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
     textTransform: 'uppercase',
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 4,
+    backgroundColor: '#26201a',
+    borderWidth: 1,
+    borderColor: '#e5a93c60',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiBtnText: {
+    color: '#e5a93c',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+    letterSpacing: 0.5,
   },
   addNodeBtn: {
     width: 38,
