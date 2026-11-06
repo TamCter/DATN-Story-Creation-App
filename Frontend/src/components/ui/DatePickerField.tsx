@@ -1,6 +1,8 @@
 import React, { useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -190,7 +192,10 @@ export function DatePickerField({
 
       {/* CALENDAR POPUP MODAL */}
       <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalBackdrop}>
           <View style={styles.calendarCard}>
             {/* Header: Prev / Month & Year / Next / Close */}
             <View style={styles.calendarHeader}>
@@ -395,7 +400,7 @@ export function DatePickerField({
               </View>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

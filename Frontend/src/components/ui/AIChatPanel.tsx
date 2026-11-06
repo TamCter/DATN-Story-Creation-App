@@ -1,9 +1,9 @@
-import React, { useCallback, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Dimensions,
   Keyboard,
-  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
@@ -40,6 +40,8 @@ const WELCOME_MSG: AIChatMessage = {
   timestamp: Date.now(),
 };
 
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+
 export default function AIChatPanel({
   visible,
   onClose,
@@ -50,8 +52,30 @@ export default function AIChatPanel({
   const [messages, setMessages] = useState<AIChatMessage[]>([WELCOME_MSG]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const scrollRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
+
+  // Lắng nghe sự kiện bàn phím để nâng toàn bộ khung chat lên trên bàn phím
+  useEffect(() => {
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+    const showSub = Keyboard.addListener(showEvent, (e) => {
+      setKeyboardHeight(e.endCoordinates.height);
+      setTimeout(() => {
+        scrollRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   React.useEffect(() => {
     Animated.spring(slideAnim, {
@@ -139,7 +163,15 @@ export default function AIChatPanel({
   if (!visible) return null;
 
   return (
-    <Animated.View style={[styles.container, { transform: [{ translateY: slideAnim }] }]}>
+    <Animated.View
+      style={[
+        styles.container,
+        {
+          transform: [{ translateY: slideAnim }],
+          bottom: keyboardHeight,
+          maxHeight: keyboardHeight > 0 ? SCREEN_HEIGHT - keyboardHeight - 20 : '75%',
+        },
+      ]}>
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
@@ -173,9 +205,7 @@ export default function AIChatPanel({
       </ScrollView>
 
       {/* Input Bar */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={80}>
+      <View style={styles.inputSection}>
         <View style={styles.inputBar}>
           <TextInput
             style={styles.textInput}
@@ -199,7 +229,8 @@ export default function AIChatPanel({
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.suggestionsRow}>
+          contentContainerStyle={styles.suggestionsRow}
+          keyboardShouldPersistTaps="handled">
           {[
             'Tạo nhân vật chính diện',
             'Thêm bảo vật thần kỳ',
@@ -212,7 +243,7 @@ export default function AIChatPanel({
             </Pressable>
           ))}
         </ScrollView>
-      </KeyboardAvoidingView>
+      </View>
     </Animated.View>
   );
 }
@@ -431,6 +462,11 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
   },
   loadingText: { fontSize: 12, color: '#6e6150', fontFamily: AppFonts.mono },
+  inputSection: {
+    backgroundColor: '#141210',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(229,169,60,0.1)',
+  },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'flex-end',

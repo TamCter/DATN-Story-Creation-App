@@ -1,6 +1,8 @@
 import React, { useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -127,7 +129,10 @@ export function FormSelectField({
 
       {/* Selection Modal */}
       <Modal visible={modalVisible} transparent animationType="fade">
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalBackdrop}>
           <Pressable
             style={StyleSheet.absoluteFill}
             onPress={() => setModalVisible(false)}
@@ -150,7 +155,10 @@ export function FormSelectField({
               />
             )}
 
-            <ScrollView style={styles.optionsList} showsVerticalScrollIndicator={false}>
+            <ScrollView
+              style={styles.optionsList}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled">
               {/* Option to clear / unselect */}
               <Pressable
                 style={[styles.optionItem, !value && styles.optionItemActive]}
@@ -215,7 +223,7 @@ export function FormSelectField({
               )}
             </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );

@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -584,7 +585,10 @@ export default function NodesDetailScreen() {
 
       {/* Dynamic Add / Edit Node Modal */}
       <Modal visible={modalOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalOverlay}>
           <View style={styles.modalCardLarge}>
             <View style={styles.modalTitleRow}>
               <Text style={styles.modalTitle}>
@@ -596,8 +600,9 @@ export default function NodesDetailScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: SCREEN_HEIGHT * 0.7 }}
+              style={{ maxHeight: SCREEN_HEIGHT * 0.65 }}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ gap: 14 }}>
               {/* Type Selector */}
               <View style={styles.modalInputGroup}>
@@ -1083,7 +1088,7 @@ export default function NodesDetailScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
