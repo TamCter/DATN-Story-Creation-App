@@ -3,6 +3,19 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
 const AIMLAPI_TIMEOUT_MS = 150000;
 const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
+const REQUIRED_NODE_FIELDS = {
+  character: [
+    'name', 'type', 'role', 'desc', 'gender', 'dob', 'birthplace',
+    'weapon', 'sect', 'personality', 'status',
+  ],
+  item: ['name', 'type', 'desc', 'rarity', 'origin', 'element', 'holderOrLocation'],
+  location: ['name', 'type', 'desc', 'region', 'climate', 'terrain', 'dangerLevel', 'ruler'],
+  faction: [
+    'name', 'type', 'desc', 'subType', 'alignment', 'status',
+    'leader', 'headquarters', 'motto',
+  ],
+  event: ['name', 'type', 'desc', 'chapter', 'time', 'location', 'status', 'impact'],
+};
 
 // System prompt mô tả cấu trúc node trong app
 const SYSTEM_PROMPT = `Bạn là trợ lý AI sáng tạo chuyên hỗ trợ viết truyện
@@ -17,10 +30,19 @@ Có 5 loại node:
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, hỏi thêm thông tin nếu cần
-- Nếu người dùng yêu cầu tạo/thêm node, hãy tự suy luận hợp lý các thông tin còn thiếu và tạo ngay, không hỏi thêm.
-- Khi người dùng yêu cầu tạo node hoặc đã đủ thông tin, trả về lời giới thiệu ngắn gọn kèm một JSON hợp lệ với định dạng CHÍNH XÁC:
-  {"action":"create_node","node":{...các trường phù hợp với loại node...}}
-- Các trường của node phải là giá trị vô hướng; luôn có name và type hợp lệ (character, item, location, faction, event).
+- Nếu người dùng yêu cầu tạo nhiều node, hãy tạo tối đa 3 node khác nhau trong cùng một lần trả lời.
+- Tự sáng tạo hợp lý mọi thông tin còn thiếu, đặc biệt birthplace, weapon, sect, origin, holderOrLocation, ruler, leader và headquarters. Không để trống, null, "không rõ", "chưa rõ" hoặc "không xác định"; khi chi tiết chưa được nêu, hãy tạo một chi tiết phù hợp với truyện.
+- Mỗi node phải có đầy đủ các trường bắt buộc theo loại:
+  character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
+  item: name, type, desc, rarity, origin, element, holderOrLocation
+  location: name, type, desc, region, climate, terrain, dangerLevel, ruler
+  faction: name, type, desc, subType, alignment, status, leader, headquarters, motto
+  event: name, type, desc, chapter, time, location, status, impact
+- Mọi trường phải là chuỗi vô hướng, không dùng object/array. Nếu tạo một node, trả về đúng một JSON:
+  {"action":"create_node","node":{...}}
+- Nếu tạo từ 2 đến 3 node, trả về đúng một JSON:
+  {"action":"create_nodes","nodes":[{...node 1...},{...node 2...}]}
+- Đặt JSON sau phần giới thiệu; không đặt thêm JSON nào khác trong câu trả lời.
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
 
@@ -55,16 +77,29 @@ function extractCreateNodeResponse(responseText) {
         if (depth === 0) {
           try {
             const parsed = JSON.parse(responseText.slice(start, end + 1));
-            if (
-              parsed.action === 'create_node' &&
-              parsed.node &&
-              typeof parsed.node === 'object' &&
-              !Array.isArray(parsed.node) &&
-              typeof parsed.node.name === 'string' &&
-              parsed.node.name.trim() &&
-              NODE_TYPES.includes(parsed.node.type)
-            ) {
-              return { nodeData: parsed.node, start, end: end + 1 };
+            const nodes = parsed.action === 'create_node'
+              ? [parsed.node]
+              : parsed.action === 'create_nodes'
+                ? parsed.nodes
+                : null;
+            if (Array.isArray(nodes) && nodes.length > 0 && nodes.length <= 3) {
+              const isCompleteNode = (node) =>
+                node &&
+                typeof node === 'object' &&
+                !Array.isArray(node) &&
+                NODE_TYPES.includes(node.type) &&
+                REQUIRED_NODE_FIELDS[node.type].every(
+                  (field) =>
+                    typeof node[field] === 'string' &&
+                    node[field].trim() !== '' &&
+                    !/^(unknown|not known|n\/a|không rõ|chưa rõ|không xác định)$/i.test(node[field].trim())
+                ) &&
+                Object.values(node).every(
+                  (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
+                );
+              if (nodes.every(isCompleteNode)) {
+                return { nodeData: nodes[0], nodeDataList: nodes, start, end: end + 1 };
+              }
             }
           } catch {
             // Continue scanning; the response may contain unrelated brace-delimited text.
@@ -191,7 +226,7 @@ async function chatWithAI(req, res, next) {
             history,
             generationConfig: {
               temperature: 0.85,
-              maxOutputTokens: 4096,
+              maxOutputTokens: 8192,
             },
           });
           const result = await chat.sendMessage(messages[messages.length - 1].content);
@@ -217,10 +252,12 @@ async function chatWithAI(req, res, next) {
     }
 
     let nodeData = null;
+    let nodeDataList = [];
     let cleanMessage = responseText;
     const nodeResponse = extractCreateNodeResponse(responseText);
     if (nodeResponse) {
       nodeData = nodeResponse.nodeData;
+      nodeDataList = nodeResponse.nodeDataList;
       cleanMessage = [
         responseText.slice(0, nodeResponse.start).trim(),
         responseText.slice(nodeResponse.end).trim(),
@@ -235,6 +272,7 @@ async function chatWithAI(req, res, next) {
       data: {
         message: cleanMessage,
         nodeData,
+        nodeDataList,
         raw: responseText,
         model: usedModel,
       },

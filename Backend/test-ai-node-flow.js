@@ -14,7 +14,7 @@ const NODE_SCENARIOS = [
       'weapon', 'sect', 'personality', 'status',
     ],
     prompt:
-      'Tạo ngay nhân vật mới, tên chính xác "Linh Kiếm Sư AI Test": một nữ kiếm khách chính diện xuất thân từ Bắc Vực. Tự sáng tạo mọi thông tin còn thiếu.',
+      'Tạo nhân vật tên chính xác "Linh Kiếm Sư AI Test": nữ kiếm khách chính diện xuất thân Bắc Vực. Tự sáng tạo đầy đủ birthplace, weapon, sect, dob, personality và mọi trường còn thiếu.',
   },
   {
     type: 'item',
@@ -23,7 +23,7 @@ const NODE_SCENARIOS = [
       'name', 'type', 'desc', 'rarity', 'origin', 'element', 'holderOrLocation',
     ],
     prompt:
-      'Tạo ngay vật phẩm mới, tên chính xác "Băng Tâm Kiếm AI Test": một thanh kiếm băng cổ. Tự sáng tạo nguồn gốc, độ hiếm, nguyên tố và chủ nhân/nơi cất giữ.',
+      'Tạo vật phẩm tên chính xác "Băng Tâm Kiếm AI Test": thanh kiếm băng cổ của nhân vật trên. Tự sáng tạo đầy đủ nguồn gốc, độ hiếm, nguyên tố, holderOrLocation và mọi trường còn thiếu.',
   },
   {
     type: 'location',
@@ -32,7 +32,7 @@ const NODE_SCENARIOS = [
       'name', 'type', 'desc', 'region', 'climate', 'dangerLevel', 'ruler',
     ],
     prompt:
-      'Tạo ngay địa điểm mới, tên chính xác "Hàn Uyên Cốc AI Test": một thung lũng băng giá bí ẩn ở Bắc Vực. Tự sáng tạo đầy đủ thông tin.',
+      'Tạo địa điểm tên chính xác "Hàn Uyên Cốc AI Test": thung lũng băng giá bí ẩn ở Bắc Vực. Tự sáng tạo đầy đủ ruler, terrain, climate, dangerLevel và mọi trường còn thiếu.',
   },
 ];
 
@@ -136,38 +136,42 @@ async function run() {
     if (!projectId) throw new Error('Backend không trả project ID.');
     console.log(`      Đã tạo project kiểm thử ${projectId}.`);
 
-    const createdNodes = [];
-    for (const [index, scenario] of NODE_SCENARIOS.entries()) {
-      console.log(`[3/5] Gemini tạo node ${index + 1}/${NODE_SCENARIOS.length}: ${scenario.type}...`);
-      const ai = await callAI(
-        [{ role: 'user', content: scenario.prompt }],
-        { projectTitle: project.data.title, nodes: createdNodes }
+    console.log(`[3/5] Gemini tạo ${NODE_SCENARIOS.length} node trong cùng một câu trả lời...`);
+    const ai = await callAI(
+      [{
+        role: 'user',
+        content:
+          `Hãy tạo cùng lúc ${NODE_SCENARIOS.length} node sau, mỗi node phải đầy đủ thông tin, không bỏ trống trường và trả về đúng một JSON action=create_nodes:\n` +
+          NODE_SCENARIOS.map((scenario, index) => `${index + 1}. ${scenario.prompt}`).join('\n'),
+      }],
+      { projectTitle: project.data.title, nodes: [] }
+    );
+    const generatedNodes = ai.data?.nodeDataList || (ai.data?.nodeData ? [ai.data.nodeData] : []);
+    if (generatedNodes.length !== NODE_SCENARIOS.length) {
+      const details = ai.data?.raw || ai.data?.message || 'Không có nội dung trả về';
+      throw new Error(
+        `Gemini trả ${generatedNodes.length}/${NODE_SCENARIOS.length} node (model: ${ai.data?.model || 'không rõ'}).\n` +
+          `Phản hồi: ${String(details).slice(0, 1800)}`
       );
-      const nodeData = ai.data?.nodeData;
-      if (!nodeData || nodeData.type !== scenario.type) {
-        const details = ai.data?.raw || ai.data?.message || 'Không có nội dung trả về';
-        throw new Error(
-          `Gemini không trả node ${scenario.type} hợp lệ (model: ${ai.data?.model || 'không rõ'}).\n` +
-            `Phản hồi: ${String(details).slice(0, 1800)}`
-        );
+    }
+
+    const createdNodes = [];
+    for (const scenario of NODE_SCENARIOS) {
+      const nodeData = generatedNodes.find((node) => node.type === scenario.type);
+      if (!nodeData) {
+        throw new Error(`Gemini không trả node loại ${scenario.type}.`);
       }
 
+      if (nodeData.name !== scenario.name) {
+        throw new Error(`Tên node ${scenario.type} sai: dự kiến "${scenario.name}", nhận "${nodeData.name}".`);
+      }
       const missingFields = scenario.requiredFields.filter((field) => {
         const value = nodeData[field];
         return value === undefined || value === null || String(value).trim() === '';
       });
       if (missingFields.length) {
-        throw new Error(
-          `Node "${nodeData.name}" thiếu trường bắt buộc: ${missingFields.join(', ')}`
-        );
+        throw new Error(`Node "${nodeData.name}" thiếu trường: ${missingFields.join(', ')}`);
       }
-      for (const [field, value] of Object.entries(nodeData)) {
-        if (value !== null && typeof value === 'object') {
-          throw new Error(`Node "${nodeData.name}" có trường ${field} không phải scalar.`);
-        }
-      }
-
-      console.log(`      Gemini ${ai.data.model}: ${nodeData.name}; đủ ${scenario.requiredFields.length} trường.`);
       const created = await apiRequest(`/projects/${projectId}/nodes`, {
         method: 'POST',
         headers: authHeaders,
@@ -177,6 +181,7 @@ async function run() {
         throw new Error(`API không xác nhận tạo node "${nodeData.name}".`);
       }
       createdNodes.push(created.data);
+      console.log(`      Gemini ${ai.data.model}: ${nodeData.name}; đủ ${scenario.requiredFields.length} trường.`);
     }
 
     console.log('[4/5] Đọc lại graph để xác nhận dữ liệu đã lưu...');

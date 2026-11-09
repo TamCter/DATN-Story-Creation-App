@@ -23,6 +23,7 @@ export interface AIChatMessage {
   role: 'user' | 'assistant' | 'system';
   content: string;
   nodeData?: Partial<StoryNode> | null;
+  nodeDataList?: Partial<StoryNode>[];
   timestamp: number;
   canRetry?: boolean;
 }
@@ -31,6 +32,7 @@ interface AIChatPanelProps {
   visible: boolean;
   onClose: () => void;
   onCreateNode: (nodeData: Partial<StoryNode>) => void;
+  onCreateNodes: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
   projectTitle?: string;
   existingNodes?: StoryNode[];
 }
@@ -39,7 +41,7 @@ const WELCOME_MSG: AIChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, bảo vật, địa điểm, phe phái hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ giúp bạn tạo thực thể hoàn chỉnh.\n\nVí dụ: "Tạo cho tôi một nữ kiếm khách bí ẩn từ Bắc Vực"',
+    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, bảo vật, địa điểm, phe phái hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ tự bổ sung các chi tiết còn thiếu. Bạn cũng có thể yêu cầu tạo cùng lúc tối đa 3 node.\n\nVí dụ: "Tạo cho tôi một nữ kiếm khách bí ẩn từ Bắc Vực" hoặc "Tạo một nhân vật, một thanh kiếm và nơi sinh của cô ấy"',
   timestamp: Date.now(),
 };
 
@@ -49,6 +51,7 @@ export default function AIChatPanel({
   visible,
   onClose,
   onCreateNode,
+  onCreateNodes,
   projectTitle,
   existingNodes = [],
 }: AIChatPanelProps) {
@@ -119,6 +122,11 @@ export default function AIChatPanel({
           role: 'assistant',
           content: res.data.message,
           nodeData: res.data.nodeData,
+          nodeDataList: res.data.nodeDataList?.length
+            ? res.data.nodeDataList
+            : res.data.nodeData
+              ? [res.data.nodeData]
+              : [],
           timestamp: Date.now(),
         };
         setMessages((prev) => [...prev, aiMsg]);
@@ -223,6 +231,7 @@ export default function AIChatPanel({
             key={msg.id}
             message={msg}
             onConfirmCreate={handleConfirmCreate}
+            onConfirmCreateMany={onCreateNodes}
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
             copied={copiedMessageId === msg.id}
@@ -284,6 +293,7 @@ export default function AIChatPanel({
 function MessageBubble({
   message,
   onConfirmCreate,
+  onConfirmCreateMany,
   onRetry,
   onCopy,
   copied,
@@ -291,6 +301,7 @@ function MessageBubble({
 }: {
   message: AIChatMessage;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
+  onConfirmCreateMany: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
   onRetry?: () => void;
   onCopy?: (message: AIChatMessage) => void;
   copied?: boolean;
@@ -298,9 +309,26 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
+  const [isAddingNodes, setIsAddingNodes] = useState(false);
+  const [nodesAdded, setNodesAdded] = useState(false);
+  const nodeDataList = message.nodeDataList?.length
+    ? message.nodeDataList
+    : message.nodeData
+      ? [message.nodeData]
+      : [];
 
-  // Tách phần text và phần JSON khỏi message assistant
-  const displayContent = message.content.replace(/\{[\s\S]*"action"\s*:\s*"create_node"[\s\S]*\}/g, '').trim();
+  const handleAddAllNodes = async () => {
+    if (isAddingNodes || nodesAdded) return;
+    setIsAddingNodes(true);
+    try {
+      setNodesAdded(await onConfirmCreateMany(nodeDataList));
+    } catch (error) {
+      console.error('[AIChatPanel] Không thể thêm nhóm node:', error);
+      Alert.alert('Không thể thêm node', 'Đã xảy ra lỗi khi thêm các node vào đồ thị.');
+    } finally {
+      setIsAddingNodes(false);
+    }
+  };
 
   return (
     <View style={[styles.messageBubbleRow, isUser && styles.messageBubbleRowUser]}>
@@ -316,7 +344,7 @@ function MessageBubble({
           isSystem && styles.bubbleSystem,
         ]}>
         <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser, isSystem && styles.bubbleTextSystem]}>
-          {displayContent || message.content}
+            {message.content}
         </Text>
 
         {isUser && onCopy && (
@@ -340,32 +368,47 @@ function MessageBubble({
         )}
 
         {/* Nút tạo node nếu AI trả về dữ liệu */}
-        {message.nodeData && (
-          <View style={styles.nodePreview}>
+        {nodeDataList.map((nodeData, index) => (
+          <View key={`${message.id}-${index}`} style={styles.nodePreview}>
             <View style={styles.nodePreviewHeader}>
               <Text style={styles.nodePreviewIcon}>
-                {message.nodeData.type === 'character' ? '●' :
-                  message.nodeData.type === 'item' ? '◆' :
-                    message.nodeData.type === 'faction' ? '⬡' :
-                      message.nodeData.type === 'event' ? '■' : '▲'}
+                {nodeData.type === 'character' ? '●' :
+                  nodeData.type === 'item' ? '◆' :
+                    nodeData.type === 'faction' ? '⬡' :
+                      nodeData.type === 'event' ? '■' : '▲'}
               </Text>
               <Text style={styles.nodePreviewType}>
-                {message.nodeData.type === 'character' ? 'NHÂN VẬT' :
-                  message.nodeData.type === 'item' ? 'VẬT PHẨM' :
-                    message.nodeData.type === 'faction' ? 'PHE PHÁI' :
-                      message.nodeData.type === 'event' ? 'SỰ KIỆN' : 'ĐỊA ĐIỂM'}
+                {nodeData.type === 'character' ? 'NHÂN VẬT' :
+                  nodeData.type === 'item' ? 'VẬT PHẨM' :
+                    nodeData.type === 'faction' ? 'PHE PHÁI' :
+                      nodeData.type === 'event' ? 'SỰ KIỆN' : 'ĐỊA ĐIỂM'}
               </Text>
             </View>
-            <Text style={styles.nodePreviewName}>{message.nodeData.name}</Text>
-            {message.nodeData.desc ? (
-              <Text style={styles.nodePreviewDesc} numberOfLines={2}>{message.nodeData.desc}</Text>
+            <Text style={styles.nodePreviewName}>{nodeData.name}</Text>
+            {nodeData.desc ? (
+              <Text style={styles.nodePreviewDesc} numberOfLines={2}>{nodeData.desc}</Text>
             ) : null}
             <Pressable
               style={styles.createNodeBtn}
-              onPress={() => onConfirmCreate(message.nodeData!)}>
-              <Text style={styles.createNodeBtnText}>+ Thêm vào đồ thị</Text>
+              onPress={() => onConfirmCreate(nodeData)}>
+              <Text style={styles.createNodeBtnText}>+ Xem / chỉnh sửa node</Text>
             </Pressable>
           </View>
+        ))}
+        {nodeDataList.length > 1 && (
+          <Pressable
+            accessibilityRole="button"
+            style={[styles.createAllNodesBtn, (isAddingNodes || nodesAdded) && styles.sendBtnDisabled]}
+            onPress={handleAddAllNodes}
+            disabled={isAddingNodes || nodesAdded}>
+            {isAddingNodes ? (
+              <ActivityIndicator size="small" color="#12100d" />
+            ) : (
+              <Text style={styles.createAllNodesBtnText}>
+                {nodesAdded ? '✓ Đã thêm tất cả node' : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
+              </Text>
+            )}
+          </Pressable>
         )}
       </View>
     </View>
@@ -542,6 +585,21 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.sans,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  createAllNodesBtn: {
+    marginTop: 10,
+    backgroundColor: '#e5a93c',
+    borderRadius: 9,
+    paddingVertical: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
+  },
+  createAllNodesBtnText: {
+    fontSize: 12.5,
+    color: '#12100d',
+    fontFamily: AppFonts.sans,
+    fontWeight: '700',
   },
   loadingBubble: {
     flexDirection: 'row',

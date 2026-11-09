@@ -301,6 +301,7 @@ export default function GraphScreen() {
     if (nodeData.role) setFormRole(nodeData.role);
     if (nodeData.subType) setFormSubType(nodeData.subType);
     if (nodeData.status) setFormStatus(nodeData.status);
+    if (nodeData.statusEvent) setFormStatusEvent(nodeData.statusEvent);
     if (nodeData.gender) setFormGender(nodeData.gender);
     if (nodeData.dob) setFormDob(nodeData.dob);
     if (nodeData.birthplace) setFormBirthplace(nodeData.birthplace);
@@ -326,6 +327,34 @@ export default function GraphScreen() {
     if (nodeData.location) setFormLocation(nodeData.location);
     if (nodeData.impact) setFormImpact(nodeData.impact);
     setAiChatOpen(false);
+  };
+
+  const handleCreateNodesFromAI = async (
+    nodeDataList: Partial<StoryNode>[]
+  ): Promise<boolean> => {
+    const createdNodes: StoryNode[] = [];
+    try {
+      for (const nodeData of nodeDataList) {
+        createdNodes.push(await projectStore.createNode(currentProject.id, nodeData));
+      }
+      await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);
+      setAiChatOpen(false);
+      return true;
+    } catch (err: any) {
+      if (createdNodes.length > 0) {
+        await refreshGraphData(createdNodes[createdNodes.length - 1].id);
+      }
+      const progress = createdNodes.length
+        ? `Đã thêm ${createdNodes.length}/${nodeDataList.length} node trước khi gặp lỗi.\n\n`
+        : '';
+      const message = `${progress}${err.message || 'Không thể thêm các node vào đồ thị.'}`;
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Không thể thêm tất cả node', message);
+      }
+      return false;
+    }
   };
 
   // Mở modal chỉnh sửa Node
@@ -1666,6 +1695,7 @@ export default function GraphScreen() {
         visible={aiChatOpen}
         onClose={() => setAiChatOpen(false)}
         onCreateNode={handleCreateNodeFromAI}
+        onCreateNodes={handleCreateNodesFromAI}
         projectTitle={currentProject.title}
         existingNodes={nodes}
       />

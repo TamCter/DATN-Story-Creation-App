@@ -373,12 +373,12 @@ class ApiService {
     projectContext?: { nodes?: any[]; projectTitle?: string };
   }): Promise<{
     success: boolean;
-    data: { message: string; nodeData: any | null };
+    data: { message: string; nodeData: any | null; nodeDataList?: any[] };
     message?: string;
   }> {
     return this.request<{
       success: boolean;
-      data: { message: string; nodeData: any | null };
+      data: { message: string; nodeData: any | null; nodeDataList?: any[] };
       message?: string;
     }>(
       '/ai/chat',

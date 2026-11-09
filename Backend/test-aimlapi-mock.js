@@ -7,7 +7,15 @@ process.env.AIMLAPI_MODEL = 'google/gemini-3-1-flash-lite';
 const expectedNode = {
   name: 'Linh Kiem Thu AI Test',
   type: 'character',
+  role: 'CHÍNH DIỆN',
   desc: 'Một kiếm khách bí ẩn.',
+  gender: 'Nữ',
+  dob: 'Ngày 12 tháng 3',
+  birthplace: 'Bắc Vực',
+  weapon: 'Thanh kiếm băng',
+  sect: 'Hàn Sơn Kiếm Phái',
+  personality: 'Điềm tĩnh',
+  status: 'Còn sống',
 };
 const aiText = `Đã tạo nhân vật.\n\`\`\`json\n${JSON.stringify({
   action: 'create_node',
@@ -34,6 +42,7 @@ async function run() {
     `\nGhi chú thêm: {"sample": true}`;
   const extracted = extractCreateNodeResponse(trailingJsonText);
   assert.deepStrictEqual(extracted?.nodeData, expectedNode);
+  assert.deepStrictEqual(extracted?.nodeDataList, [expectedNode]);
   assert.strictEqual(
     trailingJsonText.slice(extracted.start, extracted.end),
     JSON.stringify({ action: 'create_node', node: expectedNode })
@@ -46,6 +55,36 @@ async function run() {
   assert.strictEqual(
     extractCreateNodeResponse(bracesInString)?.nodeData.desc,
     'Mô tả có dấu ngoặc } và chuỗi "quoted".'
+  );
+
+  const secondNode = {
+    name: 'Băng Tâm Kiếm',
+    type: 'item',
+    desc: 'Một thanh kiếm băng.',
+    rarity: 'Hiếm',
+    origin: 'Hàn Sơn',
+    element: 'Băng',
+    holderOrLocation: 'Linh Kiếm Sư AI Test',
+  };
+  const multiNodeResponse = extractCreateNodeResponse(JSON.stringify({
+    action: 'create_nodes',
+    nodes: [expectedNode, secondNode],
+  }));
+  assert.deepStrictEqual(multiNodeResponse?.nodeDataList, [expectedNode, secondNode]);
+  assert.strictEqual(multiNodeResponse?.nodeData.name, expectedNode.name);
+  assert.strictEqual(
+    extractCreateNodeResponse(JSON.stringify({
+      action: 'create_nodes',
+      nodes: [{ ...expectedNode, weapon: '' }, secondNode],
+    })),
+    null
+  );
+  assert.strictEqual(
+    extractCreateNodeResponse(JSON.stringify({
+      action: 'create_nodes',
+      nodes: [expectedNode, secondNode, secondNode, secondNode],
+    })),
+    null
   );
 
   let responseBody;
