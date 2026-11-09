@@ -2,6 +2,7 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
 const AIMLAPI_TIMEOUT_MS = 150000;
+const MAX_NODE_GENERATION_ATTEMPTS = 3;
 const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
 const REQUIRED_NODE_FIELDS = {
   character: [
@@ -113,6 +114,120 @@ function extractCreateNodeResponse(responseText) {
   return null;
 }
 
+function getNodeCreationRequest(messages) {
+  const latestUserIndex = messages.map((message) => message.role !== 'assistant').lastIndexOf(true);
+  const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex].content || '' : '';
+  const creationIntentPattern = /\b(tạo|thêm|generate|create|add)\b/i;
+  const latestAssistantMessage = messages
+    .slice(0, latestUserIndex)
+    .reverse()
+    .find((message) => message.role === 'assistant')?.content || '';
+  const hasPendingCreationIntent =
+    /\?\s*$/.test(latestAssistantMessage) &&
+    messages
+      .slice(0, latestUserIndex)
+      .some((message) => message.role !== 'assistant' && creationIntentPattern.test(message.content || ''));
+  const wantsNodes = creationIntentPattern.test(latestUserMessage) || hasPendingCreationIntent;
+  if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
+
+  const countPattern =
+    /(?:\b(\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện)\b)|(?:\b(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)\b)/i;
+  const countMessages = creationIntentPattern.test(latestUserMessage)
+    ? [latestUserMessage]
+    : messages
+      .slice(0, latestUserIndex + 1)
+      .filter((message) => message.role !== 'assistant')
+      .map((message) => message.content || '');
+  const countMatch = countMessages
+    .reverse()
+    .map((message) => message.match(countPattern))
+    .find(Boolean);
+  const countToken = countMatch?.[1] || countMatch?.[2];
+  const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken] || 1;
+  return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
+}
+
+async function generateAIResponse({ provider, apiKey, contextText, messages }) {
+  if (provider === 'aimlapi') {
+    const model = process.env.AIMLAPI_MODEL || 'google/gemini-3-1-flash-lite';
+    const response = await fetch(AIMLAPI_URL, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model,
+        messages: [
+          { role: 'system', content: contextText },
+          ...messages.map((message) => ({
+            role: message.role,
+            content: message.content,
+          })),
+        ],
+        temperature: 0.85,
+        max_tokens: 8192,
+      }),
+      signal: AbortSignal.timeout(AIMLAPI_TIMEOUT_MS),
+    });
+    const result = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(
+        result?.error?.message ||
+          result?.message ||
+          `AIMLAPI trả về HTTP ${response.status}`
+      );
+    }
+
+    const content = result?.choices?.[0]?.message?.content;
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content.map((part) => part?.text || '').join('')
+        : '';
+    if (!text.trim()) {
+      throw new Error('AIMLAPI không trả nội dung văn bản trong choices[0].message.content');
+    }
+    return { text, model };
+  }
+
+  const genAI = new GoogleGenerativeAI(apiKey);
+  const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+  const candidateModels = Array.from(
+    new Set([preferredModel, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'])
+  );
+  let lastError = null;
+
+  for (const modelName of candidateModels) {
+    try {
+      const model = genAI.getGenerativeModel({
+        model: modelName,
+        systemInstruction: contextText,
+      });
+      const history = messages.slice(0, -1).map((message) => ({
+        role: message.role === 'assistant' ? 'model' : 'user',
+        parts: [{ text: message.content }],
+      }));
+      const chat = model.startChat({
+        history,
+        generationConfig: {
+          temperature: 0.85,
+          maxOutputTokens: 8192,
+        },
+      });
+      const result = await chat.sendMessage(messages[messages.length - 1].content);
+      return { text: result.response.text(), model: modelName };
+    } catch (error) {
+      lastError = error;
+      console.warn(
+        `[AI Controller] Model ${modelName} không thành công: ${error.message}. Đang thử model tiếp theo...`
+      );
+    }
+  }
+
+  throw lastError || new Error('Không thể kết nối đến dịch vụ AI');
+}
+
 /**
  * Chat với AI để tạo node trong câu chuyện
  * POST /api/ai/chat
@@ -146,8 +261,21 @@ async function chatWithAI(req, res, next) {
       .toLowerCase();
     let responseText = '';
     let usedModel = '';
+    const generationAttempt = req.__aiNodeGenerationAttempt || 1;
 
-    if (provider === 'aimlapi') {
+    if (generationAttempt > 1) {
+      const apiKey = (
+        process.env[provider === 'aimlapi' ? 'AIMLAPI_API_KEY' : 'GEMINI_API_KEY'] || ''
+      ).trim();
+      const generated = await generateAIResponse({
+        provider,
+        apiKey,
+        contextText,
+        messages,
+      });
+      responseText = generated.text;
+      usedModel = generated.model;
+    } else if (provider === 'aimlapi') {
       const apiKey = (process.env.AIMLAPI_API_KEY || '').trim();
       if (!apiKey) {
         return res.status(503).json({
@@ -255,6 +383,46 @@ async function chatWithAI(req, res, next) {
     let nodeDataList = [];
     let cleanMessage = responseText;
     const nodeResponse = extractCreateNodeResponse(responseText);
+    const { wantsNodes, requestedCount } = getNodeCreationRequest(messages);
+    const generatedCount = nodeResponse?.nodeDataList.length || 0;
+    if (wantsNodes && (!nodeResponse || generatedCount < requestedCount)) {
+      if (generationAttempt >= MAX_NODE_GENERATION_ATTEMPTS) {
+        return res.status(502).json({
+          success: false,
+          message:
+            `AI chưa tạo đủ ${requestedCount} node hợp lệ sau ${MAX_NODE_GENERATION_ATTEMPTS} lượt. ` +
+            'Vui lòng thử lại hoặc bổ sung mô tả cụ thể hơn.',
+        });
+      }
+
+      const issue = !nodeResponse
+        ? 'Câu trả lời trước chưa có JSON node hợp lệ hoặc node thiếu trường bắt buộc.'
+        : `Bạn mới tạo ${generatedCount}/${requestedCount} node được yêu cầu.`;
+      console.warn(
+        `[AI Controller] ${issue} Tự yêu cầu hoàn thiện lượt ${generationAttempt + 1}/${MAX_NODE_GENERATION_ATTEMPTS}.`
+      );
+      const retryRequest = {
+        ...req,
+        __aiNodeGenerationAttempt: generationAttempt + 1,
+        body: {
+          ...req.body,
+          messages: [
+            ...messages,
+            { role: 'assistant', content: responseText },
+            {
+              role: 'user',
+              content:
+                `${issue} Hãy tiếp tục ngay, không hỏi người dùng và không bỏ node nào. ` +
+                `Tạo đủ ít nhất ${requestedCount} node theo yêu cầu ban đầu; điền mọi trường bắt buộc bằng giá trị cụ thể, ` +
+                `không để trống hoặc ghi "không rõ". Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" ` +
+                `cho một node hoặc "create_nodes" cho nhiều node, tối đa 3 node.`,
+            },
+          ],
+        },
+      };
+      return chatWithAI(retryRequest, res, next);
+    }
+
     if (nodeResponse) {
       nodeData = nodeResponse.nodeData;
       nodeDataList = nodeResponse.nodeDataList;

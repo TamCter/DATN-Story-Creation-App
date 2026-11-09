@@ -108,7 +108,7 @@ class ApiService {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    // Thiết lập timeout (mặc định 15 giây, riêng AI có thể cấu hình tới 60 giây)
+    // AI có thể cần vài lượt để hoàn thiện đủ node; provider có timeout riêng cho từng lượt.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -386,7 +386,7 @@ class ApiService {
         method: 'POST',
         body: JSON.stringify(payload),
       },
-      165000 // Để request AI không bị hủy trước khi Backend hoàn tất request tới provider.
+      480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
     );
   }
 }

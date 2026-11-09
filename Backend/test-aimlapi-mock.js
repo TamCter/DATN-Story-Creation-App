@@ -134,7 +134,94 @@ async function run() {
   assert.match(responseBody.data.message, /Đã tạo nhân vật/);
   assert.doesNotMatch(responseBody.data.message, /create_node/);
 
-  console.log('AI tests passed: AIMLAPI request and robust create-node JSON extraction are valid.');
+  const secondCharacter = {
+    ...expectedNode,
+    name: 'Thanh Mai',
+    role: 'PHẢN DIỆN',
+    desc: 'Một nữ kiếm sĩ đầy tham vọng.',
+  };
+  const retryResponses = [
+    JSON.stringify({ action: 'create_node', node: expectedNode }),
+    JSON.stringify({ action: 'create_nodes', nodes: [expectedNode, secondCharacter] }),
+  ];
+  const retryRequests = [];
+  global.fetch = async (url, options) => {
+    retryRequests.push({ url, options });
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { role: 'assistant', content: retryResponses.shift() } }],
+      }),
+    };
+  };
+
+  responseBody = undefined;
+  responseStatus = undefined;
+  await chatWithAI({
+    body: {
+      messages: [{ role: 'user', content: 'Tạo 2 node nhân vật, tự sáng tạo đầy đủ thông tin.' }],
+    },
+  }, res, (error) => {
+    throw error;
+  });
+  assert.strictEqual(responseStatus, 200);
+  assert.strictEqual(responseBody.data.nodeDataList.length, 2);
+  assert.strictEqual(retryRequests.length, 2);
+  const retryPayload = JSON.parse(retryRequests[1].options.body);
+  assert.strictEqual(retryPayload.messages[2].role, 'assistant');
+  assert.match(retryPayload.messages[2].content, /create_node/);
+  assert.match(retryPayload.messages[3].content, /2 node/);
+
+  let followUpRequestCount = 0;
+  global.fetch = async () => {
+    followUpRequestCount += 1;
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [{ message: { role: 'assistant', content: 'Rất vui được giúp bạn!' } }],
+      }),
+    };
+  };
+  responseBody = undefined;
+  responseStatus = undefined;
+  await chatWithAI({
+    body: {
+      messages: [
+        { role: 'user', content: 'Tạo nhân vật Linh.' },
+        { role: 'assistant', content: 'Đã tạo xong nhân vật Linh.' },
+        { role: 'user', content: 'Cảm ơn nhé.' },
+      ],
+    },
+  }, res, (error) => {
+    throw error;
+  });
+  assert.strictEqual(responseStatus, 200);
+  assert.strictEqual(followUpRequestCount, 1);
+  assert.strictEqual(responseBody.data.message, 'Rất vui được giúp bạn!');
+
+  global.fetch = async () => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ message: { role: 'assistant', content: 'Chưa thể tạo node hợp lệ.' } }],
+    }),
+  });
+  responseBody = undefined;
+  responseStatus = undefined;
+  await chatWithAI({
+    body: {
+      messages: [{ role: 'user', content: 'Tạo 2 node nhân vật.' }],
+    },
+  }, res, (error) => {
+    throw error;
+  });
+  assert.strictEqual(responseStatus, 502);
+  assert.strictEqual(responseBody.success, false);
+  assert.match(responseBody.message, /sau 3 lượt/);
+
+  console.log('AI tests passed: JSON extraction, requested node counts, and bounded completion retries.');
 }
 
 run().catch((error) => {
