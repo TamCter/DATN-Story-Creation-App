@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Animated,
   Dimensions,
   Keyboard,
@@ -12,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import * as Clipboard from 'expo-clipboard';
 import { AppFonts } from '@/constants/theme';
 import { api } from '@/services/api';
 import { StoryNode } from '@/constants/story-data';
@@ -53,6 +55,7 @@ export default function AIChatPanel({
   const [messages, setMessages] = useState<AIChatMessage[]>([WELCOME_MSG]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const scrollRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
@@ -165,6 +168,19 @@ export default function AIChatPanel({
     await sendMessagesToAI(cleanedMessages);
   };
 
+  const handleCopyMessage = async (message: AIChatMessage) => {
+    try {
+      await Clipboard.setStringAsync(message.content);
+      setCopiedMessageId(message.id);
+      setTimeout(() => {
+        setCopiedMessageId((currentId) => currentId === message.id ? null : currentId);
+      }, 1800);
+    } catch (error) {
+      console.warn('[AIChatPanel] Không thể sao chép tin nhắn:', error);
+      Alert.alert('Không thể sao chép', 'Vui lòng thử lại.');
+    }
+  };
+
   const handleConfirmCreate = (nodeData: Partial<StoryNode>) => {
     onCreateNode(nodeData);
   };
@@ -208,6 +224,8 @@ export default function AIChatPanel({
             message={msg}
             onConfirmCreate={handleConfirmCreate}
             onRetry={handleRetry}
+            onCopy={handleCopyMessage}
+            copied={copiedMessageId === msg.id}
             isLoading={isLoading}
           />
         ))}
@@ -267,11 +285,15 @@ function MessageBubble({
   message,
   onConfirmCreate,
   onRetry,
+  onCopy,
+  copied,
   isLoading,
 }: {
   message: AIChatMessage;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
   onRetry?: () => void;
+  onCopy?: (message: AIChatMessage) => void;
+  copied?: boolean;
   isLoading?: boolean;
 }) {
   const isUser = message.role === 'user';
@@ -297,13 +319,23 @@ function MessageBubble({
           {displayContent || message.content}
         </Text>
 
+        {isUser && onCopy && (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sao chép tin nhắn"
+            style={styles.copyBtn}
+            onPress={() => onCopy(message)}>
+            <Text style={styles.copyBtnText}>{copied ? '✓ Đã sao chép' : '⧉ Sao chép'}</Text>
+          </Pressable>
+        )}
+
         {/* Nút Thử Lại khi có lỗi kết nối / timeout */}
         {isSystem && message.canRetry && onRetry && (
           <Pressable
             style={[styles.retryBtn, isLoading && { opacity: 0.5 }]}
             onPress={onRetry}
             disabled={isLoading}>
-            <Text style={styles.retryBtnText}>🔄 Thử lại yêu cầu</Text>
+            <Text style={styles.retryBtnText}>🔄 Gửi lại yêu cầu</Text>
           </Pressable>
         )}
 
@@ -442,6 +474,18 @@ const styles = StyleSheet.create({
   },
   bubbleTextUser: { color: '#f3c76f' },
   bubbleTextSystem: { color: '#f87171', fontSize: 12 },
+  copyBtn: {
+    alignSelf: 'flex-end',
+    marginTop: 6,
+    paddingVertical: 3,
+    paddingHorizontal: 6,
+  },
+  copyBtnText: {
+    fontSize: 11,
+    color: '#d9a441',
+    fontFamily: AppFonts.sans,
+    fontWeight: '600',
+  },
   retryBtn: {
     marginTop: 8,
     backgroundColor: 'rgba(248,113,113,0.15)',

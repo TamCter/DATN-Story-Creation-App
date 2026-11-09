@@ -1,7 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 // System prompt mô tả cấu trúc node trong app
-const SYSTEM_PROMPT = `Bạn là trợ lý AI sáng tạo chuyên hỗ trợ viết truyện kiếm hiệp / huyền huyễn / tiên hiệp. 
+const SYSTEM_PROMPT = `Bạn là trợ lý AI sáng tạo chuyên hỗ trợ viết truyện
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
 Có 5 loại node:
@@ -13,8 +13,10 @@ Có 5 loại node:
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, hỏi thêm thông tin nếu cần
-- Khi đã đủ thông tin hoặc người dùng yêu cầu tạo, trả về lời giới thiệu ngắn gọn kèm khối JSON với định dạng CHÍNH XÁC:
+- Nếu người dùng yêu cầu tạo/thêm node, hãy tự suy luận hợp lý các thông tin còn thiếu và tạo ngay, không hỏi thêm.
+- Khi người dùng yêu cầu tạo node hoặc đã đủ thông tin, trả về lời giới thiệu ngắn gọn kèm một JSON hợp lệ với định dạng CHÍNH XÁC:
   {"action":"create_node","node":{...các trường phù hợp với loại node...}}
+- Các trường của node phải là giá trị vô hướng; luôn có name và type hợp lệ (character, item, location, faction, event).
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
 
@@ -48,11 +50,11 @@ async function chatWithAI(req, res, next) {
     if (projectContext.nodes && projectContext.nodes.length > 0) {
       const nodesSummary = projectContext.nodes
         .slice(0, 20) // Giới hạn để tránh vượt token
-        .map((n) => `- ${ n.name } (${ n.type })`)
+        .map((n) => `- ${n.name} (${n.type})`)
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị: \n${ nodesSummary } `;
+      contextText += `\n\nCác thực thể đã có trong đồ thị: \n${nodesSummary} `;
       if (projectContext.nodes.length > 20) {
-        contextText += `\n... và ${ projectContext.nodes.length - 20 } thực thể khác`;
+        contextText += `\n... và ${projectContext.nodes.length - 20} thực thể khác`;
       }
     }
 
@@ -64,10 +66,10 @@ async function chatWithAI(req, res, next) {
 
     const lastMessage = messages[messages.length - 1];
 
-    // Danh sách models ưu tiên: Gemini 3.8 Flash, tự động dự phòng nếu gặp demand spike
-    const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.8-flash';
+    // Ưu tiên model đã kiểm tra hoạt động; vẫn cho phép cấu hình model riêng.
+    const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
     const candidateModels = Array.from(
-      new Set([preferredModel, 'gemini-3.8-flash', 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'])
+      new Set([preferredModel, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'])
     );
 
     let lastError = null;
@@ -95,7 +97,7 @@ async function chatWithAI(req, res, next) {
         break;
       } catch (err) {
         lastError = err;
-        console.warn(`[AI Controller] Thử nghiệm model ${ m } không thành công: ${ err.message }. Đang thử model tiếp theo...`);
+        console.warn(`[AI Controller] Thử nghiệm model ${m} không thành công: ${err.message}. Đang thử model tiếp theo...`);
       }
     }
 
@@ -112,12 +114,22 @@ async function chatWithAI(req, res, next) {
       const jsonMatch = responseText.match(/\{[\s\S]*"action"\s*:\s*"create_node"[\s\S]*\}/);
       if (jsonMatch) {
         const parsed = JSON.parse(jsonMatch[0]);
-        if (parsed.action === 'create_node' && parsed.node) {
+        if (
+          parsed.action === 'create_node' &&
+          parsed.node &&
+          typeof parsed.node === 'object' &&
+          !Array.isArray(parsed.node) &&
+          typeof parsed.node.name === 'string' &&
+          parsed.node.name.trim() &&
+          ['character', 'item', 'location', 'faction', 'event'].includes(parsed.node.type)
+        ) {
           nodeData = parsed.node;
-          // Loại bỏ chuỗi JSON thô trong text để người dùng không bị rối mắt
-          cleanMessage = responseText.replace(/```(?: json) ?\s *\{ [\s\S] * "action"\s *: \s * "create_node"[\s\S]*\ } \s * ```/, '').trim();
+          cleanMessage = [
+            responseText.slice(0, jsonMatch.index).trim(),
+            responseText.slice(jsonMatch.index + jsonMatch[0].length).trim(),
+          ].filter(Boolean).join('\n\n');
           if (!cleanMessage) {
-            cleanMessage = `✨ Tôi đã thiết lập xong thực thể "${nodeData.name}".Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
+            cleanMessage = `✨ Tôi đã thiết lập xong thực thể "${nodeData.name}". Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
           }
         }
       }
