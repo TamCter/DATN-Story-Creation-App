@@ -1,10 +1,40 @@
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
+const { chatWithAI } = require('./controllers/aiController');
 
 const API_BASE_URL = (process.env.TEST_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
-const AI_TIMEOUT_MS = 120000;
+const AI_TIMEOUT_MS = 180000;
 const REQUEST_TIMEOUT_MS = 15000;
-const NODE_TYPES = new Set(['character', 'item', 'location', 'faction', 'event']);
+const NODE_SCENARIOS = [
+  {
+    type: 'character',
+    name: 'Linh Kiếm Sư AI Test',
+    requiredFields: [
+      'name', 'type', 'role', 'desc', 'gender', 'dob', 'birthplace',
+      'weapon', 'sect', 'personality', 'status',
+    ],
+    prompt:
+      'Tạo ngay nhân vật mới, tên chính xác "Linh Kiếm Sư AI Test": một nữ kiếm khách chính diện xuất thân từ Bắc Vực. Tự sáng tạo mọi thông tin còn thiếu.',
+  },
+  {
+    type: 'item',
+    name: 'Băng Tâm Kiếm AI Test',
+    requiredFields: [
+      'name', 'type', 'desc', 'rarity', 'origin', 'element', 'holderOrLocation',
+    ],
+    prompt:
+      'Tạo ngay vật phẩm mới, tên chính xác "Băng Tâm Kiếm AI Test": một thanh kiếm băng cổ. Tự sáng tạo nguồn gốc, độ hiếm, nguyên tố và chủ nhân/nơi cất giữ.',
+  },
+  {
+    type: 'location',
+    name: 'Hàn Uyên Cốc AI Test',
+    requiredFields: [
+      'name', 'type', 'desc', 'region', 'climate', 'dangerLevel', 'ruler',
+    ],
+    prompt:
+      'Tạo ngay địa điểm mới, tên chính xác "Hàn Uyên Cốc AI Test": một thung lũng băng giá bí ẩn ở Bắc Vực. Tự sáng tạo đầy đủ thông tin.',
+  },
+];
 
 async function apiRequest(endpoint, options = {}) {
   const response = await fetch(`${API_BASE_URL}${endpoint}`, {
@@ -26,6 +56,53 @@ async function apiRequest(endpoint, options = {}) {
   }
 
   return body;
+}
+
+function callAI(messages, projectContext) {
+  let timeoutId;
+  return Promise.race([
+    new Promise((resolve, reject) => {
+      let completed = false;
+      const res = {
+        statusCode: 200,
+        status(statusCode) {
+          this.statusCode = statusCode;
+          return this;
+        },
+        json(body) {
+          if (completed) return;
+          completed = true;
+          if (this.statusCode >= 400 || !body?.success) {
+            reject(new Error(body?.message || `AI trả HTTP ${this.statusCode}`));
+          } else {
+            resolve(body);
+          }
+        },
+      };
+
+      chatWithAI(
+        { body: { messages, projectContext } },
+        res,
+        (error) => {
+          if (!completed) {
+            completed = true;
+            reject(error);
+          }
+        }
+      ).catch((error) => {
+        if (!completed) {
+          completed = true;
+          reject(error);
+        }
+      });
+    }),
+    new Promise((_, reject) => {
+      timeoutId = setTimeout(
+        () => reject(new Error(`AI vượt quá ${AI_TIMEOUT_MS / 1000}s`)),
+        AI_TIMEOUT_MS
+      );
+    }),
+  ]).finally(() => clearTimeout(timeoutId));
 }
 
 async function run() {
@@ -59,55 +136,61 @@ async function run() {
     if (!projectId) throw new Error('Backend không trả project ID.');
     console.log(`      Đã tạo project kiểm thử ${projectId}.`);
 
-    console.log('[3/5] Gửi yêu cầu tạo node cho AI...');
-    const ai = await apiRequest('/ai/chat', {
-      method: 'POST',
-      body: JSON.stringify({
-        messages: [
-          {
-            role: 'user',
-            content:
-              'Tạo ngay một node nhân vật với tên Linh Kiem Thu AI Test, nữ kiếm khách bí ẩn đến từ Bắc Vực. Tự điền thông tin còn thiếu, không hỏi thêm.',
-          },
-        ],
-        projectContext: { projectTitle: project.data.title, nodes: [] },
-      }),
-    });
-
-    const nodeData = ai.data?.nodeData;
-    if (
-      !nodeData ||
-      typeof nodeData.name !== 'string' ||
-      !nodeData.name.trim() ||
-      !NODE_TYPES.has(nodeData.type)
-    ) {
-      const details = ai.data?.raw || ai.data?.message || ai.message || 'Không có nội dung trả về';
-      throw new Error(
-        `AI không trả nodeData hợp lệ (model: ${ai.data?.model || 'không rõ'}).\n` +
-          `Phản hồi: ${String(details).slice(0, 1800)}`
+    const createdNodes = [];
+    for (const [index, scenario] of NODE_SCENARIOS.entries()) {
+      console.log(`[3/5] Gemini tạo node ${index + 1}/${NODE_SCENARIOS.length}: ${scenario.type}...`);
+      const ai = await callAI(
+        [{ role: 'user', content: scenario.prompt }],
+        { projectTitle: project.data.title, nodes: createdNodes }
       );
-    }
-    console.log(`      AI trả node "${nodeData.name}" (${nodeData.type}), model ${ai.data.model || 'không rõ'}.`);
+      const nodeData = ai.data?.nodeData;
+      if (!nodeData || nodeData.type !== scenario.type) {
+        const details = ai.data?.raw || ai.data?.message || 'Không có nội dung trả về';
+        throw new Error(
+          `Gemini không trả node ${scenario.type} hợp lệ (model: ${ai.data?.model || 'không rõ'}).\n` +
+            `Phản hồi: ${String(details).slice(0, 1800)}`
+        );
+      }
 
-    console.log('[4/5] Lưu node và xác nhận node trong graph...');
-    const created = await apiRequest(`/projects/${projectId}/nodes`, {
-      method: 'POST',
-      headers: authHeaders,
-      body: JSON.stringify(nodeData),
-    });
-    const createdNode = created.data;
-    if (!created.success || !createdNode?.id) {
-      throw new Error(`API không xác nhận tạo node: ${JSON.stringify(created)}`);
+      const missingFields = scenario.requiredFields.filter((field) => {
+        const value = nodeData[field];
+        return value === undefined || value === null || String(value).trim() === '';
+      });
+      if (missingFields.length) {
+        throw new Error(
+          `Node "${nodeData.name}" thiếu trường bắt buộc: ${missingFields.join(', ')}`
+        );
+      }
+      for (const [field, value] of Object.entries(nodeData)) {
+        if (value !== null && typeof value === 'object') {
+          throw new Error(`Node "${nodeData.name}" có trường ${field} không phải scalar.`);
+        }
+      }
+
+      console.log(`      Gemini ${ai.data.model}: ${nodeData.name}; đủ ${scenario.requiredFields.length} trường.`);
+      const created = await apiRequest(`/projects/${projectId}/nodes`, {
+        method: 'POST',
+        headers: authHeaders,
+        body: JSON.stringify(nodeData),
+      });
+      if (!created.success || !created.data?.id) {
+        throw new Error(`API không xác nhận tạo node "${nodeData.name}".`);
+      }
+      createdNodes.push(created.data);
     }
 
+    console.log('[4/5] Đọc lại graph để xác nhận dữ liệu đã lưu...');
     const graph = await apiRequest(`/projects/${projectId}/graph`, { headers: authHeaders });
-    const persistedNode = graph.data?.nodes?.find((node) => node.id === createdNode.id);
-    if (!persistedNode) {
-      throw new Error(`Node ${createdNode.id} không xuất hiện trong graph sau khi lưu.`);
+    const persistedNodes = graph.data?.nodes || [];
+    for (const createdNode of createdNodes) {
+      const persistedNode = persistedNodes.find((node) => node.id === createdNode.id);
+      if (!persistedNode) {
+        throw new Error(`Node "${createdNode.name}" không xuất hiện trong graph sau khi lưu.`);
+      }
+      console.log(`      Đã xác nhận "${persistedNode.name}" (${persistedNode.type}) trong Neo4j.`);
     }
-    console.log(`      Đã lưu và tìm thấy node "${persistedNode.name}" (${persistedNode.id}).`);
 
-    console.log('[5/5] Hoàn tất: AI tạo node và Backend/Neo4j lưu node thành công.');
+    console.log(`[5/5] Hoàn tất: ${createdNodes.length} node đủ thông tin đã được tạo và xác minh.`);
   } catch (error) {
     testFailed = true;
     console.error(`\nTEST THẤT BẠI: ${error.message}`);

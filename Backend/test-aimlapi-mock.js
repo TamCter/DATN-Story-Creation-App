@@ -26,9 +26,28 @@ global.fetch = async (url, options) => {
   };
 };
 
-const { chatWithAI } = require('./controllers/aiController');
+const { chatWithAI, extractCreateNodeResponse } = require('./controllers/aiController');
 
 async function run() {
+  const trailingJsonText =
+    `Đã tạo xong.\n${JSON.stringify({ action: 'create_node', node: expectedNode })}` +
+    `\nGhi chú thêm: {"sample": true}`;
+  const extracted = extractCreateNodeResponse(trailingJsonText);
+  assert.deepStrictEqual(extracted?.nodeData, expectedNode);
+  assert.strictEqual(
+    trailingJsonText.slice(extracted.start, extracted.end),
+    JSON.stringify({ action: 'create_node', node: expectedNode })
+  );
+
+  const bracesInString = JSON.stringify({
+    action: 'create_node',
+    node: { ...expectedNode, desc: 'Mô tả có dấu ngoặc } và chuỗi "quoted".' },
+  });
+  assert.strictEqual(
+    extractCreateNodeResponse(bracesInString)?.nodeData.desc,
+    'Mô tả có dấu ngoặc } và chuỗi "quoted".'
+  );
+
   let responseBody;
   let responseStatus;
   const req = {
@@ -76,7 +95,7 @@ async function run() {
   assert.match(responseBody.data.message, /Đã tạo nhân vật/);
   assert.doesNotMatch(responseBody.data.message, /create_node/);
 
-  console.log('AIMLAPI mock test passed: request, chat history and create-node parsing are valid.');
+  console.log('AI tests passed: AIMLAPI request and robust create-node JSON extraction are valid.');
 }
 
 run().catch((error) => {

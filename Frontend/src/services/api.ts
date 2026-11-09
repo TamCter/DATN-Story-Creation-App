@@ -386,7 +386,7 @@ class ApiService {
         method: 'POST',
         body: JSON.stringify(payload),
       },
-      60000 // 60 giây để AI có đủ thời gian sinh văn bản kiếm hiệp và cấu trúc JSON
+      165000 // Để request AI không bị hủy trước khi Backend hoàn tất request tới provider.
     );
   }
 }

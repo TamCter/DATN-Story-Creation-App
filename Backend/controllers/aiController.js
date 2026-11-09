@@ -1,6 +1,7 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
+const AIMLAPI_TIMEOUT_MS = 150000;
 const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
 
 // System prompt mô tả cấu trúc node trong app
@@ -22,6 +23,60 @@ Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo no
 - Các trường của node phải là giá trị vô hướng; luôn có name và type hợp lệ (character, item, location, faction, event).
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
+
+function extractCreateNodeResponse(responseText) {
+  for (let start = 0; start < responseText.length; start += 1) {
+    if (responseText[start] !== '{') continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let end = start; end < responseText.length; end += 1) {
+      const character = responseText[end];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === '\\') {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (character === '"') {
+        inString = true;
+      } else if (character === '{') {
+        depth += 1;
+      } else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(responseText.slice(start, end + 1));
+            if (
+              parsed.action === 'create_node' &&
+              parsed.node &&
+              typeof parsed.node === 'object' &&
+              !Array.isArray(parsed.node) &&
+              typeof parsed.node.name === 'string' &&
+              parsed.node.name.trim() &&
+              NODE_TYPES.includes(parsed.node.type)
+            ) {
+              return { nodeData: parsed.node, start, end: end + 1 };
+            }
+          } catch {
+            // Continue scanning; the response may contain unrelated brace-delimited text.
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
 
 /**
  * Chat với AI để tạo node trong câu chuyện
@@ -86,7 +141,7 @@ async function chatWithAI(req, res, next) {
           temperature: 0.85,
           max_tokens: 2048,
         }),
-        signal: AbortSignal.timeout(55000),
+        signal: AbortSignal.timeout(AIMLAPI_TIMEOUT_MS),
       });
       const result = await response.json().catch(() => null);
       if (!response.ok) {
@@ -136,7 +191,7 @@ async function chatWithAI(req, res, next) {
             history,
             generationConfig: {
               temperature: 0.85,
-              maxOutputTokens: 2048,
+              maxOutputTokens: 4096,
             },
           });
           const result = await chat.sendMessage(messages[messages.length - 1].content);
@@ -161,36 +216,18 @@ async function chatWithAI(req, res, next) {
       });
     }
 
-    // Kiểm tra xem response có chứa JSON tạo node không
     let nodeData = null;
     let cleanMessage = responseText;
-
-    try {
-      // Tìm JSON block trong response
-      const jsonMatch = responseText.match(/\{[\s\S]*"action"\s*:\s*"create_node"[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        if (
-          parsed.action === 'create_node' &&
-          parsed.node &&
-          typeof parsed.node === 'object' &&
-          !Array.isArray(parsed.node) &&
-          typeof parsed.node.name === 'string' &&
-          parsed.node.name.trim() &&
-          NODE_TYPES.includes(parsed.node.type)
-        ) {
-          nodeData = parsed.node;
-          cleanMessage = [
-            responseText.slice(0, jsonMatch.index).trim(),
-            responseText.slice(jsonMatch.index + jsonMatch[0].length).trim(),
-          ].filter(Boolean).join('\n\n');
-          if (!cleanMessage) {
-            cleanMessage = `✨ Tôi đã thiết lập xong thực thể "${nodeData.name}". Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
-          }
-        }
+    const nodeResponse = extractCreateNodeResponse(responseText);
+    if (nodeResponse) {
+      nodeData = nodeResponse.nodeData;
+      cleanMessage = [
+        responseText.slice(0, nodeResponse.start).trim(),
+        responseText.slice(nodeResponse.end).trim(),
+      ].filter(Boolean).join('\n\n');
+      if (!cleanMessage) {
+        cleanMessage = `✨ Tôi đã thiết lập xong thực thể "${nodeData.name}". Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
       }
-    } catch (parseErr) {
-      console.warn('Lỗi parse JSON từ AI response:', parseErr.message);
     }
 
     return res.status(200).json({
@@ -213,4 +250,5 @@ async function chatWithAI(req, res, next) {
 
 module.exports = {
   chatWithAI,
+  extractCreateNodeResponse,
 };
