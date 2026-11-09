@@ -1,5 +1,8 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
 
+const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
+const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
+
 // System prompt mô tả cấu trúc node trong app
 const SYSTEM_PROMPT = `Bạn là trợ lý AI sáng tạo chuyên hỗ trợ viết truyện
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
@@ -27,20 +30,10 @@ Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo no
  */
 async function chatWithAI(req, res, next) {
   try {
-    const apiKey = (process.env.GEMINI_API_KEY || '').trim();
-    if (!apiKey) {
-      return res.status(503).json({
-        success: false,
-        message: 'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY vào file .env',
-      });
-    }
-
     const { messages = [], projectContext = {} } = req.body;
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: 'Thiếu danh sách tin nhắn' });
     }
-
-    const genAI = new GoogleGenerativeAI(apiKey);
 
     // Xây dựng context về dự án hiện tại để AI biết các thực thể đang có
     let contextText = SYSTEM_PROMPT;
@@ -58,51 +51,114 @@ async function chatWithAI(req, res, next) {
       }
     }
 
-    // Chuyển đổi lịch sử chat sang định dạng Gemini
-    const history = messages.slice(0, -1).map((msg) => ({
-      role: msg.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: msg.content }],
-    }));
-
-    const lastMessage = messages[messages.length - 1];
-
-    // Ưu tiên model đã kiểm tra hoạt động; vẫn cho phép cấu hình model riêng.
-    const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
-    const candidateModels = Array.from(
-      new Set([preferredModel, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'])
-    );
-
-    let lastError = null;
+    const provider = (process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini'))
+      .trim()
+      .toLowerCase();
     let responseText = '';
     let usedModel = '';
 
-    for (const m of candidateModels) {
-      try {
-        const model = genAI.getGenerativeModel({
-          model: m,
-          systemInstruction: contextText,
+    if (provider === 'aimlapi') {
+      const apiKey = (process.env.AIMLAPI_API_KEY || '').trim();
+      if (!apiKey) {
+        return res.status(503).json({
+          success: false,
+          message: 'Thiếu AIMLAPI_API_KEY. Hãy cấu hình khóa AIMLAPI trong file .env của Backend.',
         });
-
-        const chat = model.startChat({
-          history,
-          generationConfig: {
-            temperature: 0.85,
-            maxOutputTokens: 1024,
-          },
-        });
-
-        const result = await chat.sendMessage(lastMessage.content);
-        responseText = result.response.text();
-        usedModel = m;
-        break;
-      } catch (err) {
-        lastError = err;
-        console.warn(`[AI Controller] Thử nghiệm model ${m} không thành công: ${err.message}. Đang thử model tiếp theo...`);
       }
-    }
 
-    if (!responseText) {
-      throw lastError || new Error('Không thể kết nối đến dịch vụ AI');
+      usedModel = process.env.AIMLAPI_MODEL || 'google/gemini-3-1-flash-lite';
+      const apiMessages = [
+        { role: 'system', content: contextText },
+        ...messages.map((message) => ({
+          role: message.role === 'assistant' ? 'assistant' : 'user',
+          content: message.content,
+        })),
+      ];
+      const response = await fetch(AIMLAPI_URL, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: usedModel,
+          messages: apiMessages,
+          temperature: 0.85,
+          max_tokens: 2048,
+        }),
+        signal: AbortSignal.timeout(55000),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(
+          result?.error?.message ||
+            result?.message ||
+            `AIMLAPI trả về HTTP ${response.status}`
+        );
+      }
+
+      const content = result?.choices?.[0]?.message?.content;
+      responseText = typeof content === 'string'
+        ? content
+        : Array.isArray(content)
+          ? content.map((part) => part?.text || '').join('')
+          : '';
+      if (!responseText.trim()) {
+        throw new Error('AIMLAPI không trả nội dung văn bản trong choices[0].message.content');
+      }
+    } else if (provider === 'gemini') {
+      const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+      if (!apiKey) {
+        return res.status(503).json({
+          success: false,
+          message: 'AI chưa được cấu hình. Hãy thêm GEMINI_API_KEY hoặc AIMLAPI_API_KEY vào file .env',
+        });
+      }
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const preferredModel = process.env.GEMINI_MODEL || 'gemini-3.1-flash-lite';
+      const candidateModels = Array.from(
+        new Set([preferredModel, 'gemini-3.1-flash-lite', 'gemini-3.5-flash', 'gemini-flash-latest'])
+      );
+      let lastError = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const model = genAI.getGenerativeModel({
+            model: modelName,
+            systemInstruction: contextText,
+          });
+          const history = messages.slice(0, -1).map((message) => ({
+            role: message.role === 'assistant' ? 'model' : 'user',
+            parts: [{ text: message.content }],
+          }));
+          const chat = model.startChat({
+            history,
+            generationConfig: {
+              temperature: 0.85,
+              maxOutputTokens: 2048,
+            },
+          });
+          const result = await chat.sendMessage(messages[messages.length - 1].content);
+          responseText = result.response.text();
+          usedModel = modelName;
+          break;
+        } catch (error) {
+          lastError = error;
+          console.warn(
+            `[AI Controller] Model ${modelName} không thành công: ${error.message}. Đang thử model tiếp theo...`
+          );
+        }
+      }
+
+      if (!responseText) {
+        throw lastError || new Error('Không thể kết nối đến dịch vụ AI');
+      }
+    } else {
+      return res.status(503).json({
+        success: false,
+        message: `AI_PROVIDER không hợp lệ: '${provider}'. Hãy chọn 'aimlapi' hoặc 'gemini'.`,
+      });
     }
 
     // Kiểm tra xem response có chứa JSON tạo node không
@@ -121,7 +177,7 @@ async function chatWithAI(req, res, next) {
           !Array.isArray(parsed.node) &&
           typeof parsed.node.name === 'string' &&
           parsed.node.name.trim() &&
-          ['character', 'item', 'location', 'faction', 'event'].includes(parsed.node.type)
+          NODE_TYPES.includes(parsed.node.type)
         ) {
           nodeData = parsed.node;
           cleanMessage = [
@@ -147,7 +203,7 @@ async function chatWithAI(req, res, next) {
       },
     });
   } catch (error) {
-    console.error('Lỗi khi gọi Gemini AI:', error);
+    console.error('Lỗi khi gọi AI:', error);
     return res.status(500).json({
       success: false,
       message: error.message || 'Không thể tạo nội dung từ AI. Vui lòng thử lại.',
