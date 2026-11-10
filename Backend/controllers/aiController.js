@@ -118,22 +118,25 @@ function extractCreateNodeResponse(responseText) {
  * Determines whether the latest user turn explicitly requests story nodes.
  */
 function getNodeCreationRequest(messages) {
-  const creationIntentPattern = /\b(?:tạo|thêm|generate|create|add)\b/i;
-  const nodeTopicPattern = /\b(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện|character|item|location|faction|event)\b/i;
+  const creationIntentPattern = /(?<![\p{L}\p{N}])(?:tạo|thêm|generate|create|add)(?![\p{L}\p{N}])/iu;
+  const nodeTopicPattern = /(?<![\p{L}\p{N}])(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện|character|item|location|faction|event)(?![\p{L}\p{N}])/iu;
   const latestUserIndex = messages.map((message) => message.role === 'user').lastIndexOf(true);
   const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex].content || '' : '';
 
-  const trailingAssistantIndex = messages
-    .slice(0, latestUserIndex)
-    .map((message, index) => ({ message, index }))
-    .filter(({ message }) => message.role === 'assistant')
-    .reverse()
-    .find(({ message }) => /\?\s*$/.test(message.content || ''))?.index ?? -1;
-  const trailingAssistantMessage = trailingAssistantIndex >= 0 ? messages[trailingAssistantIndex].content || '' : '';
-  const pendingUserMessage = trailingAssistantIndex > 0 ? messages[trailingAssistantIndex - 1] : null;
+  const previousAssistantIndex = (() => {
+    for (let index = latestUserIndex - 1; index >= 0; index -= 1) {
+      if (messages[index]?.role === 'assistant') {
+        return /\?\s*$/.test(messages[index].content || '') ? index : -1;
+      }
+    }
+    return -1;
+  })();
+
+  const trailingAssistantMessage = previousAssistantIndex >= 0 ? messages[previousAssistantIndex].content || '' : '';
+  const pendingUserMessage = previousAssistantIndex > 0 ? messages[previousAssistantIndex - 1] : null;
 
   const hasPendingCreationIntent =
-    trailingAssistantIndex >= 0 &&
+    previousAssistantIndex >= 0 &&
     pendingUserMessage &&
     pendingUserMessage.role === 'user' &&
     /\?\s*$/.test(trailingAssistantMessage) &&
@@ -147,11 +150,11 @@ function getNodeCreationRequest(messages) {
   const wantsNodes = latestUserIntent || hasPendingCreationIntent;
   if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
 
-  const countPattern = /(?:\b(\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện)\b)|(?:\b(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)\b)/i;
+  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)(?![\p{L}\p{N}])/iu;
   const requestMessage = latestUserIntent ? latestUserMessage : (pendingUserMessage?.content || '');
   const countMatch = requestMessage.match(countPattern);
-  const countToken = countMatch?.[1] || countMatch?.[2];
-  const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken] || 1;
+  const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba)/iu)?.[1] || '1';
+  const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken.toLowerCase()] || 1;
   return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
 }
 
