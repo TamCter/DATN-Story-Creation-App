@@ -59,13 +59,15 @@ export class ProjectStore {
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
-        const { project, nodes = [], links = [], chapters = [] } = res.data;
+        const { project, nodes = [], links = [], edges, chapters = [] } = res.data;
+        const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
         const fullProject: StoryProject = {
           ...project,
           nodeCount: nodes.length,
-          linkCount: links.length,
+          linkCount: actualLinks.length,
           nodes: nodes as StoryNode[],
-          links: links as StoryLink[],
+          links: actualLinks,
+          edges: actualLinks,
           chapters: Array.isArray(chapters) && chapters.length > 0 ? (chapters as StoryChapter[]) : project.chapters,
         };
         this.memoryProjects.set(projectId, fullProject);
@@ -139,9 +141,7 @@ export class ProjectStore {
     const project = await this.getProject(projectId);
     const type = nodeData.type || 'character';
     const cleanPrefix = type.slice(0, 4);
-    const generatedId = nodeData.id && nodeData.id.trim()
-      ? nodeData.id.trim()
-      : `${cleanPrefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+    const generatedId = `${cleanPrefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 
     const defaultStatusByType: Record<string, string> = {
       character: 'Còn sống',
@@ -208,6 +208,7 @@ export class ProjectStore {
     // Cập nhật bộ nhớ và local cache
     project.nodes = [...project.nodes, newNode];
     project.nodeCount = project.nodes.length;
+    project.edges = project.links;
     await this.saveProject(project);
 
     return newNode;
@@ -268,6 +269,7 @@ export class ProjectStore {
     // Xóa node và các liên kết liên quan
     project.nodes = project.nodes.filter((n) => n.id !== nodeId);
     project.links = project.links.filter((l) => l.source !== nodeId && l.target !== nodeId);
+    project.edges = project.links;
     project.nodeCount = project.nodes.length;
     project.linkCount = project.links.length;
 
@@ -308,6 +310,7 @@ export class ProjectStore {
     }
 
     project.links = [...project.links, newLink];
+    project.edges = project.links;
     project.linkCount = project.links.length;
     await this.saveProject(project);
 
@@ -328,6 +331,7 @@ export class ProjectStore {
     }
 
     project.links = project.links.filter((l) => l.id !== linkId);
+    project.edges = project.links;
     project.linkCount = project.links.length;
     await this.saveProject(project);
   }

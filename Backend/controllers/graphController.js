@@ -126,6 +126,7 @@ async function getProjectGraph(req, res, next) {
         project: projectRecords[0].p,
         nodes,
         links: linkRecords,
+        edges: linkRecords,
         chapters,
         stats,
       },

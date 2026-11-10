@@ -94,7 +94,8 @@ class ApiService {
 
   private async request<T>(
     endpoint: string,
-    options: RequestInit = {}
+    options: RequestInit = {},
+    timeoutMs: number = 15000
   ): Promise<T> {
     const url = `${API_BASE_URL}${endpoint}`;
     const headers: Record<string, string> = {
@@ -107,9 +108,9 @@ class ApiService {
       headers['Authorization'] = `Bearer ${this.token}`;
     }
 
-    // Thiết lập timeout 12 giây để không bị treo màn hình nếu kết nối bị kẹt
+    // AI có thể cần vài lượt để hoàn thiện đủ node; provider có timeout riêng cho từng lượt.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 12000);
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
     try {
       console.log(`[API] 📡 ${options.method || 'GET'} ${url}`);
@@ -137,7 +138,7 @@ class ApiService {
 
       if (error.name === 'AbortError') {
         throw new Error(
-          `Yêu cầu tới máy chủ quá thời gian chờ (12s). Vui lòng kiểm tra kết nối mạng hoặc thử lại.`
+          `Yêu cầu tới máy chủ bị quá thời gian chờ (${Math.round(timeoutMs / 1000)}s) hoặc đã bị hủy. Vui lòng thử lại.`
         );
       }
 
@@ -225,6 +226,7 @@ class ApiService {
       project: any;
       nodes: any[];
       links: any[];
+      edges?: any[];
       chapters?: any[];
       stats?: any;
     };
@@ -236,6 +238,7 @@ class ApiService {
         project: any;
         nodes: any[];
         links: any[];
+        edges?: any[];
         chapters?: any[];
         stats?: any;
       };
@@ -362,6 +365,29 @@ class ApiService {
     return this.request<{ success: boolean; message: string }>(`/chapters/${chapterId}`, {
       method: 'DELETE',
     });
+  }
+
+  // AI APIs
+  async chatWithAI(payload: {
+    messages: { role: 'user' | 'assistant'; content: string }[];
+    projectContext?: { nodes?: any[]; projectTitle?: string };
+  }): Promise<{
+    success: boolean;
+    data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+    message?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+      message?: string;
+    }>(
+      '/ai/chat',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
+    );
   }
 }
 

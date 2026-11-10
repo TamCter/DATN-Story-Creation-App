@@ -80,6 +80,30 @@ Kiểm tra tình trạng kết nối: `http://localhost:5000/api/health`
 
 ---
 
+## 🤖 Cấu hình AI
+
+Backend hỗ trợ AIMLAPI (API tương thích OpenAI) và Google Gemini trực tiếp. Thêm vào `Backend/.env`:
+
+```env
+AI_PROVIDER=aimlapi
+AIMLAPI_API_KEY=<API-key-cua-ban>
+AIMLAPI_MODEL=google/gemini-3-1-flash-lite
+```
+
+Model AIMLAPI mặc định là `google/gemini-3-1-flash-lite`; có thể đổi sang model chat khác được AIMLAPI hỗ trợ. Không commit hoặc chia sẻ file `.env`; nếu API key từng bị lộ, hãy thu hồi key cũ và tạo key mới.
+
+Để dùng Gemini trực tiếp, cấu hình `AI_PROVIDER=gemini` cùng `GEMINI_API_KEY` (tùy chọn `GEMINI_MODEL`). Nếu không chỉ định `AI_PROVIDER`, Backend ưu tiên AIMLAPI khi `AIMLAPI_API_KEY` đã được cấu hình.
+
+Sau khi cập nhật `.env`, khởi động lại Backend rồi chạy bài test tích hợp tạo node:
+
+```bash
+node test-ai-node-flow.js
+```
+
+Bài test tạo project tạm, gọi AI, lưu node vào Neo4j, xác nhận node xuất hiện trong graph và xóa dữ liệu test.
+
+---
+
 ## 📚 Danh sách API (API Reference)
 
 ### 1. Xác thực người dùng (Authentication)

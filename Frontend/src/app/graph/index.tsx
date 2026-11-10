@@ -4,6 +4,8 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -14,15 +16,8 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import Svg, {
-  Circle,
-  G,
-  Line,
-  Path,
-  Polygon,
-  Rect,
-  Text as SvgText,
-} from 'react-native-svg';
+import { GraphWebView, GraphWebViewRef } from '@/components/graph/GraphWebView';
+
 
 import {
   CHARACTER_PROFESSIONS,
@@ -47,21 +42,11 @@ import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
+import AIChatPanel from '@/components/ui/AIChatPanel';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Precomputed static SVG path for the dot grid (replaces 646 separate Circle elements)
-const DOT_GRID_PATH = (() => {
-  let path = '';
-  for (let col = 0; col < 19; col++) {
-    for (let row = 0; row < 34; row++) {
-      const cx = col * 20 + 10;
-      const cy = row * 20 + 10;
-      path += `M${cx - 0.8},${cy}a0.8,0.8 0 1,0 1.6,0a0.8,0.8 0 1,0 -1.6,0 `;
-    }
-  }
-  return path;
-})();
+
 
 export default function GraphScreen() {
   const params = useLocalSearchParams();
@@ -90,6 +75,21 @@ export default function GraphScreen() {
   const [links, setLinks] = useState<StoryLink[]>(currentProject.links || []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
 
+  // Tải lại đồ thị (nodes + links) mới nhất từ Backend
+  const refreshGraphData = async (selectNodeId?: string | null) => {
+    try {
+      const proj = await projectStore.getProject(projectId);
+      setCurrentProject(proj);
+      setNodes(proj.nodes || []);
+      setLinks(proj.edges || proj.links || []);
+      if (selectNodeId !== undefined) {
+        setSelectedNodeId(selectNodeId);
+      }
+    } catch (err) {
+      console.warn('Lỗi tải lại dữ liệu đồ thị:', err);
+    }
+  };
+
   // Tải dự án từ projectStore (kết nối Backend Neo4j hoặc Cache cục bộ)
   useEffect(() => {
     let isMounted = true;
@@ -100,7 +100,7 @@ export default function GraphScreen() {
         if (isMounted) {
           setCurrentProject(proj);
           setNodes(proj.nodes || []);
-          setLinks(proj.links || []);
+          setLinks(proj.edges || proj.links || []);
           setSelectedNodeId(null);
         }
       } catch (err) {
@@ -141,6 +141,7 @@ export default function GraphScreen() {
   const [isEditingNode, setIsEditingNode] = useState<boolean>(false);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
+  const [aiChatOpen, setAiChatOpen] = useState<boolean>(false);
 
   // Form States (Đầy đủ và phân hóa theo từng loại Node)
   const [formId, setFormId] = useState('');
@@ -221,12 +222,14 @@ export default function GraphScreen() {
     return nodes.filter((n) => n.type === activeFilter);
   }, [nodes, activeFilter]);
 
+  const graphRef = useRef<GraphWebViewRef>(null);
+
   const handleZoomIn = () => {
-    setZoomLevel((prev) => Math.min(prev + 0.15, 1.8));
+    graphRef.current?.zoomIn();
   };
 
   const handleZoomOut = () => {
-    setZoomLevel((prev) => Math.max(prev - 0.15, 0.7));
+    graphRef.current?.zoomOut();
   };
 
   const handleSelectNode = (id: string) => {
@@ -288,6 +291,85 @@ export default function GraphScreen() {
     setFormLocation('');
     setFormImpact('');
     setNodeModalOpen(true);
+  };
+
+  const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
+    const targetType = nodeData.type || 'character';
+    handleOpenAddModal(targetType);
+    if (nodeData.name) setFormName(nodeData.name);
+    if (nodeData.desc) setFormDesc(nodeData.desc);
+    if (nodeData.role) setFormRole(nodeData.role);
+    if (nodeData.subType) setFormSubType(nodeData.subType);
+    if (nodeData.status) setFormStatus(nodeData.status);
+    if (nodeData.statusEvent) setFormStatusEvent(nodeData.statusEvent);
+    if (nodeData.gender) setFormGender(nodeData.gender);
+    if (nodeData.dob) setFormDob(nodeData.dob);
+    if (nodeData.birthplace) setFormBirthplace(nodeData.birthplace);
+    if (nodeData.weapon) setFormWeapon(nodeData.weapon);
+    if (nodeData.sect) setFormSect(nodeData.sect);
+    if (nodeData.personality) setFormPersonality(nodeData.personality);
+    if (nodeData.rarity) setFormRarity(nodeData.rarity);
+    if (nodeData.origin) setFormOrigin(nodeData.origin);
+    if (nodeData.element) setFormElement(nodeData.element);
+    if (nodeData.power) setFormPower(nodeData.power);
+    if (nodeData.holderOrLocation) setFormHolder(nodeData.holderOrLocation);
+    if (nodeData.region) setFormRegion(nodeData.region);
+    if (nodeData.terrain) setFormTerrain(nodeData.terrain);
+    if (nodeData.dangerLevel) setFormDangerLevel(nodeData.dangerLevel);
+    if (nodeData.climate) setFormClimate(nodeData.climate);
+    if (nodeData.ruler) setFormRuler(nodeData.ruler);
+    if (nodeData.leader) setFormLeader(nodeData.leader);
+    if (nodeData.headquarters) setFormHeadquarters(nodeData.headquarters);
+    if (nodeData.motto) setFormMotto(nodeData.motto);
+    if (nodeData.alignment) setFormAlignment(nodeData.alignment);
+    if (nodeData.chapter) setFormChapter(nodeData.chapter);
+    if (nodeData.time) setFormTime(nodeData.time);
+    if (nodeData.location) setFormLocation(nodeData.location);
+    if (nodeData.impact) setFormImpact(nodeData.impact);
+    setAiChatOpen(false);
+  };
+
+  const handleCreateNodesFromAI = async (
+    nodeDataList: Partial<StoryNode>[]
+  ): Promise<boolean> => {
+    const createdNodes: StoryNode[] = [];
+    const remainingNodes = [...nodeDataList];
+
+    try {
+      for (let index = 0; index < remainingNodes.length; index += 1) {
+        const nodeData = remainingNodes[index];
+        const stableKey = `${nodeData.type || 'unknown'}:${(nodeData.name || '').trim()}:${(nodeData.desc || '').trim()}`;
+        const alreadyCreated = createdNodes.some((createdNode) => {
+          const createdKey = `${createdNode.type}:${(createdNode.name || '').trim()}:${(createdNode.desc || '').trim()}`;
+          return createdKey === stableKey;
+        });
+
+        if (alreadyCreated) {
+          continue;
+        }
+
+        const createdNode = await projectStore.createNode(currentProject.id, nodeData);
+        createdNodes.push(createdNode);
+      }
+
+      await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);
+      setAiChatOpen(false);
+      return true;
+    } catch (err: any) {
+      if (createdNodes.length > 0) {
+        await refreshGraphData(createdNodes[createdNodes.length - 1].id);
+      }
+      const progress = createdNodes.length
+        ? `Đã thêm ${createdNodes.length}/${nodeDataList.length} node trước khi gặp lỗi.\n\n`
+        : '';
+      const message = `${progress}${err.message || 'Không thể thêm các node vào đồ thị.'}`;
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Không thể thêm tất cả node', message);
+      }
+      return false;
+    }
   };
 
   // Mở modal chỉnh sửa Node
@@ -375,6 +457,7 @@ export default function GraphScreen() {
       payload.origin = formOrigin.trim();
       payload.holderOrLocation = formHolder.trim();
       payload.element = formElement.trim();
+      payload.power = formPower.trim();
     } else if (formType === 'location') {
       payload.role = '';
       payload.subType = '';
@@ -383,6 +466,7 @@ export default function GraphScreen() {
       payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
       payload.climate = formClimate.trim() || 'Ôn hòa';
       payload.ruler = formRuler.trim();
+      payload.terrain = formTerrain.trim();
     } else if (formType === 'faction') {
       payload.role = '';
       payload.subType = formSubType.trim() || 'Chính phái';
@@ -403,17 +487,18 @@ export default function GraphScreen() {
       payload.chapter = chVal;
       payload.time = chVal;
       payload.location = formLocation.trim();
+      payload.impact = formImpact.trim();
     }
 
     try {
       if (isEditingNode && editingNodeId) {
         const updated = await projectStore.updateNode(currentProject.id, editingNodeId, payload);
-        setNodes((prev) => prev.map((n) => (n.id === editingNodeId ? { ...n, ...updated } : n)));
-        setSelectedNodeId(updated.id);
+        // Tải lại toàn bộ đồ thị để cập nhật cả nodes và links/edges mới từ backend
+        await refreshGraphData(updated.id);
       } else {
         const created = await projectStore.createNode(currentProject.id, payload);
-        setNodes((prev) => [...prev, created]);
-        setSelectedNodeId(created.id);
+        // Tải lại toàn bộ đồ thị để cập nhật cả nodes và links/edges mới từ backend
+        await refreshGraphData(created.id);
       }
       setNodeModalOpen(false);
     } catch (err: any) {
@@ -433,9 +518,8 @@ export default function GraphScreen() {
     const doDelete = async () => {
       try {
         await projectStore.deleteNode(currentProject.id, node.id);
-        setNodes((prev) => prev.filter((n) => n.id !== node.id));
-        setLinks((prev) => prev.filter((l) => l.source !== node.id && l.target !== node.id));
-        setSelectedNodeId(null);
+        // Tải lại toàn bộ đồ thị để cập nhật nodes và links/edges sau khi xóa
+        await refreshGraphData(null);
         setDetailModalOpen(false);
       } catch (err: any) {
         const msg = err.message || 'Không thể xóa node';
@@ -463,179 +547,6 @@ export default function GraphScreen() {
     }
   };
 
-  // Render Node Icon based on Type
-  const renderNodeShape = (node: StoryNode, isSelected: boolean) => {
-    const isConnected = connectedNodeIds.has(node.id);
-    const opacity = selectedNodeId && !isConnected ? 0.25 : 1;
-    const color = NODE_TYPE_CONFIG[node.type]?.color || '#e5a93c';
-
-    if (node.type === 'character') {
-      return (
-        <G opacity={opacity}>
-          {isSelected && (
-            <>
-              <Circle
-                cx={node.x}
-                cy={node.y}
-                r={24}
-                stroke={color}
-                strokeWidth={1.2}
-                strokeDasharray="3,3"
-                fill="none"
-              />
-              <Circle
-                cx={node.x}
-                cy={node.y}
-                r={20}
-                stroke="rgba(229, 169, 60, 0.2)"
-                strokeWidth={6}
-                fill="none"
-              />
-            </>
-          )}
-          <Circle
-            cx={node.x}
-            cy={node.y}
-            r={13}
-            stroke={color}
-            strokeWidth={2}
-            fill="#12100d"
-          />
-          <Circle cx={node.x} cy={node.y} r={5} fill={color} />
-        </G>
-      );
-    }
-
-    if (node.type === 'faction') {
-      const r = 14;
-      const points = [
-        `${node.x},${node.y - r}`,
-        `${node.x + r * 0.866},${node.y - r * 0.5}`,
-        `${node.x + r * 0.866},${node.y + r * 0.5}`,
-        `${node.x},${node.y + r}`,
-        `${node.x - r * 0.866},${node.y + r * 0.5}`,
-        `${node.x - r * 0.866},${node.y - r * 0.5}`,
-      ].join(' ');
-
-      const innerPoints = [
-        `${node.x},${node.y - r * 0.55}`,
-        `${node.x + r * 0.48},${node.y - r * 0.28}`,
-        `${node.x + r * 0.48},${node.y + r * 0.28}`,
-        `${node.x},${node.y + r * 0.55}`,
-        `${node.x - r * 0.48},${node.y + r * 0.28}`,
-        `${node.x - r * 0.48},${node.y - r * 0.28}`,
-      ].join(' ');
-
-      return (
-        <G opacity={opacity}>
-          {isSelected && (
-            <Polygon
-              points={points}
-              stroke={color}
-              strokeWidth={4}
-              strokeOpacity={0.3}
-              fill="none"
-            />
-          )}
-          <Polygon
-            points={points}
-            stroke={color}
-            strokeWidth={2}
-            fill="#12100d"
-          />
-          <Polygon points={innerPoints} fill={color} />
-        </G>
-      );
-    }
-
-    if (node.type === 'event') {
-      const size = 12;
-      return (
-        <G opacity={opacity}>
-          {isSelected && (
-            <Rect
-              x={node.x - size - 4}
-              y={node.y - size - 4}
-              width={(size + 4) * 2}
-              height={(size + 4) * 2}
-              stroke={color}
-              strokeWidth={1}
-              strokeDasharray="2,2"
-              fill="none"
-            />
-          )}
-          <Rect
-            x={node.x - size}
-            y={node.y - size}
-            width={size * 2}
-            height={size * 2}
-            stroke={color}
-            strokeWidth={2}
-            fill="#12100d"
-          />
-          <Rect
-            x={node.x - 5}
-            y={node.y - 5}
-            width={10}
-            height={10}
-            fill={color}
-          />
-        </G>
-      );
-    }
-
-    if (node.type === 'item') {
-      const r = 13;
-      const points = `${node.x},${node.y - r} ${node.x + r},${node.y} ${node.x},${node.y + r} ${node.x - r},${node.y}`;
-      const innerPoints = `${node.x},${node.y - 6} ${node.x + 6},${node.y} ${node.x},${node.y + 6} ${node.x - 6},${node.y}`;
-      return (
-        <G opacity={opacity}>
-          {isSelected && (
-            <Polygon
-              points={points}
-              stroke={color}
-              strokeWidth={4}
-              strokeOpacity={0.3}
-              fill="none"
-            />
-          )}
-          <Polygon
-            points={points}
-            stroke={color}
-            strokeWidth={2}
-            fill="#12100d"
-          />
-          <Polygon points={innerPoints} fill={color} />
-        </G>
-      );
-    }
-
-    // Location (Triangle)
-    const r = 14;
-    const points = `${node.x},${node.y - r} ${node.x + r * 0.866},${node.y + r * 0.7} ${node.x - r * 0.866},${node.y + r * 0.7}`;
-    const innerPoints = `${node.x},${node.y - 5} ${node.x + 5 * 0.866},${node.y + 4} ${node.x - 5 * 0.866},${node.y + 4}`;
-    return (
-      <G opacity={opacity}>
-        {isSelected && (
-          <Polygon
-            points={points}
-            stroke={color}
-            strokeWidth={4}
-            strokeOpacity={0.3}
-            fill="none"
-          />
-        )}
-        <Polygon
-          points={points}
-          stroke={color}
-          strokeWidth={2}
-          fill="#12100d"
-        />
-        <Polygon points={innerPoints} fill={color} />
-      </G>
-    );
-  };
-
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Top Header Bar */}
@@ -655,9 +566,14 @@ export default function GraphScreen() {
           </Text>
         </View>
 
-        <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
-          <Text style={styles.addNodeBtnText}>+</Text>
-        </Pressable>
+        <View style={styles.topBarRight}>
+          <Pressable style={styles.aiBtn} onPress={() => setAiChatOpen(true)}>
+            <Text style={styles.aiBtnText}>✨ AI</Text>
+          </Pressable>
+          <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
+            <Text style={styles.addNodeBtnText}>+</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Filter Chips Bar */}
@@ -719,87 +635,21 @@ export default function GraphScreen() {
           </Pressable>
         </View>
 
-        {/* SVG Drawing Canvas */}
+        {/* Interactive Graph Canvas via WebView */}
         <View style={styles.svgWrapper}>
-          <Svg
-            width={SCREEN_WIDTH}
-            height={SCREEN_HEIGHT * 0.72}
-            viewBox={`0 0 ${SCREEN_WIDTH / zoomLevel} ${(SCREEN_HEIGHT * 0.72) / zoomLevel}`}>
-            {/* Background Dot Grid */}
-            <Path d={DOT_GRID_PATH} fill="#26221b" />
-
-            {/* Render Links */}
-            {links.map((link) => {
-              const src = nodes.find((n) => n.id === link.source);
-              const tgt = nodes.find((n) => n.id === link.target);
-              if (!src || !tgt) return null;
-
-              const isHighlighted =
-                selectedNodeId === link.source || selectedNodeId === link.target;
-              const isDimmed = selectedNodeId && !isHighlighted;
-
-              const strokeColor = isHighlighted
-                ? '#f0b84c'
-                : 'rgba(229, 169, 60, 0.38)';
-              const strokeW = isHighlighted ? 1.6 : 1.2;
-              const strokeDash = '3,3';
-
-              const midX = (src.x + tgt.x) / 2;
-              const midY = (src.y + tgt.y) / 2;
-
-              return (
-                <G key={link.id} opacity={isDimmed ? 0.12 : 1}>
-                  <Line
-                    x1={src.x}
-                    y1={src.y}
-                    x2={tgt.x}
-                    y2={tgt.y}
-                    stroke={strokeColor}
-                    strokeWidth={strokeW}
-                    strokeDasharray={strokeDash}
-                  />
-
-                  {isHighlighted && link.label && (
-                    <SvgText
-                      x={midX}
-                      y={midY - 4}
-                      fill="#e5a93c"
-                      fontSize="9.5"
-                      fontFamily={AppFonts.serif}
-                      fontStyle="italic"
-                      textAnchor="middle">
-                      {link.label}
-                    </SvgText>
-                  )}
-                </G>
-              );
-            })}
-
-            {/* Render Nodes */}
-            {filteredNodes.map((node) => {
-              const isSelected = selectedNodeId === node.id;
-              const isConnected = connectedNodeIds.has(node.id);
-              const isDimmed = selectedNodeId && !isConnected;
-
-              return (
-                <G key={node.id} onPress={() => handleSelectNode(node.id)}>
-                  <Circle cx={node.x} cy={node.y} r={32} fill="transparent" />
-                  {renderNodeShape(node, isSelected)}
-                  <SvgText
-                    x={node.x}
-                    y={node.y + 24}
-                    fill={isSelected ? '#f3c76f' : '#ded5c7'}
-                    fontSize="11.5"
-                    fontFamily={AppFonts.serif}
-                    fontWeight={isSelected ? '700' : '500'}
-                    textAnchor="middle"
-                    opacity={isDimmed ? 0.25 : 1}>
-                    {node.name}
-                  </SvgText>
-                </G>
-              );
-            })}
-          </Svg>
+          <GraphWebView
+            ref={graphRef}
+            nodes={nodes}
+            edges={links}
+            selectedNodeId={selectedNodeId}
+            activeFilter={activeFilter}
+            onNodeClick={(nodeId) => {
+              handleSelectNode(nodeId);
+            }}
+            onCanvasClick={() => {
+              handleCloseDetail();
+            }}
+          />
 
           {/* Khi dự án chưa có node nào: Hiển thị thông báo sạch đẹp thay vì hiển thị node dự án khác */}
           {!isLoading && nodes.length === 0 && (
@@ -1068,7 +918,10 @@ export default function GraphScreen() {
 
       {/* Dynamic Add / Edit Node Modal */}
       <Modal visible={nodeModalOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalOverlay}>
           <View style={styles.modalCardLarge}>
             <View style={styles.modalTitleRow}>
               <Text style={styles.modalTitle}>
@@ -1080,8 +933,9 @@ export default function GraphScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: SCREEN_HEIGHT * 0.7 }}
+              style={{ maxHeight: SCREEN_HEIGHT * 0.65 }}
               showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
               contentContainerStyle={{ gap: 14 }}>
               {/* Type Selector */}
               <View style={styles.modalInputGroup}>
@@ -1581,7 +1435,7 @@ export default function GraphScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Node Full Details Modal */}
@@ -1853,6 +1707,16 @@ export default function GraphScreen() {
           </View>
         </Modal>
       )}
+
+      {/* AI Assistant Chat Panel */}
+      <AIChatPanel
+        visible={aiChatOpen}
+        onClose={() => setAiChatOpen(false)}
+        onCreateNode={handleCreateNodeFromAI}
+        onCreateNodes={handleCreateNodesFromAI}
+        projectTitle={currentProject.title}
+        existingNodes={nodes}
+      />
     </SafeAreaView>
   );
 }
@@ -1907,6 +1771,29 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginTop: 2,
     textTransform: 'uppercase',
+  },
+  topBarRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 4,
+    backgroundColor: '#26201a',
+    borderWidth: 1,
+    borderColor: '#e5a93c60',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  aiBtnText: {
+    color: '#e5a93c',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+    letterSpacing: 0.5,
   },
   addNodeBtn: {
     width: 38,
@@ -2007,15 +1894,20 @@ const styles = StyleSheet.create({
   },
   svgWrapper: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: '100%',
+    height: '100%',
+    position: 'relative',
   },
   emptyCanvasContainer: {
     position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 32,
-    maxWidth: 420,
+    zIndex: 15,
   },
   emptySymbolBox: {
     width: 56,

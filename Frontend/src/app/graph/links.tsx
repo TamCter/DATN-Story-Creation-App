@@ -1,7 +1,9 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -542,7 +544,10 @@ export default function LinksScreen() {
 
       {/* Add Link Modal */}
       <Modal visible={addModalOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Thiết lập mối liên kết mới</Text>
@@ -553,117 +558,123 @@ export default function LinksScreen() {
               </Pressable>
             </View>
 
-            {/* Source Node Select */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>NODE NGUỒN (KHỞI ĐIỂM)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-                {nodes.map((n) => {
-                  const isSelected = sourceNodeId === n.id;
-                  const cfg = NODE_TYPE_CONFIG[n.type];
-                  return (
-                    <Pressable
-                      key={n.id}
-                      style={[
-                        styles.nodePickChip,
-                        isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
-                      ]}
-                      onPress={() => setSourceNodeId(n.id)}>
-                      <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
-                      <Text style={[styles.nodePickName, isSelected && { color: cfg.color }]}>
-                        {n.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
+            <ScrollView
+              style={styles.modalScroll}
+              contentContainerStyle={styles.modalScrollContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled">
+              {/* Source Node Select */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>NODE NGUỒN (KHỞI ĐIỂM)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
+                  {nodes.map((n) => {
+                    const isSelected = sourceNodeId === n.id;
+                    const cfg = NODE_TYPE_CONFIG[n.type];
+                    return (
+                      <Pressable
+                        key={n.id}
+                        style={[
+                          styles.nodePickChip,
+                          isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
+                        ]}
+                        onPress={() => setSourceNodeId(n.id)}>
+                        <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
+                        <Text style={[styles.nodePickName, isSelected && { color: cfg.color }]}>
+                          {n.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
 
-            {/* Target Node Select */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>NODE ĐÍCH (ĐẾN)</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
-                {nodes.map((n) => {
-                  const isSelected = targetNodeId === n.id;
-                  const cfg = NODE_TYPE_CONFIG[n.type];
-                  return (
-                    <Pressable
-                      key={n.id}
-                      style={[
-                        styles.nodePickChip,
-                        isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
-                      ]}
-                      onPress={() => setTargetNodeId(n.id)}>
-                      <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
-                      <Text style={[styles.nodePickName, isSelected && { color: cfg.color }]}>
-                        {n.name}
-                      </Text>
-                    </Pressable>
-                  );
-                })}
-              </ScrollView>
-            </View>
+              {/* Target Node Select */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>NODE ĐÍCH (ĐẾN)</Text>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
+                  {nodes.map((n) => {
+                    const isSelected = targetNodeId === n.id;
+                    const cfg = NODE_TYPE_CONFIG[n.type];
+                    return (
+                      <Pressable
+                        key={n.id}
+                        style={[
+                          styles.nodePickChip,
+                          isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
+                        ]}
+                        onPress={() => setTargetNodeId(n.id)}>
+                        <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
+                        <Text style={[styles.nodePickName, isSelected && { color: cfg.color }]}>
+                          {n.name}
+                        </Text>
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
+              </View>
 
-            {/* Relationship Label Input */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>NHÃN MỐI QUAN HỆ</Text>
-              <TextInput
-                style={styles.textInput}
-                placeholder="Ví dụ: kết nghĩa, tương trợ, truy sát, sở hữu..."
-                placeholderTextColor="#665f52"
-                value={newLinkLabel}
-                onChangeText={setNewLinkLabel}
-              />
-            </View>
+              {/* Relationship Label Input */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>NHÃN MỐI QUAN HỆ</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ví dụ: kết nghĩa, tương trợ, truy sát, sở hữu..."
+                  placeholderTextColor="#665f52"
+                  value={newLinkLabel}
+                  onChangeText={setNewLinkLabel}
+                />
+              </View>
 
-            {/* Connection Type */}
-            <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>KIỂU ĐƯỜNG NỐI</Text>
-              <View style={styles.lineTypeSelector}>
-                <Pressable
-                  style={[
-                    styles.lineTypeBtn,
-                    newLinkType === 'solid' && styles.lineTypeBtnSelected,
-                  ]}
-                  onPress={() => setNewLinkType('solid')}>
-                  <Text
+              {/* Connection Type */}
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>KIỂU ĐƯỜNG NỐI</Text>
+                <View style={styles.lineTypeSelector}>
+                  <Pressable
                     style={[
-                      styles.lineTypeBtnText,
-                      newLinkType === 'solid' && styles.lineTypeBtnTextSelected,
-                    ]}>
-                    Nét liền (Trực tiếp)
-                  </Text>
+                      styles.lineTypeBtn,
+                      newLinkType === 'solid' && styles.lineTypeBtnSelected,
+                    ]}
+                    onPress={() => setNewLinkType('solid')}>
+                    <Text
+                      style={[
+                        styles.lineTypeBtnText,
+                        newLinkType === 'solid' && styles.lineTypeBtnTextSelected,
+                      ]}>
+                      Nét liền (Trực tiếp)
+                    </Text>
+                  </Pressable>
+                  <Pressable
+                    style={[
+                      styles.lineTypeBtn,
+                      newLinkType === 'dashed' && styles.lineTypeBtnSelected,
+                    ]}
+                    onPress={() => setNewLinkType('dashed')}>
+                    <Text
+                      style={[
+                        styles.lineTypeBtnText,
+                        newLinkType === 'dashed' && styles.lineTypeBtnTextSelected,
+                      ]}>
+                      Nét đứt (Gián tiếp / Ẩn)
+                    </Text>
+                  </Pressable>
+                </View>
+              </View>
+
+              <View style={styles.modalActionRow}>
+                <Pressable
+                  style={styles.modalCancelBtn}
+                  onPress={() => setAddModalOpen(false)}>
+                  <Text style={styles.modalCancelText}>Hủy</Text>
                 </Pressable>
                 <Pressable
-                  style={[
-                    styles.lineTypeBtn,
-                    newLinkType === 'dashed' && styles.lineTypeBtnSelected,
-                  ]}
-                  onPress={() => setNewLinkType('dashed')}>
-                  <Text
-                    style={[
-                      styles.lineTypeBtnText,
-                      newLinkType === 'dashed' && styles.lineTypeBtnTextSelected,
-                    ]}>
-                    Nét đứt (Gián tiếp / Ẩn)
-                  </Text>
+                  style={styles.modalSubmitBtn}
+                  onPress={handleCreateLink}>
+                  <Text style={styles.modalSubmitText}>Tạo liên kết</Text>
                 </Pressable>
               </View>
-            </View>
-
-            <View style={styles.modalActionRow}>
-              <Pressable
-                style={styles.modalCancelBtn}
-                onPress={() => setAddModalOpen(false)}>
-                <Text style={styles.modalCancelText}>Hủy</Text>
-              </Pressable>
-              <Pressable
-                style={styles.modalSubmitBtn}
-                onPress={handleCreateLink}>
-                <Text style={styles.modalSubmitText}>Tạo liên kết</Text>
-              </Pressable>
-            </View>
+            </ScrollView>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1043,16 +1054,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 20,
+    paddingVertical: 18,
   },
   modalCard: {
     width: '100%',
     maxWidth: 460,
+    maxHeight: '85%',
     backgroundColor: '#171511',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#383226',
     padding: 22,
     gap: 14,
+    flexShrink: 1,
+  },
+  modalScroll: {
+    maxHeight: '100%',
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    gap: 14,
+    paddingBottom: 6,
   },
   modalHeader: {
     flexDirection: 'row',

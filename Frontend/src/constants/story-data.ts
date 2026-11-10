@@ -83,6 +83,7 @@ export interface StoryChapter {
   events: ChapterEvent[];
   nodes: StoryNode[];
   links: StoryLink[];
+  edges?: StoryLink[];
 }
 
 export interface StoryLocationItem {
@@ -104,6 +105,7 @@ export interface StoryProject {
   updatedAt: string;
   nodes: StoryNode[];
   links: StoryLink[];
+  edges?: StoryLink[];
   events?: StoryTimelineEvent[];
   locations?: StoryLocationItem[];
   chapters?: StoryChapter[];

@@ -4,6 +4,7 @@ import {
   ActivityIndicator,
   Alert,
   Dimensions,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -584,7 +585,10 @@ export default function NodesDetailScreen() {
 
       {/* Dynamic Add / Edit Node Modal */}
       <Modal visible={modalOpen} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
+          style={styles.modalOverlay}>
           <View style={styles.modalCardLarge}>
             <View style={styles.modalTitleRow}>
               <Text style={styles.modalTitle}>
@@ -596,9 +600,10 @@ export default function NodesDetailScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: SCREEN_HEIGHT * 0.7 }}
+              style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
-              contentContainerStyle={{ gap: 14 }}>
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={styles.modalScrollContent}>
               {/* Type Selector */}
               <View style={styles.modalInputGroup}>
                 <Text style={styles.modalInputLabel}>Loại phân loại thực thể</Text>
@@ -1083,7 +1088,7 @@ export default function NodesDetailScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -1409,16 +1414,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 18,
   },
   modalCardLarge: {
     width: '100%',
     maxWidth: 500,
+    maxHeight: '85%',
     backgroundColor: '#191713',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#383226',
     padding: 20,
     gap: 14,
+    flexShrink: 1,
+  },
+  modalScroll: {
+    maxHeight: '100%',
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    gap: 14,
+    paddingBottom: 6,
   },
   modalTitleRow: {
     flexDirection: 'row',
