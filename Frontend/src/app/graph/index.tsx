@@ -333,10 +333,25 @@ export default function GraphScreen() {
     nodeDataList: Partial<StoryNode>[]
   ): Promise<boolean> => {
     const createdNodes: StoryNode[] = [];
+    const remainingNodes = [...nodeDataList];
+
     try {
-      for (const nodeData of nodeDataList) {
-        createdNodes.push(await projectStore.createNode(currentProject.id, nodeData));
+      for (let index = 0; index < remainingNodes.length; index += 1) {
+        const nodeData = remainingNodes[index];
+        const stableKey = `${nodeData.type || 'unknown'}:${(nodeData.name || '').trim()}:${(nodeData.desc || '').trim()}`;
+        const alreadyCreated = createdNodes.some((createdNode) => {
+          const createdKey = `${createdNode.type}:${(createdNode.name || '').trim()}:${(createdNode.desc || '').trim()}`;
+          return createdKey === stableKey;
+        });
+
+        if (alreadyCreated) {
+          continue;
+        }
+
+        const createdNode = await projectStore.createNode(currentProject.id, nodeData);
+        createdNodes.push(createdNode);
       }
+
       await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);
       setAiChatOpen(false);
       return true;
@@ -442,6 +457,7 @@ export default function GraphScreen() {
       payload.origin = formOrigin.trim();
       payload.holderOrLocation = formHolder.trim();
       payload.element = formElement.trim();
+      payload.power = formPower.trim();
     } else if (formType === 'location') {
       payload.role = '';
       payload.subType = '';
@@ -450,6 +466,7 @@ export default function GraphScreen() {
       payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
       payload.climate = formClimate.trim() || 'Ôn hòa';
       payload.ruler = formRuler.trim();
+      payload.terrain = formTerrain.trim();
     } else if (formType === 'faction') {
       payload.role = '';
       payload.subType = formSubType.trim() || 'Chính phái';
@@ -470,6 +487,7 @@ export default function GraphScreen() {
       payload.chapter = chVal;
       payload.time = chVal;
       payload.location = formLocation.trim();
+      payload.impact = formImpact.trim();
     }
 
     try {

@@ -3,7 +3,7 @@ require('dotenv').config({ path: path.join(__dirname, '.env') });
 const { chatWithAI } = require('./controllers/aiController');
 
 const API_BASE_URL = (process.env.TEST_API_URL || 'http://localhost:5000/api').replace(/\/+$/, '');
-const AI_TIMEOUT_MS = 180000;
+const AI_TIMEOUT_MS = 480000;
 const REQUEST_TIMEOUT_MS = 15000;
 const NODE_SCENARIOS = [
   {

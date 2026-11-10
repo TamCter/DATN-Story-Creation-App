@@ -39,6 +39,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     const webViewRef = useRef<any>(null);
     const RNWebView = WebView as any;
     const isFirstRender = useRef(true);
+    const readyRef = useRef(false);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -50,6 +51,20 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Chỉ tạo HTML ban đầu 1 lần, sau đó dùng injectJavaScript để cập nhật dữ liệu
+
+    const sendGraphData = () => {
+      const graphEdges = (Array.isArray(edges) && edges.length > 0)
+        ? edges
+        : (Array.isArray(links) && links.length > 0 ? links : []);
+      const updatePayload = JSON.stringify({
+        type: 'UPDATE_DATA',
+        nodes,
+        edges: graphEdges,
+      });
+      webViewRef.current?.injectJavaScript(
+        `window.postMessage(${JSON.stringify(updatePayload)}, '*'); true;`
+      );
+    };
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -83,6 +98,15 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       },
     }));
 
+    useEffect(() => {
+      if (!webViewRef.current) return;
+      if (!readyRef.current) {
+        webViewRef.current?.injectJavaScript(
+          `window.postMessage(JSON.stringify({ type: 'READY' }), '*'); true;`
+        );
+      }
+    }, []);
+
     // Đồng bộ trạng thái khi selectedNodeId thay đổi
     useEffect(() => {
       webViewRef.current?.injectJavaScript(
@@ -98,15 +122,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         isFirstRender.current = false;
         return;
       }
-      const graphEdges = (Array.isArray(edges) && edges.length > 0) ? edges : links;
-      const updatePayload = JSON.stringify({
-        type: 'UPDATE_DATA',
-        nodes: nodes,
-        edges: graphEdges,
-      }).replace(/<\/script>/gi, '<\\/script>');
-      webViewRef.current?.injectJavaScript(
-        `window.postMessage(${JSON.stringify(updatePayload)}, '*'); true;`
-      );
+      sendGraphData();
     }, [nodes, edges, links]);
 
     // Đồng bộ trạng thái khi activeFilter thay đổi
@@ -124,6 +140,12 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         const raw = event.nativeEvent?.data;
         const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
         if (!data || !data.type) return;
+
+        if (data.type === 'READY') {
+          readyRef.current = true;
+          sendGraphData();
+          return;
+        }
 
         if (data.type === 'NODE_CLICK') {
           onNodeClick?.(data.nodeId, data.node);

@@ -18,12 +18,20 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
   } = options;
 
   // Hỗ trợ cả hai tên gọi edges hoặc links
-  const graphEdges = Array.isArray(edges) && edges.length > 0 ? edges : links;
+  const graphEdges = (Array.isArray(edges) && edges.length > 0)
+    ? edges
+    : (Array.isArray(links) && links.length > 0 ? links : []);
 
-  const serializedNodes = JSON.stringify(nodes).replace(/<\/script>/gi, '<\\/script>');
-  const serializedEdges = JSON.stringify(graphEdges).replace(/<\/script>/gi, '<\\/script>');
-  const serializedSelectedId = JSON.stringify(selectedNodeId || null);
-  const serializedFilter = JSON.stringify(activeFilter || null);
+  const serializeInlineScriptValue = (value: unknown) => JSON.stringify(value)
+    .replace(/</g, '\\u003C')
+    .replace(/\u2028/g, '\\u2028')
+    .replace(/\u2029/g, '\\u2029')
+    .replace(/<\/script>/gi, '<\\/script>');
+
+  const serializedNodes = serializeInlineScriptValue(nodes);
+  const serializedEdges = serializeInlineScriptValue(graphEdges);
+  const serializedSelectedId = serializeInlineScriptValue(selectedNodeId || null);
+  const serializedFilter = serializeInlineScriptValue(activeFilter || null);
 
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -176,26 +184,33 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         var cx = width / 2;
         var cy = height / 2;
         var radius = Math.min(width, height) * 0.35;
+        var priorNodeMap = Object.assign({}, nodeMap);
 
         nodes = rawNodes.map(function(n, index) {
+          var existingNode = priorNodeMap[String(n.id)];
           var hasValidCoords = typeof n.x === 'number' && typeof n.y === 'number' && (n.x !== 0 || n.y !== 0);
           var angle = (index / (count || 1)) * 2 * Math.PI;
           var initX = hasValidCoords ? n.x : cx + radius * Math.cos(angle);
           var initY = hasValidCoords ? n.y : cy + radius * Math.sin(angle);
-
-          return {
+          var rebuiltNode = {
             id: String(n.id),
             name: n.name || 'Thực thể',
             type: n.type || 'character',
             role: n.role || '',
             desc: n.desc || '',
             status: n.status || '',
-            x: initX,
-            y: initY,
-            vx: 0,
-            vy: 0,
+            x: existingNode ? existingNode.x : initX,
+            y: existingNode ? existingNode.y : initY,
+            vx: existingNode ? (typeof existingNode.vx === 'number' ? existingNode.vx : 0) : 0,
+            vy: existingNode ? (typeof existingNode.vy === 'number' ? existingNode.vy : 0) : 0,
             raw: n
           };
+
+          if (draggedNode && String(draggedNode.id) === String(n.id)) {
+            draggedNode = rebuiltNode;
+          }
+
+          return rebuiltNode;
         });
 
         nodeMap = {};
@@ -587,6 +602,7 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         if (e.touches && e.touches.length === 2) {
           initialPinchDistance = getTouchDistance(e.touches[0], e.touches[1]);
           initialPinchZoom = camera.zoom;
+          hasPointerMoved = true;
           return;
         }
 
@@ -675,6 +691,8 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
       // Double Click / Double Tap to reset
       var lastTapTime = 0;
       function handleDoubleTap(e) {
+        if (e && e.touches && e.touches.length !== 1) return;
+
         var now = Date.now();
         if (now - lastTapTime < 300) {
           camera.x = 0;
@@ -686,6 +704,9 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
 
       // Attach event listeners
       canvas.addEventListener('mousedown', handlePointerDown);
+      canvas.addEventListener('dblclick', function(e) {
+        handleDoubleTap({ clientX: e.clientX, clientY: e.clientY });
+      });
       window.addEventListener('mousemove', handlePointerMove);
       window.addEventListener('mouseup', handlePointerUp);
 
@@ -731,6 +752,7 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
 
       window.addEventListener('message', handleIncomingMessage);
       document.addEventListener('message', handleIncomingMessage);
+      sendToApp({ type: 'READY' });
 
       // Start
       window.addEventListener('resize', resize);

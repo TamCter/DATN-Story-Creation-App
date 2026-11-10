@@ -1,13 +1,24 @@
 const express = require('express');
+const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const { chatWithAI } = require('../controllers/aiController');
-const { optionalAuth } = require('../middlewares/authMiddleware');
+const { verifyToken } = require('../middlewares/authMiddleware');
 
-// Cho phép cả người dùng đã đăng nhập và khách
-router.use(optionalAuth);
+const aiChatLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 20,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req) => req.user?.id || req.ip || 'anonymous',
+  message: {
+    success: false,
+    message: 'Bạn đang gửi quá nhiều yêu cầu chat. Hãy thử lại sau 1 phút.',
+  },
+  statusCode: 429,
+});
 
-// POST /api/ai/chat - Chat với AI để tạo node
-router.post('/chat', chatWithAI);
+router.use(verifyToken);
+router.post('/chat', aiChatLimiter, chatWithAI);
 
 module.exports = router;
 

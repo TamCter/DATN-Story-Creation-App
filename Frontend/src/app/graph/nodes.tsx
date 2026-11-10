@@ -600,10 +600,10 @@ export default function NodesDetailScreen() {
             </View>
 
             <ScrollView
-              style={{ maxHeight: SCREEN_HEIGHT * 0.65 }}
+              style={styles.modalScroll}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
-              contentContainerStyle={{ gap: 14 }}>
+              contentContainerStyle={styles.modalScrollContent}>
               {/* Type Selector */}
               <View style={styles.modalInputGroup}>
                 <Text style={styles.modalInputLabel}>Loại phân loại thực thể</Text>
@@ -1414,16 +1414,27 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 16,
+    paddingVertical: 18,
   },
   modalCardLarge: {
     width: '100%',
     maxWidth: 500,
+    maxHeight: '85%',
     backgroundColor: '#191713',
     borderRadius: 14,
     borderWidth: 1,
     borderColor: '#383226',
     padding: 20,
     gap: 14,
+    flexShrink: 1,
+  },
+  modalScroll: {
+    maxHeight: '100%',
+    flexShrink: 1,
+  },
+  modalScrollContent: {
+    gap: 14,
+    paddingBottom: 6,
   },
   modalTitleRow: {
     flexDirection: 'row',

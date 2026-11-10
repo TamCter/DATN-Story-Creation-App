@@ -37,6 +37,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
   ) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const isFirstRender = useRef(true);
+    const readyRef = useRef(false);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -48,6 +49,20 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       });
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Chỉ tạo HTML ban đầu 1 lần
+
+    const sendGraphData = () => {
+      const graphEdges = (Array.isArray(edges) && edges.length > 0)
+        ? edges
+        : (Array.isArray(links) && links.length > 0 ? links : []);
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({
+          type: 'UPDATE_DATA',
+          nodes,
+          edges: graphEdges,
+        }),
+        '*'
+      );
+    };
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -95,15 +110,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         isFirstRender.current = false;
         return;
       }
-      const graphEdges = (Array.isArray(edges) && edges.length > 0) ? edges : links;
-      iframeRef.current?.contentWindow?.postMessage(
-        JSON.stringify({
-          type: 'UPDATE_DATA',
-          nodes: nodes,
-          edges: graphEdges,
-        }),
-        '*'
-      );
+      sendGraphData();
     }, [nodes, edges, links]);
 
     useEffect(() => {
@@ -117,9 +124,17 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     useEffect(() => {
       const handleWindowMessage = (event: MessageEvent) => {
         try {
+          if (event.source !== iframeRef.current?.contentWindow) return;
           const raw = event.data;
           const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
           if (!data || !data.type) return;
+
+          if (data.type === 'READY') {
+            readyRef.current = true;
+            sendGraphData();
+            iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'READY' }), '*');
+            return;
+          }
 
           if (data.type === 'NODE_CLICK') {
             onNodeClick?.(data.nodeId, data.node);
