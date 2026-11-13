@@ -260,6 +260,7 @@ export default function GraphScreen() {
   const [formTime, setFormTime] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formImpact, setFormImpact] = useState('');
+  const [formCharactersInvolved, setFormCharactersInvolved] = useState<string[]>([]);
 
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
@@ -389,6 +390,7 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormTime(chapters[0]?.title || '');
   setFormLocation('');
   setFormImpact('');
+  setFormCharactersInvolved([]);
   setNodeModalOpen(true);
 };
 
@@ -507,6 +509,12 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormTime(node.time || node.chapter || '');
   setFormLocation(node.location || '');
   setFormImpact(node.impact || '');
+  setFormCharactersInvolved(
+    (node.charactersInvolved || node.characters || '')
+      .split(',')
+      .map((name) => name.trim())
+      .filter(Boolean)
+  );
   setDetailModalOpen(false);
   setNodeModalOpen(true);
 };
@@ -587,6 +595,7 @@ const handleSaveNode = async () => {
     payload.time = chVal;
     payload.location = formLocation.trim();
     payload.impact = formImpact.trim();
+    payload.charactersInvolved = formCharactersInvolved.join(', ');
   }
 
   try {
@@ -667,8 +676,19 @@ return (
       </View>
 
       <View style={styles.topBarRight}>
-        <Pressable style={styles.aiBtn} onPress={() => setAiChatOpen(true)}>
-          <Text style={styles.aiBtnText}>✨ AI</Text>
+        <Pressable
+          style={styles.aiBtn}
+          onPress={() => setAiChatOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI Chat">
+          <Text style={styles.aiBtnText}>💬</Text>
+        </Pressable>
+        <Pressable
+          style={[styles.aiBtn, styles.aiStoryBtn]}
+          onPress={() => setAiStoryModalOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI sáng tác câu chuyện">
+          <Text style={styles.aiBtnText}>✨</Text>
         </Pressable>
         <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
           <Text style={styles.addNodeBtnText}>+</Text>
@@ -694,79 +714,83 @@ return (
         ).map((item) => {
           const isActive = activeFilter === item.type;
           const itemColor = NODE_TYPE_CONFIG[item.type]?.color || '#e5a93c';
-          {/* Relationships Toggle */ }
-          <Pressable
-            style={[
-              styles.filterChip,
-              showRelationships && {
-                borderColor: '#a8884a',
-                backgroundColor: 'rgba(168,136,74,0.15)',
-              },
-            ]}
-            onPress={() => setShowRelationships(!showRelationships)}>
-            <Text style={[styles.filterChipSymbol, { color: '#a8884a' }]}>
-              ⟷
-            </Text>
-            <Text style={[styles.filterChipText, showRelationships && { color: '#a8884a' }]}>
-              Mối quan hệ
-            </Text>
-          </Pressable>
+          return (
+            <Pressable
+              key={item.type}
+              style={[
+                styles.filterChip,
+                isActive && {
+                  borderColor: itemColor,
+                  backgroundColor: `${itemColor}20`,
+                },
+              ]}
+              onPress={() => setActiveFilter(isActive ? null : item.type)}>
+              <Text style={[styles.filterChipSymbol, { color: itemColor }]}>
+                {item.symbol}
+              </Text>
+              <Text style={[styles.filterChipText, isActive && { color: itemColor }]}>
+                {item.label}
+              </Text>
+            </Pressable>
+          );
+        })}
 
-          {/* Separator */ }
-          <View style={{ width: 1, backgroundColor: '#29251e', marginHorizontal: 4 }} />
+        <View style={{ width: 1, backgroundColor: '#29251e', marginHorizontal: 4 }} />
 
-          {/* "Tất cả" chip */ }
-          <Pressable
-            style={[
-              styles.filterChip,
-              !chapterFilter && {
-                borderColor: '#e5a93c',
-                backgroundColor: 'rgba(229,169,60,0.12)',
-              },
-            ]}
-            onPress={() => setChapterFilter(null)}>
-            <Text style={[styles.filterChipSymbol, { color: '#e5a93c' }]}>
-              ☰
-            </Text>
-            <Text style={[styles.filterChipText, !chapterFilter && { color: '#e5a93c' }]}>
-              Tất cả
-            </Text>
-          </Pressable>
+        <Pressable
+          style={[
+            styles.filterChip,
+            showRelationships && {
+              borderColor: '#a8884a',
+              backgroundColor: 'rgba(168,136,74,0.15)',
+            },
+          ]}
+          onPress={() => setShowRelationships(!showRelationships)}>
+          <Text style={[styles.filterChipSymbol, { color: '#a8884a' }]}>⟷</Text>
+          <Text style={[styles.filterChipText, showRelationships && { color: '#a8884a' }]}>
+            Mối quan hệ
+          </Text>
+        </Pressable>
 
-          {/* Chapter chips */ }
-          {
-            chapters.map((ch) => {
-              const isActive = chapterFilter === ch.title;
-              return (
-                <Pressable
-                  key={item.type}
-                  key={ch.id}
-                  style={[
-                    styles.filterChip,
-                    isActive && {
-                      borderColor: itemColor,
-                      backgroundColor: 'rgba(229,169,60,0.12)',
-                      borderColor: '#5b8ec2',
-                      backgroundColor: 'rgba(91,142,194,0.12)',
-                    },
-                  ]}
-                  onPress={() => setActiveFilter(isActive ? null : item.type)}>
-                  <Text style={[styles.filterChipSymbol, { color: itemColor }]}>
-                    {item.symbol}
-                    onPress={() => setChapterFilter(isActive ? null : ch.title)}>
-                    <Text style={[styles.filterChipSymbol, { color: '#5b8ec2' }]}>
-                      📖
-                    </Text>
-                    <Text style={[styles.filterChipText, isActive && { color: itemColor }]}>
-                      {item.label}
-                      <Text style={[styles.filterChipText, isActive && { color: '#5b8ec2' }]}>
-                        Chương {ch.chapterNumber}
-                      </Text>
-                    </Pressable>
-                    );
-          })}
-                  </ScrollView>
-                </View>
+        <View style={{ width: 1, backgroundColor: '#29251e', marginHorizontal: 4 }} />
+
+        <Pressable
+          style={[
+            styles.filterChip,
+            !chapterFilter && {
+              borderColor: '#e5a93c',
+              backgroundColor: 'rgba(229,169,60,0.12)',
+            },
+          ]}
+          onPress={() => setChapterFilter(null)}>
+          <Text style={[styles.filterChipSymbol, { color: '#e5a93c' }]}>☰</Text>
+          <Text style={[styles.filterChipText, !chapterFilter && { color: '#e5a93c' }]}>
+            Tất cả
+          </Text>
+        </Pressable>
+
+        {chapters.map((chapter) => {
+          const isActive = chapterFilter === chapter.title;
+          return (
+            <Pressable
+              key={chapter.id}
+              style={[
+                styles.filterChip,
+                isActive && {
+                  borderColor: '#5b8ec2',
+                  backgroundColor: 'rgba(91,142,194,0.12)',
+                },
+              ]}
+              onPress={() => setChapterFilter(isActive ? null : chapter.title)}>
+              <Text style={[styles.filterChipSymbol, { color: '#5b8ec2' }]}>📖</Text>
+              <Text style={[styles.filterChipText, isActive && { color: '#5b8ec2' }]}>
+                Chương {chapter.chapterNumber}
+              </Text>
+            </Pressable>
+          );
+        })}
+      </ScrollView>
+    </View>
 
       {
                 focusedRelation && (
@@ -808,7 +832,6 @@ return (
                   <GraphWebView
                     ref={graphRef}
                     nodes={visibleNodes}
-                    edges={visibleLinks}
                     edges={filteredLinks}
                     selectedNodeId={selectedNodeId}
                     activeFilter={activeFilter}
@@ -1566,6 +1589,45 @@ return (
                               />
                             </View>
                           </View>
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Nhân vật tham gia</Text>
+                            {characterNodes.length > 0 ? (
+                              <View style={styles.eventCharacterOptions}>
+                                {characterNodes.map((character) => {
+                                  const isSelected = formCharactersInvolved.includes(character.name);
+                                  return (
+                                    <Pressable
+                                      key={character.id}
+                                      style={[
+                                        styles.eventCharacterChip,
+                                        isSelected && styles.eventCharacterChipSelected,
+                                      ]}
+                                      onPress={() =>
+                                        setFormCharactersInvolved((selected) =>
+                                          isSelected
+                                            ? selected.filter((name) => name !== character.name)
+                                            : [...selected, character.name]
+                                        )
+                                      }
+                                      accessibilityRole="checkbox"
+                                      accessibilityState={{ checked: isSelected }}>
+                                      <Text
+                                        style={[
+                                          styles.eventCharacterChipText,
+                                          isSelected && styles.eventCharacterChipTextSelected,
+                                        ]}>
+                                        {isSelected ? '✓ ' : ''}{character.name}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            ) : (
+                              <Text style={styles.eventCharacterEmpty}>
+                                Chưa có node nhân vật nào trong dự án.
+                              </Text>
+                            )}
+                          </View>
                         </View>
                       )}
 
@@ -1823,6 +1885,14 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.impact}</Text>
                                   </View>
                                 ) : null}
+                                {selectedNode.charactersInvolved || selectedNode.characters ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Nhân vật tham gia:</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      {selectedNode.charactersInvolved || selectedNode.characters}
+                                    </Text>
+                                  </View>
+                                ) : null}
                               </>
                             )}
                           </View>
@@ -1898,22 +1968,6 @@ return (
                   await refreshGraphData(null);
                 }}
               />
-
-              {/* Floating AI Action Buttons - Bottom Right */ }
-              <View style={styles.aiFabContainer}>
-                <Pressable
-                  style={styles.aiFabBtnSecondary}
-                  onPress={() => setAiChatOpen(true)}>
-                  <Text style={styles.aiFabIcon}>💬</Text>
-                  <Text style={styles.aiFabTextSecondary}>AI Chat</Text>
-                </Pressable>
-                <Pressable
-                  style={styles.aiFabBtn}
-                  onPress={() => setAiStoryModalOpen(true)}>
-                  <Text style={styles.aiFabIcon}>✨</Text>
-                  <Text style={styles.aiFabText}>AI Sáng tác</Text>
-                </Pressable>
-              </View>
     </SafeAreaView>
       );
 }
@@ -1975,22 +2029,24 @@ return (
       gap: 8,
   },
       aiBtn: {
-        paddingHorizontal: 10,
-      paddingVertical: 7,
+        width: 34,
+      height: 34,
       borderRadius: 4,
       backgroundColor: '#26201a',
       borderWidth: 1,
       borderColor: '#e5a93c60',
-      flexDirection: 'row',
       alignItems: 'center',
       justifyContent: 'center',
   },
+      aiStoryBtn: {
+        backgroundColor: '#2a2010',
+      borderColor: '#e5a93c',
+  },
       aiBtnText: {
         color: '#e5a93c',
-      fontSize: 12,
+      fontSize: 16,
       fontWeight: '700',
       fontFamily: AppFonts.sans,
-      letterSpacing: 0.5,
   },
       addNodeBtn: {
         width: 38,
@@ -2499,6 +2555,36 @@ return (
       fontFamily: AppFonts.mono,
       marginBottom: 2,
   },
+      eventCharacterOptions: {
+        flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 8,
+  },
+      eventCharacterChip: {
+        borderWidth: 1,
+      borderColor: '#383226',
+      borderRadius: 16,
+      backgroundColor: '#1b1814',
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+  },
+      eventCharacterChipSelected: {
+        borderColor: '#5b8ec2',
+      backgroundColor: 'rgba(91,142,194,0.16)',
+  },
+      eventCharacterChipText: {
+        color: '#a69d8e',
+      fontSize: 12,
+  },
+      eventCharacterChipTextSelected: {
+        color: '#9dc7f2',
+      fontWeight: '600',
+  },
+      eventCharacterEmpty: {
+        color: '#8f887b',
+      fontSize: 12,
+      fontStyle: 'italic',
+  },
       modalActionRow: {
         flexDirection: 'row',
       justifyContent: 'flex-end',
@@ -2674,59 +2760,5 @@ return (
         color: '#e5a93c',
       fontSize: 11,
       fontWeight: '600',
-  },
-      // Floating AI Action Buttons
-      aiFabContainer: {
-        position: 'absolute',
-      bottom: 24,
-      right: 16,
-      flexDirection: 'column',
-      gap: 10,
-      alignItems: 'flex-end',
-      zIndex: 999,
-  },
-      aiFabBtn: {
-        flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 16,
-      paddingVertical: 12,
-      borderRadius: 28,
-      backgroundColor: '#2a2010',
-      borderWidth: 1.5,
-      borderColor: '#e5a93c',
-      gap: 8,
-      shadowColor: '#e5a93c',
-      shadowOffset: {width: 0, height: 2 },
-      shadowOpacity: 0.35,
-      shadowRadius: 8,
-      elevation: 8,
-  },
-      aiFabBtnSecondary: {
-        flexDirection: 'row',
-      alignItems: 'center',
-      paddingHorizontal: 14,
-      paddingVertical: 10,
-      borderRadius: 24,
-      backgroundColor: '#1a1611',
-      borderWidth: 1,
-      borderColor: '#383226',
-      gap: 6,
-      elevation: 5,
-  },
-      aiFabIcon: {
-        fontSize: 18,
-  },
-      aiFabText: {
-        color: '#e5a93c',
-      fontSize: 13,
-      fontWeight: '700',
-      fontFamily: AppFonts.sans,
-      letterSpacing: 0.3,
-  },
-      aiFabTextSecondary: {
-        color: '#ded5c7',
-      fontSize: 12,
-      fontWeight: '600',
-      fontFamily: AppFonts.sans,
   },
 });

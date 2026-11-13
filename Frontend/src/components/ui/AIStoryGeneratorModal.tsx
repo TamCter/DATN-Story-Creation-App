@@ -352,14 +352,21 @@ export default function AIStoryGeneratorModal({
           <View style={styles.modalHeader}>
             <View style={styles.headerTitleBox}>
               <Text style={styles.headerIcon}>✨</Text>
-              <View>
-                <Text style={styles.headerTitle}>AI Sáng Tác Câu Chuyện</Text>
-                <Text style={styles.headerSubtitle}>
+              <View style={styles.headerTextBox}>
+                <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
+                  AI Sáng Tác Câu Chuyện
+                </Text>
+                <Text style={styles.headerSubtitle} numberOfLines={1} ellipsizeMode="tail">
                   Tạo Chương · Thiết Lập Sự Kiện · Viết Toàn Văn
                 </Text>
               </View>
             </View>
-            <Pressable hitSlop={12} onPress={onClose} style={styles.closeBtn}>
+            <Pressable
+              hitSlop={12}
+              onPress={onClose}
+              style={styles.closeBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Đóng bảng AI sáng tác câu chuyện">
               <Text style={styles.closeBtnText}>✕</Text>
             </Pressable>
           </View>
@@ -645,6 +652,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
+    flex: 1,
+    minWidth: 0,
+  },
+  headerTextBox: {
+    flex: 1,
+    minWidth: 0,
   },
   headerIcon: {
     fontSize: 22,
@@ -664,12 +677,14 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
   },
   closeBtn: {
-    width: 32,
-    height: 32,
+    width: 36,
+    height: 36,
     borderRadius: 16,
     backgroundColor: 'rgba(229,169,60,0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+    flexShrink: 0,
+    marginLeft: 8,
   },
   closeBtnText: {
     fontSize: 14,
