@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { WebView, WebViewMessageEvent } from 'react-native-webview';
 import { generateGraphHtml } from './generateGraphHtml';
@@ -20,6 +20,7 @@ export interface GraphWebViewRef {
   resetView: () => void;
   selectNode: (nodeId: string | null) => void;
   setFilter: (filter: string | null) => void;
+  focusRelation: (sourceId: string, targetId: string) => void;
 }
 
 export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
@@ -38,8 +39,8 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
   ) => {
     const webViewRef = useRef<any>(null);
     const RNWebView = WebView as any;
-    const isFirstRender = useRef(true);
     const readyRef = useRef(false);
+    const pendingFocusRef = useRef<{ sourceId: string; targetId: string } | null>(null);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -52,7 +53,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Chỉ tạo HTML ban đầu 1 lần, sau đó dùng injectJavaScript để cập nhật dữ liệu
 
-    const sendGraphData = () => {
+    const sendGraphData = useCallback(() => {
       const graphEdges = (Array.isArray(edges) && edges.length > 0)
         ? edges
         : (Array.isArray(links) && links.length > 0 ? links : []);
@@ -64,7 +65,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       webViewRef.current?.injectJavaScript(
         `window.postMessage(${JSON.stringify(updatePayload)}, '*'); true;`
       );
-    };
+    }, [nodes, edges, links]);
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -96,13 +97,24 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           )} }), '*'); true;`
         );
       },
+      focusRelation: (sourceId: string, targetId: string) => {
+        pendingFocusRef.current = { sourceId, targetId };
+        if (readyRef.current) {
+          webViewRef.current?.injectJavaScript(
+            `window.postMessage(JSON.stringify({ type: 'FOCUS_RELATION', sourceId: ${JSON.stringify(
+              sourceId
+            )}, targetId: ${JSON.stringify(targetId)} }), '*'); true;`
+          );
+          pendingFocusRef.current = null;
+        }
+      },
     }));
 
     useEffect(() => {
       if (!webViewRef.current) return;
       if (!readyRef.current) {
         webViewRef.current?.injectJavaScript(
-          `window.postMessage(JSON.stringify({ type: 'READY' }), '*'); true;`
+          `window.postMessage(JSON.stringify({ type: 'REQUEST_READY' }), '*'); true;`
         );
       }
     }, []);
@@ -116,14 +128,11 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       );
     }, [selectedNodeId]);
 
-    // Đồng bộ dữ liệu nodes/edges khi chúng thay đổi (sau khi tạo/sửa/xóa node)
+    // Chờ WebView sẵn sàng; khi sẵn sàng, READY sẽ gửi dữ liệu mới nhất.
     useEffect(() => {
-      if (isFirstRender.current) {
-        isFirstRender.current = false;
-        return;
-      }
+      if (!readyRef.current) return;
       sendGraphData();
-    }, [nodes, edges, links]);
+    }, [sendGraphData]);
 
     // Đồng bộ trạng thái khi activeFilter thay đổi
     useEffect(() => {
@@ -144,6 +153,15 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         if (data.type === 'READY') {
           readyRef.current = true;
           sendGraphData();
+          if (pendingFocusRef.current) {
+            const { sourceId, targetId } = pendingFocusRef.current;
+            webViewRef.current?.injectJavaScript(
+              `window.postMessage(JSON.stringify({ type: 'FOCUS_RELATION', sourceId: ${JSON.stringify(
+                sourceId
+              )}, targetId: ${JSON.stringify(targetId)} }), '*'); true;`
+            );
+            pendingFocusRef.current = null;
+          }
           return;
         }
 

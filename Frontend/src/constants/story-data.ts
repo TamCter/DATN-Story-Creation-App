@@ -49,6 +49,9 @@ export interface StoryLink {
   target: string;
   label?: string;
   type?: 'solid' | 'dashed';
+  category?: string;
+  contextNote?: string;
+  tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
 }
 
 export interface StoryTag {
@@ -738,6 +741,5 @@ export const GENDER_OPTIONS = [
   { label: 'Nữ', value: 'Nữ', icon: '♀️' },
   { label: 'Khác / Chưa rõ', value: 'Khác', icon: '⚧' },
 ];
-
 
 

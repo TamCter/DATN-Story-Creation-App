@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
 import { StyleSheet, View } from 'react-native';
 import { generateGraphHtml } from './generateGraphHtml';
 
@@ -19,6 +19,7 @@ export interface GraphWebViewRef {
   resetView: () => void;
   selectNode: (nodeId: string | null) => void;
   setFilter: (filter: string | null) => void;
+  focusRelation: (sourceId: string, targetId: string) => void;
 }
 
 export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
@@ -36,8 +37,8 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     ref
   ) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
-    const isFirstRender = useRef(true);
     const readyRef = useRef(false);
+    const pendingFocusRef = useRef<{ sourceId: string; targetId: string } | null>(null);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -50,7 +51,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, []); // Chỉ tạo HTML ban đầu 1 lần
 
-    const sendGraphData = () => {
+    const sendGraphData = useCallback(() => {
       const graphEdges = (Array.isArray(edges) && edges.length > 0)
         ? edges
         : (Array.isArray(links) && links.length > 0 ? links : []);
@@ -62,7 +63,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         }),
         '*'
       );
-    };
+    }, [nodes, edges, links]);
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -95,6 +96,16 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           '*'
         );
       },
+      focusRelation: (sourceId: string, targetId: string) => {
+        pendingFocusRef.current = { sourceId, targetId };
+        if (readyRef.current) {
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ type: 'FOCUS_RELATION', sourceId, targetId }),
+            '*'
+          );
+          pendingFocusRef.current = null;
+        }
+      },
     }));
 
     useEffect(() => {
@@ -104,14 +115,11 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       );
     }, [selectedNodeId]);
 
-    // Đồng bộ dữ liệu nodes/edges khi chúng thay đổi
+    // Chờ iframe sẵn sàng; khi sẵn sàng, READY sẽ gửi dữ liệu mới nhất.
     useEffect(() => {
-      if (isFirstRender.current) {
-        isFirstRender.current = false;
-        return;
-      }
+      if (!readyRef.current) return;
       sendGraphData();
-    }, [nodes, edges, links]);
+    }, [sendGraphData]);
 
     useEffect(() => {
       iframeRef.current?.contentWindow?.postMessage(
@@ -132,6 +140,16 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           if (data.type === 'READY') {
             readyRef.current = true;
             sendGraphData();
+            if (pendingFocusRef.current) {
+              iframeRef.current?.contentWindow?.postMessage(
+                JSON.stringify({
+                  type: 'FOCUS_RELATION',
+                  ...pendingFocusRef.current,
+                }),
+                '*'
+              );
+              pendingFocusRef.current = null;
+            }
             iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'READY' }), '*');
             return;
           }
@@ -145,10 +163,14 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       };
 
       window.addEventListener('message', handleWindowMessage);
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ type: 'REQUEST_READY' }),
+        '*'
+      );
       return () => {
         window.removeEventListener('message', handleWindowMessage);
       };
-    }, [onNodeClick, onCanvasClick]);
+    }, [onNodeClick, onCanvasClick, sendGraphData]);
 
     return (
       <View style={[styles.container, style]}>
@@ -156,6 +178,12 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           ref={iframeRef}
           srcDoc={html}
           title="Graph WebView"
+          onLoad={() =>
+            iframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({ type: 'REQUEST_READY' }),
+              '*'
+            )
+          }
           style={{
             width: '100%',
             height: '100%',
@@ -179,4 +207,3 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
 });
-

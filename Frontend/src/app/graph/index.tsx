@@ -51,6 +51,14 @@ const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 export default function GraphScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
+  const routeFocusSourceId =
+    typeof params.focusSourceId === 'string' ? params.focusSourceId : null;
+  const routeFocusTargetId =
+    typeof params.focusTargetId === 'string' ? params.focusTargetId : null;
+  const routeFocusLinkId =
+    typeof params.focusLinkId === 'string' ? params.focusLinkId : null;
+  const routeFocusKey = `${projectId}:${routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
+  const hasRouteFocus = Boolean(routeFocusSourceId && routeFocusTargetId);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     // Chỉ nạp dữ liệu mẫu nếu ID thực sự khớp chính xác với dự án mẫu, không fallback sai lệch
@@ -73,7 +81,10 @@ export default function GraphScreen() {
   const [isLoading, setIsLoading] = useState(true);
   const [nodes, setNodes] = useState<StoryNode[]>(currentProject.nodes || []);
   const [links, setLinks] = useState<StoryLink[]>(currentProject.links || []);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
+    routeFocusSourceId
+  );
+  const [dismissedFocusKey, setDismissedFocusKey] = useState<string | null>(null);
 
   // Tải lại đồ thị (nodes + links) mới nhất từ Backend
   const refreshGraphData = async (selectNodeId?: string | null) => {
@@ -96,12 +107,14 @@ export default function GraphScreen() {
     async function loadProjectData() {
       setIsLoading(true);
       try {
-        const proj = await projectStore.getProject(projectId);
+        const proj = await projectStore.getProject(projectId, {
+          preferCache: hasRouteFocus,
+        });
         if (isMounted) {
           setCurrentProject(proj);
           setNodes(proj.nodes || []);
           setLinks(proj.edges || proj.links || []);
-          setSelectedNodeId(null);
+          setSelectedNodeId(routeFocusSourceId);
         }
       } catch (err) {
         console.warn('Lỗi tải dữ liệu đồ thị:', err);
@@ -113,7 +126,7 @@ export default function GraphScreen() {
     return () => {
       isMounted = false;
     };
-  }, [projectId]);
+  }, [projectId, routeFocusSourceId, routeFocusTargetId, hasRouteFocus]);
 
   const chapters = useMemo(() => {
     return getProjectChapters(currentProject);
@@ -132,6 +145,55 @@ export default function GraphScreen() {
   const activeChapter = useMemo(() => {
     return chapters.find((c) => c.id === activeChapterId) || chapters[0];
   }, [chapters, activeChapterId]);
+
+  const focusedRelation = useMemo(() => {
+    if (
+      !routeFocusSourceId ||
+      !routeFocusTargetId ||
+      dismissedFocusKey === routeFocusKey ||
+      (!isLoading &&
+        (!nodes.some((node) => node.id === routeFocusSourceId) ||
+          !nodes.some((node) => node.id === routeFocusTargetId)))
+    ) {
+      return null;
+    }
+
+    return {
+      sourceId: routeFocusSourceId,
+      targetId: routeFocusTargetId,
+      linkId: routeFocusLinkId,
+    };
+  }, [
+    dismissedFocusKey,
+    routeFocusKey,
+    isLoading,
+    nodes,
+    routeFocusSourceId,
+    routeFocusTargetId,
+    routeFocusLinkId,
+  ]);
+
+  const visibleNodes = useMemo(() => {
+    if (!focusedRelation) return nodes;
+    return nodes.filter(
+      (node) =>
+        node.id === focusedRelation.sourceId ||
+        node.id === focusedRelation.targetId
+    );
+  }, [nodes, focusedRelation]);
+
+  const visibleLinks = useMemo(() => {
+    if (!focusedRelation) return links;
+    const focusedLink = focusedRelation.linkId
+      ? links.find((link) => link.id === focusedRelation.linkId)
+      : undefined;
+    if (focusedLink) return [focusedLink];
+    return links.filter(
+      (link) =>
+        link.source === focusedRelation.sourceId &&
+        link.target === focusedRelation.targetId
+    );
+  }, [links, focusedRelation]);
 
   const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -202,10 +264,10 @@ export default function GraphScreen() {
   // Xác định các liên kết xung quanh node được chọn
   const connectedLinks = useMemo(() => {
     if (!selectedNodeId) return [];
-    return links.filter(
+    return visibleLinks.filter(
       (link) => link.source === selectedNodeId || link.target === selectedNodeId
     );
-  }, [links, selectedNodeId]);
+  }, [visibleLinks, selectedNodeId]);
 
   const connectedNodeIds = useMemo(() => {
     if (!selectedNodeId) return new Set<string>();
@@ -218,11 +280,19 @@ export default function GraphScreen() {
   }, [connectedLinks, selectedNodeId]);
 
   const filteredNodes = useMemo(() => {
-    if (!activeFilter) return nodes;
-    return nodes.filter((n) => n.type === activeFilter);
-  }, [nodes, activeFilter]);
+    if (!activeFilter) return visibleNodes;
+    return visibleNodes.filter((n) => n.type === activeFilter);
+  }, [visibleNodes, activeFilter]);
 
   const graphRef = useRef<GraphWebViewRef>(null);
+
+  useEffect(() => {
+    if (!focusedRelation || isLoading) return;
+    graphRef.current?.focusRelation(
+      focusedRelation.sourceId,
+      focusedRelation.targetId
+    );
+  }, [focusedRelation, isLoading]);
 
   const handleZoomIn = () => {
     graphRef.current?.zoomIn();
@@ -238,6 +308,12 @@ export default function GraphScreen() {
 
   const handleCloseDetail = () => {
     setSelectedNodeId(null);
+  };
+
+  const handleShowFullGraph = () => {
+    setDismissedFocusKey(routeFocusKey);
+    setSelectedNodeId(null);
+    graphRef.current?.resetView();
   };
 
   // Mở modal tạo Node mới
@@ -562,7 +638,7 @@ export default function GraphScreen() {
             {currentProject.title}
           </Text>
           <Text style={styles.topBarSub}>
-            {filteredNodes.length} THỰC THỂ · {links.length} LIÊN KẾT
+            {filteredNodes.length} THỰC THỂ · {visibleLinks.length} LIÊN KẾT
           </Text>
         </View>
 
@@ -616,6 +692,20 @@ export default function GraphScreen() {
         </ScrollView>
       </View>
 
+      {focusedRelation && (
+        <View style={styles.focusNotice}>
+          <Text style={styles.focusNoticeText} numberOfLines={1}>
+            Đang tập trung: {nodes.find((node) => node.id === focusedRelation.sourceId)?.name}
+            {' → '}
+            {nodes.find((node) => node.id === focusedRelation.targetId)?.name}
+            {visibleLinks[0]?.label ? ` · ${visibleLinks[0].label}` : ''}
+          </Text>
+          <Pressable onPress={handleShowFullGraph} hitSlop={8}>
+            <Text style={styles.focusNoticeAction}>Toàn đồ thị</Text>
+          </Pressable>
+        </View>
+      )}
+
       {/* Canvas Area */}
       <View style={styles.canvasContainer}>
         {/* Floating Title / Watermark */}
@@ -639,8 +729,8 @@ export default function GraphScreen() {
         <View style={styles.svgWrapper}>
           <GraphWebView
             ref={graphRef}
-            nodes={nodes}
-            edges={links}
+            nodes={visibleNodes}
+            edges={visibleLinks}
             selectedNodeId={selectedNodeId}
             activeFilter={activeFilter}
             onNodeClick={(nodeId) => {
@@ -1813,6 +1903,29 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     borderBottomWidth: 1,
     borderBottomColor: '#1d1b16',
+  },
+  focusNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: '#1a1711',
+    borderBottomWidth: 1,
+    borderBottomColor: '#3a3020',
+  },
+  focusNoticeText: {
+    flex: 1,
+    color: '#ded5c7',
+    fontSize: 11,
+    fontFamily: AppFonts.sans,
+  },
+  focusNoticeAction: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
   },
   filterScroll: {
     paddingHorizontal: 16,

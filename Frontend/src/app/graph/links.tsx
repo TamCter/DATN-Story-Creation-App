@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -152,10 +153,23 @@ export default function LinksScreen() {
 
   // Add Link Modal
   const [addModalOpen, setAddModalOpen] = useState(false);
-  const [sourceNodeId, setSourceNodeId] = useState(nodes[0]?.id || '');
-  const [targetNodeId, setTargetNodeId] = useState(nodes[1]?.id || '');
+  const [sourceNodeId, setSourceNodeId] = useState('');
+  const [targetNodeId, setTargetNodeId] = useState('');
   const [newLinkLabel, setNewLinkLabel] = useState('');
+  const [newLinkCategory, setNewLinkCategory] = useState('');
+  const [newLinkContext, setNewLinkContext] = useState('');
   const [newLinkType, setNewLinkType] = useState<'solid' | 'dashed'>('dashed');
+  const [isCreating, setIsCreating] = useState(false);
+
+  const effectiveSourceNodeId = nodes.some((node) => node.id === sourceNodeId)
+    ? sourceNodeId
+    : nodes[0]?.id || '';
+  const effectiveTargetNodeId = nodes.some(
+    (node) =>
+      node.id === targetNodeId && node.id !== effectiveSourceNodeId
+  )
+    ? targetNodeId
+    : nodes.find((node) => node.id !== effectiveSourceNodeId)?.id || '';
 
   // Node lookup map
   const nodeMap = useMemo(() => {
@@ -209,32 +223,71 @@ export default function LinksScreen() {
         src.name.toLowerCase().includes(q) ||
         tgt.name.toLowerCase().includes(q) ||
         (link.label && link.label.toLowerCase().includes(q)) ||
+        (link.category && link.category.toLowerCase().includes(q)) ||
+        (link.contextNote && link.contextNote.toLowerCase().includes(q)) ||
         (meta && meta.contextNote.toLowerCase().includes(q))
       );
     });
   }, [links, nodeMap, selectedEntityFilter, selectedCategory, searchQuery]);
 
+  const showMessage = (title: string, message: string) => {
+    if (Platform.OS === 'web') {
+      window.alert(`${title}\n\n${message}`);
+    } else {
+      Alert.alert(title, message);
+    }
+  };
+
+  const handleOpenAddModal = () => {
+    if (nodes.length < 2) {
+      showMessage('Chưa đủ thực thể', 'Cần có ít nhất hai thực thể để tạo mối quan hệ.');
+      return;
+    }
+    setSourceNodeId(nodes[0].id);
+    setTargetNodeId(nodes[1].id);
+    setNewLinkLabel('');
+    setNewLinkCategory('');
+    setNewLinkContext('');
+    setNewLinkType('solid');
+    setAddModalOpen(true);
+  };
+
   const handleCreateLink = async () => {
-    if (!sourceNodeId || !targetNodeId || sourceNodeId === targetNodeId) return;
+    if (!effectiveSourceNodeId || !effectiveTargetNodeId) {
+      showMessage('Thiếu thực thể', 'Vui lòng chọn thực thể nguồn và thực thể đích.');
+      return;
+    }
+    if (effectiveSourceNodeId === effectiveTargetNodeId) {
+      showMessage('Mối quan hệ không hợp lệ', 'Hai đầu của mối quan hệ phải là hai thực thể khác nhau.');
+      return;
+    }
+    if (!nodes.some((node) => node.id === effectiveSourceNodeId) || !nodes.some((node) => node.id === effectiveTargetNodeId)) {
+      showMessage('Thực thể không hợp lệ', 'Vui lòng chọn lại hai thực thể trong dự án.');
+      return;
+    }
+
+    setIsCreating(true);
     try {
       const created = await projectStore.createLink(projectId, {
-        source: sourceNodeId,
-        target: targetNodeId,
+        source: effectiveSourceNodeId,
+        target: effectiveTargetNodeId,
         label: newLinkLabel.trim() || 'liên hệ',
         type: newLinkType,
-      });
-
-      LINK_METAS[created.id] = {
-        category: 'MỐI LIÊN HỆ MỚI',
-        contextNote: 'Liên kết được thiết lập trực tiếp trong đồ thị cốt truyện.',
+        category: newLinkCategory.trim(),
+        contextNote: newLinkContext.trim(),
         tone: 'loyalty',
-      };
+      });
 
       setLinks((prev) => [...prev, created]);
       setAddModalOpen(false);
-      setNewLinkLabel('');
-    } catch (err: any) {
+    } catch (err) {
       console.warn('Lỗi tạo liên kết:', err);
+      showMessage(
+        'Không thể tạo mối quan hệ',
+        err instanceof Error ? err.message : 'Đã xảy ra lỗi không xác định.'
+      );
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -266,6 +319,29 @@ export default function LinksScreen() {
     }
   };
 
+  const openRelationOnGraph = (link: StoryLink) => {
+    router.push({
+      pathname: '/graph' as any,
+      params: {
+        projectId: currentProject.id,
+        focusLinkId: link.id,
+        focusSourceId: link.source,
+        focusTargetId: link.target,
+      },
+    });
+  };
+
+  const participatingNodeCount = new Set(
+    links.flatMap((link) => [link.source, link.target])
+  ).size;
+  const participatingNodeTypeCount = new Set(
+    nodes
+      .filter((node) =>
+        links.some((link) => link.source === node.id || link.target === node.id)
+      )
+      .map((node) => node.type)
+  ).size;
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Top Header */}
@@ -293,7 +369,7 @@ export default function LinksScreen() {
             styles.addHeaderBtn,
             pressed && styles.addHeaderBtnPressed,
           ]}
-          onPress={() => setAddModalOpen(true)}>
+          onPress={handleOpenAddModal}>
           <Text style={styles.addHeaderBtnPlus}>+</Text>
           <Text style={styles.addHeaderBtnText}>Thêm</Text>
         </Pressable>
@@ -313,13 +389,13 @@ export default function LinksScreen() {
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
             <Text style={[styles.statValue, { color: '#ded5c7' }]}>
-              {nodes.length}
+              {participatingNodeCount}
             </Text>
             <Text style={styles.statLabel}>NODE THAM GIA</Text>
           </View>
           <View style={styles.statDivider} />
           <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#42b883' }]}>5</Text>
+            <Text style={[styles.statValue, { color: '#42b883' }]}>{participatingNodeTypeCount}</Text>
             <Text style={styles.statLabel}>LOẠI THỰC THỂ</Text>
           </View>
         </View>
@@ -380,10 +456,14 @@ export default function LinksScreen() {
 
             const srcConfig = NODE_TYPE_CONFIG[src.type];
             const tgtConfig = NODE_TYPE_CONFIG[tgt.type];
-            const meta = LINK_METAS[link.id] || {
-              category: 'MỐI LIÊN KẾT',
-              contextNote: 'Hai thực thể liên quan mật thiết trong cốt truyện.',
-              tone: 'loyalty',
+            const sampleMeta = LINK_METAS[link.id];
+            const meta = {
+              category: link.category || sampleMeta?.category || 'MỐI LIÊN KẾT',
+              contextNote:
+                link.contextNote ||
+                sampleMeta?.contextNote ||
+                'Hai thực thể liên quan mật thiết trong cốt truyện.',
+              tone: link.tone || sampleMeta?.tone || 'loyalty',
             };
 
             const toneColor = getToneColor(meta.tone);
@@ -407,12 +487,7 @@ export default function LinksScreen() {
                   {/* Left Node (Source) */}
                   <Pressable
                     style={styles.nodeEntityBox}
-                    onPress={() => {
-                      router.push({
-                        pathname: '/graph' as any,
-                        params: { projectId: currentProject.id },
-                      });
-                    }}>
+                    onPress={() => openRelationOnGraph(link)}>
                     <View style={styles.entityNameRow}>
                       <Text
                         style={[
@@ -462,12 +537,7 @@ export default function LinksScreen() {
                   {/* Right Node (Target) */}
                   <Pressable
                     style={styles.nodeEntityBox}
-                    onPress={() => {
-                      router.push({
-                        pathname: '/graph' as any,
-                        params: { projectId: currentProject.id },
-                      });
-                    }}>
+                    onPress={() => openRelationOnGraph(link)}>
                     <View style={styles.entityNameRow}>
                       <Text
                         style={[
@@ -503,14 +573,7 @@ export default function LinksScreen() {
                       styles.viewOnGraphLink,
                       pressed && { opacity: 0.7 },
                     ]}
-                    onPress={() => {
-                      router.push({
-                        pathname: '/graph' as any,
-                        params: {
-                          projectId: currentProject.id,
-                        },
-                      });
-                    }}>
+                    onPress={() => openRelationOnGraph(link)}>
                     <Text style={styles.viewOnGraphText}>
                       Xem trên đồ thị →
                     </Text>
@@ -550,7 +613,7 @@ export default function LinksScreen() {
           style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Thiết lập mối liên kết mới</Text>
+              <Text style={styles.modalTitle}>Tạo mối quan hệ</Text>
               <Pressable
                 hitSlop={12}
                 onPress={() => setAddModalOpen(false)}>
@@ -568,7 +631,7 @@ export default function LinksScreen() {
                 <Text style={styles.inputLabel}>NODE NGUỒN (KHỞI ĐIỂM)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
                   {nodes.map((n) => {
-                    const isSelected = sourceNodeId === n.id;
+                    const isSelected = effectiveSourceNodeId === n.id;
                     const cfg = NODE_TYPE_CONFIG[n.type];
                     return (
                       <Pressable
@@ -577,7 +640,12 @@ export default function LinksScreen() {
                           styles.nodePickChip,
                           isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
                         ]}
-                        onPress={() => setSourceNodeId(n.id)}>
+                        onPress={() => {
+                          setSourceNodeId(n.id);
+                          if (effectiveTargetNodeId === n.id) {
+                            setTargetNodeId(nodes.find((node) => node.id !== n.id)?.id || '');
+                          }
+                        }}>
                         <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
                         <Text style={[styles.nodePickName, isSelected && { color: cfg.color }]}>
                           {n.name}
@@ -593,14 +661,16 @@ export default function LinksScreen() {
                 <Text style={styles.inputLabel}>NODE ĐÍCH (ĐẾN)</Text>
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.pickerScroll}>
                   {nodes.map((n) => {
-                    const isSelected = targetNodeId === n.id;
+                    const isSelected = effectiveTargetNodeId === n.id;
                     const cfg = NODE_TYPE_CONFIG[n.type];
                     return (
                       <Pressable
                         key={n.id}
+                        disabled={n.id === effectiveSourceNodeId}
                         style={[
                           styles.nodePickChip,
                           isSelected && { borderColor: cfg.color, backgroundColor: `${cfg.color}18` },
+                          n.id === effectiveSourceNodeId && styles.nodePickChipDisabled,
                         ]}
                         onPress={() => setTargetNodeId(n.id)}>
                         <Text style={{ color: cfg.color, fontSize: 12 }}>{cfg.symbol}</Text>
@@ -622,6 +692,30 @@ export default function LinksScreen() {
                   placeholderTextColor="#665f52"
                   value={newLinkLabel}
                   onChangeText={setNewLinkLabel}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>NHÓM / LOẠI QUAN HỆ (TÙY CHỌN)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Ví dụ: đồng minh, thù địch, sở hữu..."
+                  placeholderTextColor="#665f52"
+                  value={newLinkCategory}
+                  onChangeText={setNewLinkCategory}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>BỐI CẢNH (TÙY CHỌN)</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="Ghi chú vì sao hai thực thể có mối quan hệ này"
+                  placeholderTextColor="#665f52"
+                  value={newLinkContext}
+                  onChangeText={setNewLinkContext}
+                  multiline
+                  textAlignVertical="top"
                 />
               </View>
 
@@ -667,9 +761,15 @@ export default function LinksScreen() {
                   <Text style={styles.modalCancelText}>Hủy</Text>
                 </Pressable>
                 <Pressable
-                  style={styles.modalSubmitBtn}
+                  disabled={isCreating}
+                  style={[
+                    styles.modalSubmitBtn,
+                    isCreating && styles.modalSubmitBtnDisabled,
+                  ]}
                   onPress={handleCreateLink}>
-                  <Text style={styles.modalSubmitText}>Tạo liên kết</Text>
+                  <Text style={styles.modalSubmitText}>
+                    {isCreating ? 'Đang tạo...' : 'Tạo mối quan hệ'}
+                  </Text>
                 </Pressable>
               </View>
             </ScrollView>
@@ -1120,6 +1220,9 @@ const styles = StyleSheet.create({
     color: '#c2b9aa',
     fontWeight: '500',
   },
+  nodePickChipDisabled: {
+    opacity: 0.35,
+  },
   textInput: {
     borderWidth: 1,
     borderColor: '#2c271e',
@@ -1130,6 +1233,10 @@ const styles = StyleSheet.create({
     color: '#f5eee6',
     fontSize: 13.5,
     fontFamily: AppFonts.sans,
+  },
+  textArea: {
+    minHeight: 76,
+    paddingTop: 10,
   },
   lineTypeSelector: {
     flexDirection: 'row',
@@ -1176,6 +1283,9 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     paddingVertical: 8,
     paddingHorizontal: 16,
+  },
+  modalSubmitBtnDisabled: {
+    opacity: 0.6,
   },
   modalSubmitText: {
     color: '#11100d',

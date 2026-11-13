@@ -54,7 +54,28 @@ export class ProjectStore {
    * Lấy thông tin chi tiết dự án kèm Nodes và Links của dự án đó.
    * QUAN TRỌNG: Không bao giờ fallback sang dự án khác nếu không tìm thấy!
    */
-  async getProject(projectId: string): Promise<StoryProject> {
+  async getProject(
+    projectId: string,
+    options: { preferCache?: boolean } = {}
+  ): Promise<StoryProject> {
+    if (options.preferCache && this.memoryProjects.has(projectId)) {
+      const cached = this.memoryProjects.get(projectId)!;
+      return {
+        ...cached,
+        nodes: [...cached.nodes],
+        links: [...cached.links],
+        edges: [...(cached.edges || cached.links)],
+      };
+    }
+
+    if (options.preferCache) {
+      const cached = await this.getCachedProjectLocally(projectId);
+      if (cached) {
+        this.memoryProjects.set(projectId, cached);
+        return cached;
+      }
+    }
+
     // 1. Thử gọi API Backend để lấy dữ liệu mới nhất từ Neo4j
     try {
       const res = await api.getProjectGraph(projectId);
@@ -291,6 +312,9 @@ export class ProjectStore {
       target: linkData.target || '',
       label: linkData.label || 'liên hệ',
       type: linkData.type || 'solid',
+      category: linkData.category || '',
+      contextNote: linkData.contextNote || '',
+      tone: linkData.tone || 'loyalty',
     };
 
     // Thử gọi backend để lưu quan hệ vào Neo4j
@@ -301,6 +325,9 @@ export class ProjectStore {
         target: newLink.target,
         label: newLink.label,
         type: newLink.type,
+        category: newLink.category,
+        contextNote: newLink.contextNote,
+        tone: newLink.tone,
       });
       if (res.success && res.data) {
         Object.assign(newLink, res.data);
