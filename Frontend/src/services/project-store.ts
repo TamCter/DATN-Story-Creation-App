@@ -413,6 +413,7 @@ export class ProjectStore {
       chapterNumber?: number;
       title: string;
       desc?: string;
+      content?: string;
       events?: any[];
     }
   ): Promise<StoryChapter> {
@@ -427,6 +428,7 @@ export class ProjectStore {
       shortTitle: `C${num} ${chapterData.title.trim()}`,
       watermark: chapterData.title.trim().toUpperCase(),
       desc: chapterData.desc?.trim() || '',
+      content: chapterData.content?.trim() || '',
       events: chapterData.events || [],
       nodes: [],
       links: [],
@@ -437,6 +439,7 @@ export class ProjectStore {
         chapterNumber: num,
         title: newChapter.title,
         desc: newChapter.desc,
+        content: newChapter.content,
         events: newChapter.events,
       });
       if (res.success && res.data) {
@@ -449,6 +452,28 @@ export class ProjectStore {
     project.chapters = [...existingChapters, newChapter];
     await this.saveProject(project);
     return newChapter;
+  }
+
+  /**
+   * Cập nhật nội dung văn bản câu chuyện của Chapter
+   */
+  async updateChapterStoryContent(
+    projectId: string,
+    chapterId: string,
+    content: string
+  ): Promise<void> {
+    const project = await this.getProject(projectId);
+    const chapters = project.chapters || [];
+    const chIdx = chapters.findIndex((c) => c.id === chapterId);
+    if (chIdx === -1) return;
+
+    chapters[chIdx].content = content;
+    try {
+      await api.updateChapter(chapterId, { content });
+    } catch (err) {
+      console.warn('[ProjectStore] Không thể cập nhật nội dung chương lên Backend:', err);
+    }
+    await this.saveProject(project);
   }
 
   /**

@@ -92,6 +92,7 @@ async function createChapter(req, res, next) {
     shortTitle,
     watermark,
     desc = '',
+    content = '',
     events = [],
   } = req.body || {};
 
@@ -140,6 +141,7 @@ async function createChapter(req, res, next) {
         shortTitle: $shortTitle,
         watermark: $watermark,
         desc: $desc,
+        content: $content,
         events: $events,
         createdAt: timestamp(),
         updatedAt: timestamp()
@@ -157,6 +159,7 @@ async function createChapter(req, res, next) {
       shortTitle: shortTitle || `${chapterCode} ${title}`,
       watermark: watermark || title.toUpperCase(),
       desc,
+      content,
       events: eventsJson,
     });
 
@@ -178,7 +181,7 @@ async function createChapter(req, res, next) {
  */
 async function updateChapter(req, res, next) {
   const { id } = req.params;
-  const { chapterNumber, code, title, shortTitle, watermark, desc, events } = req.body || {};
+  const { chapterNumber, code, title, shortTitle, watermark, desc, content, events } = req.body || {};
 
   let parsedChapterNumber = null;
   if (chapterNumber !== undefined) {
@@ -197,6 +200,7 @@ async function updateChapter(req, res, next) {
           c.shortTitle = COALESCE($shortTitle, c.shortTitle),
           c.watermark = COALESCE($watermark, c.watermark),
           c.desc = COALESCE($desc, c.desc),
+          c.content = COALESCE($content, c.content),
           c.events = CASE WHEN $events IS NOT NULL THEN $events ELSE c.events END,
           c.updatedAt = timestamp()
       RETURN c
@@ -210,6 +214,7 @@ async function updateChapter(req, res, next) {
       shortTitle: shortTitle ?? null,
       watermark: watermark ?? null,
       desc: desc ?? null,
+      content: content ?? null,
       events: events !== undefined ? JSON.stringify(events) : null,
     });
 

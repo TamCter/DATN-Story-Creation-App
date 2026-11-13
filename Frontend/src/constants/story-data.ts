@@ -83,6 +83,7 @@ export interface StoryChapter {
   shortTitle: string;
   watermark: string;
   desc: string;
+  content?: string;
   events: ChapterEvent[];
   nodes: StoryNode[];
   links: StoryLink[];

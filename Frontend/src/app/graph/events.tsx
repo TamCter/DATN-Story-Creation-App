@@ -24,6 +24,8 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import AIStoryGeneratorModal from '@/components/ui/AIStoryGeneratorModal';
+import ChapterStoryReaderModal from '@/components/ui/ChapterStoryReaderModal';
 
 export default function ChapterDetailScreen() {
   const params = useLocalSearchParams();
@@ -58,6 +60,12 @@ export default function ChapterDetailScreen() {
   // Assign Event Modal State
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [targetChapter, setTargetChapter] = useState<StoryChapter | null>(null);
+
+  // AI Story Generator & Reader Modals
+  const [aiStoryModalOpen, setAiStoryModalOpen] = useState(false);
+  const [aiTargetChapter, setAiTargetChapter] = useState<StoryChapter | null>(null);
+  const [readerModalOpen, setReaderModalOpen] = useState(false);
+  const [readingChapter, setReadingChapter] = useState<StoryChapter | null>(null);
 
   const loadData = React.useCallback(async () => {
     setIsLoading(true);
@@ -165,14 +173,28 @@ export default function ChapterDetailScreen() {
           <Text style={styles.headerTitle}>Chi tiết chương</Text>
         </View>
 
-        <Pressable
-          style={({ pressed }) => [
-            styles.addChapterBtn,
-            pressed && styles.addChapterBtnPressed,
-          ]}
-          onPress={handleOpenCreateModal}>
-          <Text style={styles.addChapterBtnText}>+ Tạo chương</Text>
-        </Pressable>
+        <View style={styles.headerRightBox}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.aiStoryHeaderBtn,
+              pressed && styles.aiStoryHeaderBtnPressed,
+            ]}
+            onPress={() => {
+              setAiTargetChapter(null);
+              setAiStoryModalOpen(true);
+            }}>
+            <Text style={styles.aiStoryHeaderBtnText}>✨ AI Tạo truyện</Text>
+          </Pressable>
+
+          <Pressable
+            style={({ pressed }) => [
+              styles.addChapterBtn,
+              pressed && styles.addChapterBtnPressed,
+            ]}
+            onPress={handleOpenCreateModal}>
+            <Text style={styles.addChapterBtnText}>+ Tạo chương</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Chapters & Events List */}
@@ -261,13 +283,41 @@ export default function ChapterDetailScreen() {
 
               {/* Action buttons */}
               <View style={styles.chapterActionsRow}>
+                {Boolean(chapter.content) && (
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.readStoryBtn,
+                      pressed && styles.readStoryBtnPressed,
+                    ]}
+                    onPress={() => {
+                      setReadingChapter(chapter);
+                      setReaderModalOpen(true);
+                    }}>
+                    <Text style={styles.readStoryBtnText}>📖 Đọc truyện</Text>
+                  </Pressable>
+                )}
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.aiWriteChapterBtn,
+                    pressed && styles.aiWriteChapterBtnPressed,
+                  ]}
+                  onPress={() => {
+                    setAiTargetChapter(chapter);
+                    setAiStoryModalOpen(true);
+                  }}>
+                  <Text style={styles.aiWriteChapterBtnText}>
+                    {chapter.content ? '✨ AI Viết lại' : '✨ AI Viết truyện'}
+                  </Text>
+                </Pressable>
+
                 <Pressable
                   style={({ pressed }) => [
                     styles.assignEventBtn,
                     pressed && styles.assignEventBtnPressed,
                   ]}
                   onPress={() => handleOpenAssignModal(chapter)}>
-                  <Text style={styles.assignEventBtnText}>+ Gán sự kiện vào chương</Text>
+                  <Text style={styles.assignEventBtnText}>+ Gán sự kiện</Text>
                 </Pressable>
 
                 <Pressable
@@ -285,7 +335,7 @@ export default function ChapterDetailScreen() {
                     });
                   }}>
                   <Text style={styles.viewGraphBtnText}>
-                    Xem đồ thị →
+                    Đồ thị →
                   </Text>
                 </Pressable>
               </View>
@@ -447,6 +497,34 @@ export default function ChapterDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* AI Story Generator Modal */}
+      <AIStoryGeneratorModal
+        visible={aiStoryModalOpen}
+        onClose={() => {
+          setAiStoryModalOpen(false);
+          setAiTargetChapter(null);
+        }}
+        project={currentProject}
+        initialChapter={aiTargetChapter}
+        onSuccess={async () => {
+          await loadData();
+        }}
+      />
+
+      {/* Chapter Story Reader Modal */}
+      <ChapterStoryReaderModal
+        visible={readerModalOpen}
+        onClose={() => {
+          setReaderModalOpen(false);
+          setReadingChapter(null);
+        }}
+        chapter={readingChapter}
+        onRewriteWithAI={(ch) => {
+          setAiTargetChapter(ch);
+          setAiStoryModalOpen(true);
+        }}
+      />
     </SafeAreaView>
   );
 }
@@ -496,6 +574,28 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     fontSize: 22,
     color: '#f3c76f',
+  },
+  headerRightBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  aiStoryHeaderBtn: {
+    backgroundColor: 'rgba(229,169,60,0.15)',
+    borderWidth: 1,
+    borderColor: '#e5a93c',
+    borderRadius: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  aiStoryHeaderBtnPressed: {
+    backgroundColor: 'rgba(229,169,60,0.3)',
+  },
+  aiStoryHeaderBtnText: {
+    color: '#f3c76f',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
   },
   addChapterBtn: {
     backgroundColor: '#e5a93c',
@@ -622,9 +722,44 @@ const styles = StyleSheet.create({
   },
   chapterActionsRow: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     marginTop: 12,
+  },
+  readStoryBtn: {
+    borderWidth: 1,
+    borderColor: '#34d39980',
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(52,211,153,0.12)',
+  },
+  readStoryBtnPressed: {
+    backgroundColor: 'rgba(52,211,153,0.25)',
+  },
+  readStoryBtnText: {
+    color: '#34d399',
+    fontSize: 11.5,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+  },
+  aiWriteChapterBtn: {
+    borderWidth: 1,
+    borderColor: '#e5a93c80',
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(229,169,60,0.12)',
+  },
+  aiWriteChapterBtnPressed: {
+    backgroundColor: 'rgba(229,169,60,0.25)',
+  },
+  aiWriteChapterBtnText: {
+    color: '#e5a93c',
+    fontSize: 11.5,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
   },
   assignEventBtn: {
     borderWidth: 1,
