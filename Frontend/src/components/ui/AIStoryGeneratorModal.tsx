@@ -225,8 +225,64 @@ export default function AIStoryGeneratorModal({
 
       // 2. Tạo các Node loại 'event' trong đồ thị nếu là chương mới tạo từ AI
       if (!initialChapter && generatedEvents.length > 0) {
+        // Lấy danh sách nodes hiện có của dự án để kiểm tra
+        const currentNodes = project.nodes || [];
+
         for (const ev of generatedEvents) {
           try {
+            // Đảm bảo node Địa điểm (Location) tồn tại
+            if (ev.location && ev.location.trim()) {
+              const locTrim = ev.location.trim();
+              const existingLoc = currentNodes.find(
+                (n) => n.type === 'location' && n.name.toLowerCase() === locTrim.toLowerCase()
+              );
+              if (!existingLoc) {
+                try {
+                  const createdLoc = await projectStore.createNode(project.id, {
+                    name: locTrim,
+                    type: 'location',
+                    role: 'ĐỊA DANH',
+                    region: 'Đông Vực',
+                    desc: `Địa danh diễn ra sự kiện ${ev.name}`,
+                    status: 'Hoạt động',
+                  });
+                  if (createdLoc) currentNodes.push(createdLoc);
+                } catch (locErr) {
+                  console.warn('Lỗi auto-create location:', locErr);
+                }
+              }
+            }
+
+            // Đảm bảo các node Nhân vật (Character) tham gia tồn tại
+            if (ev.charactersInvolved && Array.isArray(ev.charactersInvolved)) {
+              for (const charName of ev.charactersInvolved) {
+                const cTrim = String(charName).trim();
+                if (!cTrim) continue;
+                const existingChar = currentNodes.find(
+                  (n) => n.type === 'character' && n.name.toLowerCase() === cTrim.toLowerCase()
+                );
+                if (!existingChar) {
+                  try {
+                    const createdChar = await projectStore.createNode(project.id, {
+                      name: cTrim,
+                      type: 'character',
+                      role: 'TRUNG LẬP',
+                      gender: 'Nam',
+                      desc: `Nhân vật tham gia sự kiện ${ev.name}`,
+                      status: 'Còn sống',
+                    });
+                    if (createdChar) currentNodes.push(createdChar);
+                  } catch (charErr) {
+                    console.warn('Lỗi auto-create character:', charErr);
+                  }
+                }
+              }
+            }
+
+            const charsStr = Array.isArray(ev.charactersInvolved)
+              ? ev.charactersInvolved.join(', ')
+              : (ev.charactersInvolved || '');
+
             const eventNodeData: Partial<StoryNode> = {
               name: ev.name,
               type: 'event',
@@ -237,9 +293,11 @@ export default function AIStoryGeneratorModal({
               impact: ev.impact || '',
               role: 'BIẾN CỐ',
               status: 'Đã diễn ra',
+              charactersInvolved: charsStr,
             };
 
             const createdNode = await projectStore.createNode(project.id, eventNodeData);
+            if (createdNode) currentNodes.push(createdNode);
             if (targetChapterId && createdNode) {
               await projectStore.assignEventToChapter(project.id, targetChapterId, createdNode);
             }

@@ -38,6 +38,8 @@ export interface StoryNode {
   location?: string;
   chapter?: string;
   impact?: string;
+  charactersInvolved?: string;
+  characters?: string;
   statusEvent?: string;
   createdAt?: number;
   updatedAt?: number;
