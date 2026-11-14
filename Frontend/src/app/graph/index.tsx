@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -59,7 +59,6 @@ export default function GraphScreen() {
   const routeFocusLinkId =
     typeof params.focusLinkId === 'string' ? params.focusLinkId : null;
   const routeFocusKey = `${projectId}:${routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
-  const hasRouteFocus = Boolean(routeFocusSourceId && routeFocusTargetId);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     // Chỉ nạp dữ liệu mẫu nếu ID thực sự khớp chính xác với dự án mẫu, không fallback sai lệch
@@ -102,32 +101,36 @@ export default function GraphScreen() {
     }
   };
 
-  // Tải dự án từ projectStore (kết nối Backend Neo4j hoặc Cache cục bộ)
-  useEffect(() => {
-    let isMounted = true;
-    async function loadProjectData() {
-      setIsLoading(true);
-      try {
-        const proj = await projectStore.getProject(projectId, {
-          preferCache: hasRouteFocus,
-        });
-        if (isMounted) {
-          setCurrentProject(proj);
-          setNodes(proj.nodes || []);
-          setLinks(proj.edges || proj.links || []);
-          setSelectedNodeId(routeFocusSourceId);
+  // Reload whenever this screen regains focus so graph, nodes, and chapter counts stay current.
+  useFocusEffect(
+    useCallback(() => {
+      let isFocused = true;
+      async function loadProjectData() {
+        try {
+          const proj = await projectStore.getProject(projectId);
+          if (isFocused) {
+            setCurrentProject(proj);
+            setNodes(proj.nodes || []);
+            setLinks(proj.edges || proj.links || []);
+            setSelectedNodeId((selectedId) => {
+              const desiredId = routeFocusSourceId || selectedId;
+              return desiredId && proj.nodes?.some((node) => node.id === desiredId)
+                ? desiredId
+                : null;
+            });
+          }
+        } catch (err) {
+          console.warn('Lỗi tải dữ liệu đồ thị:', err);
+        } finally {
+          if (isFocused) setIsLoading(false);
         }
-      } catch (err) {
-        console.warn('Lỗi tải dữ liệu đồ thị:', err);
-      } finally {
-        if (isMounted) setIsLoading(false);
       }
-    }
-    void loadProjectData();
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId, routeFocusSourceId, routeFocusTargetId, hasRouteFocus]);
+      void loadProjectData();
+      return () => {
+        isFocused = false;
+      };
+    }, [projectId, routeFocusSourceId])
+  );
 
   const chapters = useMemo(() => {
     return getProjectChapters(currentProject);
@@ -196,8 +199,10 @@ export default function GraphScreen() {
     );
   }, [links, focusedRelation]);
 
-  const [activeFilter, setActiveFilter] = useState<string | null>(null);
   const [chapterFilter, setChapterFilter] = useState<string | null>(null); // null = Tất cả
+  const activeChapterFilter = chapters.some((chapter) => chapter.title === chapterFilter)
+    ? chapterFilter
+    : null;
   const [showRelationships, setShowRelationships] = useState<boolean>(true);
   const [aiStoryModalOpen, setAiStoryModalOpen] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -285,28 +290,44 @@ export default function GraphScreen() {
   }, [connectedLinks, selectedNodeId]);
 
   const filteredNodes = useMemo(() => {
-  let result = visibleNodes;
-  if (activeFilter) {
-    result = result.filter((n) => n.type === activeFilter);
-  }
-  if (chapterFilter) {
-    result = result.filter((n) => {
-      // Nếu node có trường chapter khớp với chapterFilter
-      if (n.chapter && n.chapter === chapterFilter) return true;
-      // Nếu node có trường time khớp
-      if (n.time && n.time === chapterFilter) return true;
-      // Các node không phải event thì luôn hiện (character, item, location, faction)
-      if (n.type !== 'event') return true;
-      return false;
+    if (!activeChapterFilter) return visibleNodes;
+    const chapter = chapters.find((item) => item.title === activeChapterFilter);
+    if (!chapter) return visibleNodes;
+
+    const chapterLabels = new Set([
+      chapter.id,
+      chapter.title,
+      `Chương ${chapter.chapterNumber}`,
+    ].map((label) => label.trim().toLocaleLowerCase()));
+    const chapterEventIds = new Set((chapter.events || []).map((event) => event.id));
+    const eventNodeIds = new Set(
+      visibleNodes
+        .filter(
+          (node) =>
+            node.type === 'event' &&
+            (chapterEventIds.has(node.id) ||
+              (typeof node.chapter === 'string' &&
+                chapterLabels.has(node.chapter.trim().toLocaleLowerCase())))
+        )
+        .map((node) => node.id)
+    );
+    const relatedNodeIds = new Set(eventNodeIds);
+
+    visibleLinks.forEach((link) => {
+      if (eventNodeIds.has(link.source)) relatedNodeIds.add(link.target);
+      if (eventNodeIds.has(link.target)) relatedNodeIds.add(link.source);
     });
-  }
-  return result;
-}, [visibleNodes, activeFilter, chapterFilter]);
+
+    return visibleNodes.filter((node) => relatedNodeIds.has(node.id));
+  }, [visibleNodes, visibleLinks, chapters, activeChapterFilter]);
 
 const filteredLinks = useMemo(() => {
   if (!showRelationships) return [];
-  return visibleLinks;
-}, [visibleLinks, showRelationships]);
+  const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
+  return visibleLinks.filter(
+    (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target)
+  );
+}, [visibleLinks, filteredNodes, showRelationships]);
 
 const graphRef = useRef<GraphWebViewRef>(null);
 
@@ -670,7 +691,6 @@ return (
           {currentProject.title}
         </Text>
         <Text style={styles.topBarSub}>
-          {filteredNodes.length} THỰC THỂ · {visibleLinks.length} LIÊN KẾT
           {filteredNodes.length} THỰC THỂ · {filteredLinks.length} LIÊN KẾT
         </Text>
       </View>
@@ -703,33 +723,37 @@ return (
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.filterScroll}>
-        {(
-          [
-            { type: 'character', label: 'Nhân vật', symbol: '●' },
-            { type: 'item', label: 'Vật phẩm', symbol: '◆' },
-            { type: 'faction', label: 'Phe phái', symbol: '⬡' },
-            { type: 'event', label: 'Sự kiện', symbol: '■' },
-            { type: 'location', label: 'Địa điểm', symbol: '▲' },
-          ] as const
-        ).map((item) => {
-          const isActive = activeFilter === item.type;
-          const itemColor = NODE_TYPE_CONFIG[item.type]?.color || '#e5a93c';
+        <Pressable
+          style={[
+            styles.filterChip,
+            !activeChapterFilter && {
+              borderColor: '#e5a93c',
+              backgroundColor: 'rgba(229,169,60,0.12)',
+            },
+          ]}
+          onPress={() => setChapterFilter(null)}>
+          <Text style={[styles.filterChipSymbol, { color: '#e5a93c' }]}>☰</Text>
+          <Text style={[styles.filterChipText, !activeChapterFilter && { color: '#e5a93c' }]}>
+            Tất cả
+          </Text>
+        </Pressable>
+
+        {chapters.map((chapter) => {
+          const isActive = activeChapterFilter === chapter.title;
           return (
             <Pressable
-              key={item.type}
+              key={chapter.id}
               style={[
                 styles.filterChip,
                 isActive && {
-                  borderColor: itemColor,
-                  backgroundColor: `${itemColor}20`,
+                  borderColor: '#5b8ec2',
+                  backgroundColor: 'rgba(91,142,194,0.12)',
                 },
               ]}
-              onPress={() => setActiveFilter(isActive ? null : item.type)}>
-              <Text style={[styles.filterChipSymbol, { color: itemColor }]}>
-                {item.symbol}
-              </Text>
-              <Text style={[styles.filterChipText, isActive && { color: itemColor }]}>
-                {item.label}
+              onPress={() => setChapterFilter(isActive ? null : chapter.title)}>
+              <Text style={[styles.filterChipSymbol, { color: '#5b8ec2' }]}>📖</Text>
+              <Text style={[styles.filterChipText, isActive && { color: '#5b8ec2' }]}>
+                Chương {chapter.chapterNumber}
               </Text>
             </Pressable>
           );
@@ -751,44 +775,6 @@ return (
             Mối quan hệ
           </Text>
         </Pressable>
-
-        <View style={{ width: 1, backgroundColor: '#29251e', marginHorizontal: 4 }} />
-
-        <Pressable
-          style={[
-            styles.filterChip,
-            !chapterFilter && {
-              borderColor: '#e5a93c',
-              backgroundColor: 'rgba(229,169,60,0.12)',
-            },
-          ]}
-          onPress={() => setChapterFilter(null)}>
-          <Text style={[styles.filterChipSymbol, { color: '#e5a93c' }]}>☰</Text>
-          <Text style={[styles.filterChipText, !chapterFilter && { color: '#e5a93c' }]}>
-            Tất cả
-          </Text>
-        </Pressable>
-
-        {chapters.map((chapter) => {
-          const isActive = chapterFilter === chapter.title;
-          return (
-            <Pressable
-              key={chapter.id}
-              style={[
-                styles.filterChip,
-                isActive && {
-                  borderColor: '#5b8ec2',
-                  backgroundColor: 'rgba(91,142,194,0.12)',
-                },
-              ]}
-              onPress={() => setChapterFilter(isActive ? null : chapter.title)}>
-              <Text style={[styles.filterChipSymbol, { color: '#5b8ec2' }]}>📖</Text>
-              <Text style={[styles.filterChipText, isActive && { color: '#5b8ec2' }]}>
-                Chương {chapter.chapterNumber}
-              </Text>
-            </Pressable>
-          );
-        })}
       </ScrollView>
     </View>
 
@@ -831,10 +817,9 @@ return (
                 <View style={styles.svgWrapper}>
                   <GraphWebView
                     ref={graphRef}
-                    nodes={visibleNodes}
+                    nodes={filteredNodes}
                     edges={filteredLinks}
                     selectedNodeId={selectedNodeId}
-                    activeFilter={activeFilter}
                     onNodeClick={(nodeId) => {
                       handleSelectNode(nodeId);
                     }}

@@ -27,6 +27,20 @@ import { projectStore } from '@/services/project-store';
 import AIStoryGeneratorModal from '@/components/ui/AIStoryGeneratorModal';
 import ChapterStoryReaderModal from '@/components/ui/ChapterStoryReaderModal';
 
+type PendingRemoval =
+  | {
+      kind: 'chapter';
+      chapter: StoryChapter;
+      deleteEntity: boolean;
+    }
+  | {
+      kind: 'event';
+      chapter: StoryChapter;
+      eventId: string;
+      eventTitle: string;
+      deleteEntity: boolean;
+    };
+
 export default function ChapterDetailScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
@@ -60,6 +74,8 @@ export default function ChapterDetailScreen() {
   // Assign Event Modal State
   const [assignModalOpen, setAssignModalOpen] = useState(false);
   const [targetChapter, setTargetChapter] = useState<StoryChapter | null>(null);
+  const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
+  const [isRemoving, setIsRemoving] = useState(false);
 
   // AI Story Generator & Reader Modals
   const [aiStoryModalOpen, setAiStoryModalOpen] = useState(false);
@@ -156,6 +172,38 @@ export default function ChapterDetailScreen() {
     }
   };
 
+  const handleConfirmRemoval = async () => {
+    if (!pendingRemoval) return;
+    setIsRemoving(true);
+    try {
+      if (pendingRemoval.kind === 'chapter') {
+        await projectStore.deleteChapter(
+          projectId,
+          pendingRemoval.chapter.id,
+          pendingRemoval.deleteEntity
+        );
+      } else {
+        await projectStore.removeEventFromChapter(
+          projectId,
+          pendingRemoval.chapter.id,
+          pendingRemoval.eventId,
+          pendingRemoval.deleteEntity
+        );
+      }
+      setPendingRemoval(null);
+      await loadData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Không thể hoàn tất thao tác xóa';
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Lỗi', message);
+      }
+    } finally {
+      setIsRemoving(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.safeArea}>
       {/* Top Header */}
@@ -170,7 +218,9 @@ export default function ChapterDetailScreen() {
             onPress={() => router.back()}>
             <Text style={styles.backBtnIcon}>‹</Text>
           </Pressable>
-          <Text style={styles.headerTitle}>Chi tiết chương</Text>
+          <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
+            Chi tiết chương
+          </Text>
         </View>
 
         <View style={styles.headerRightBox}>
@@ -182,8 +232,10 @@ export default function ChapterDetailScreen() {
             onPress={() => {
               setAiTargetChapter(null);
               setAiStoryModalOpen(true);
-            }}>
-            <Text style={styles.aiStoryHeaderBtnText}>✨ AI Tạo truyện</Text>
+            }}
+            accessibilityRole="button"
+            accessibilityLabel="Mở AI tạo truyện">
+            <Text style={styles.aiStoryHeaderBtnText}>✨</Text>
           </Pressable>
 
           <Pressable
@@ -231,6 +283,7 @@ export default function ChapterDetailScreen() {
             return (
               evtChapter === chTitle ||
               evtChapter === chNum ||
+              evtChapter === chapter.id.toLowerCase() ||
               (chapter.events && chapter.events.some((e) => e.id === evt.id))
             );
           });
@@ -268,8 +321,25 @@ export default function ChapterDetailScreen() {
                   {displayEvents.map((evt) => (
                     <View key={evt.id} style={styles.eventRow}>
                       <View style={styles.eventDot} />
-                      <View style={{ flex: 1 }}>
-                        <Text style={styles.eventTitle}>{evt.title}</Text>
+                      <View style={styles.eventTextColumn}>
+                        <View style={styles.eventTitleRow}>
+                          <Text style={styles.eventTitle}>{evt.title}</Text>
+                          <Pressable
+                            style={styles.removeEventBtn}
+                            onPress={() =>
+                              setPendingRemoval({
+                                kind: 'event',
+                                chapter,
+                                eventId: evt.id,
+                                eventTitle: evt.title,
+                                deleteEntity: false,
+                              })
+                            }
+                            accessibilityRole="button"
+                            accessibilityLabel={`Gỡ sự kiện ${evt.title} khỏi chương`}>
+                            <Text style={styles.removeEventBtnText}>✕</Text>
+                          </Pressable>
+                        </View>
                         {Boolean(evt.desc) && (
                           <Text style={styles.eventDesc}>{evt.desc}</Text>
                         )}
@@ -337,6 +407,23 @@ export default function ChapterDetailScreen() {
                   <Text style={styles.viewGraphBtnText}>
                     Đồ thị →
                   </Text>
+                </Pressable>
+
+                <Pressable
+                  style={({ pressed }) => [
+                    styles.deleteChapterBtn,
+                    pressed && styles.deleteChapterBtnPressed,
+                  ]}
+                  onPress={() =>
+                    setPendingRemoval({
+                      kind: 'chapter',
+                      chapter,
+                      deleteEntity: false,
+                    })
+                  }
+                  accessibilityRole="button"
+                  accessibilityLabel={`Xóa chương ${chapter.chapterNumber}`}>
+                  <Text style={styles.deleteChapterBtnText}>🗑 Xóa chương</Text>
                 </Pressable>
               </View>
 
@@ -498,6 +585,79 @@ export default function ChapterDetailScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* Modal 3: Confirm chapter or event removal */}
+      <Modal visible={pendingRemoval !== null} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalHeading}>
+                {pendingRemoval?.kind === 'chapter' ? 'Xóa chương' : 'Gỡ sự kiện khỏi chương'}
+              </Text>
+              <Pressable
+                onPress={() => setPendingRemoval(null)}
+                hitSlop={10}
+                disabled={isRemoving}
+                accessibilityRole="button"
+                accessibilityLabel="Đóng hộp xác nhận">
+                <Text style={styles.closeModalText}>✕</Text>
+              </Pressable>
+            </View>
+
+            <Text style={styles.removeConfirmText}>
+              {pendingRemoval?.kind === 'chapter'
+                ? `Bạn có chắc muốn xóa Chương ${pendingRemoval.chapter.chapterNumber}: ${pendingRemoval.chapter.title}?`
+                : `Bạn có chắc muốn gỡ sự kiện "${pendingRemoval?.kind === 'event' ? pendingRemoval.eventTitle : ''}" khỏi Chương ${pendingRemoval?.chapter.chapterNumber}?`}
+            </Text>
+            <Pressable
+              style={styles.deleteOptionRow}
+              onPress={() =>
+                setPendingRemoval((current) =>
+                  current ? { ...current, deleteEntity: !current.deleteEntity } : current
+                )
+              }
+              accessibilityRole="checkbox"
+              accessibilityState={{ checked: pendingRemoval?.deleteEntity ?? false }}>
+              <View
+                style={[
+                  styles.deleteCheckbox,
+                  pendingRemoval?.deleteEntity && styles.deleteCheckboxChecked,
+                ]}>
+                {pendingRemoval?.deleteEntity && (
+                  <Text style={styles.deleteCheckboxMark}>✓</Text>
+                )}
+              </View>
+              <Text style={styles.deleteOptionText}>
+                {pendingRemoval?.kind === 'chapter'
+                  ? 'Đồng thời xóa vĩnh viễn các sự kiện thuộc chương'
+                  : 'Đồng thời xóa vĩnh viễn node sự kiện khỏi đồ thị'}
+              </Text>
+            </Pressable>
+            <Text style={styles.deleteOptionHint}>
+              {pendingRemoval?.deleteEntity
+                ? 'Sự kiện sẽ bị xóa vĩnh viễn khỏi đồ thị.'
+                : 'Sự kiện vẫn được giữ lại trong đồ thị.'}
+            </Text>
+
+            <View style={styles.modalFooter}>
+              <Pressable
+                style={styles.cancelBtn}
+                onPress={() => setPendingRemoval(null)}
+                disabled={isRemoving}>
+                <Text style={styles.cancelBtnText}>Hủy</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.confirmDeleteBtn, isRemoving && { opacity: 0.6 }]}
+                onPress={() => void handleConfirmRemoval()}
+                disabled={isRemoving}>
+                <Text style={styles.confirmDeleteBtnText}>
+                  {isRemoving ? 'Đang xóa...' : 'Xác nhận xóa'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       {/* AI Story Generator Modal */}
       <AIStoryGeneratorModal
         visible={aiStoryModalOpen}
@@ -538,7 +698,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
+    gap: 10,
+    paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 16,
     borderBottomWidth: 1,
@@ -547,11 +708,14 @@ const styles = StyleSheet.create({
   headerLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 8,
+    flex: 1,
+    minWidth: 0,
   },
   backBtn: {
     width: 38,
     height: 38,
+    flexShrink: 0,
     borderRadius: 4,
     borderWidth: 1,
     borderColor: '#2d271e',
@@ -574,26 +738,33 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
     fontSize: 22,
     color: '#f3c76f',
+    flex: 1,
+    flexShrink: 1,
+    minWidth: 0,
   },
   headerRightBox: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+    flexShrink: 0,
+    marginLeft: 'auto',
   },
   aiStoryHeaderBtn: {
+    width: 36,
+    height: 36,
     backgroundColor: 'rgba(229,169,60,0.15)',
     borderWidth: 1,
     borderColor: '#e5a93c',
     borderRadius: 5,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   aiStoryHeaderBtnPressed: {
     backgroundColor: 'rgba(229,169,60,0.3)',
   },
   aiStoryHeaderBtnText: {
     color: '#f3c76f',
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '700',
     fontFamily: AppFonts.sans,
   },
@@ -694,6 +865,31 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     gap: 8,
   },
+  eventTextColumn: {
+    flex: 1,
+    minWidth: 0,
+  },
+  eventTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 6,
+  },
+  removeEventBtn: {
+    width: 28,
+    height: 28,
+    flexShrink: 0,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#5a342e',
+    backgroundColor: '#261916',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeEventBtnText: {
+    color: '#df7663',
+    fontSize: 13,
+    fontWeight: '700',
+  },
   eventDot: {
     width: 6,
     height: 6,
@@ -702,6 +898,8 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   eventTitle: {
+    flex: 1,
+    minWidth: 0,
     fontFamily: AppFonts.serif,
     fontSize: 15,
     color: '#ded5c7',
@@ -795,6 +993,23 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     fontFamily: AppFonts.sans,
   },
+  deleteChapterBtn: {
+    borderWidth: 1,
+    borderColor: '#713e35',
+    borderRadius: 4,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(217,90,56,0.1)',
+  },
+  deleteChapterBtnPressed: {
+    backgroundColor: 'rgba(217,90,56,0.24)',
+  },
+  deleteChapterBtnText: {
+    color: '#e5816b',
+    fontSize: 11.5,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
+  },
   chapterDivider: {
     height: 1,
     backgroundColor: '#201d18',
@@ -839,6 +1054,63 @@ const styles = StyleSheet.create({
     color: '#8c7d6b',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  removeConfirmText: {
+    color: '#ded5c7',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  deleteOptionRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    padding: 10,
+    borderRadius: 6,
+    backgroundColor: '#231d17',
+    borderWidth: 1,
+    borderColor: '#3d3328',
+  },
+  deleteCheckbox: {
+    width: 20,
+    height: 20,
+    flexShrink: 0,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: '#8c7d6b',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteCheckboxChecked: {
+    borderColor: '#d95a38',
+    backgroundColor: '#d95a38',
+  },
+  deleteCheckboxMark: {
+    color: '#fff',
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 16,
+  },
+  deleteOptionText: {
+    flex: 1,
+    color: '#ded5c7',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  deleteOptionHint: {
+    color: '#8c7d6b',
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  confirmDeleteBtn: {
+    backgroundColor: '#a94435',
+    borderRadius: 6,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  confirmDeleteBtnText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 13,
   },
   eventNoticeText: {
     fontSize: 12,

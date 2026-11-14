@@ -158,6 +158,69 @@ function getNodeCreationRequest(messages) {
   return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
 }
 
+function normalizeEventCharacters(events, characterNodes) {
+  const characters = characterNodes.filter(
+    (node) => node && node.type === 'character' && typeof node.name === 'string' && node.name.trim()
+  );
+
+  return events.map((event) => {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) {
+      return event;
+    }
+
+    const rawCharacters = Array.isArray(event.charactersInvolved)
+      ? event.charactersInvolved
+      : typeof event.charactersInvolved === 'string'
+        ? event.charactersInvolved.split(/[,;\n]+/)
+        : [];
+    const involvedNames = [];
+    const involvedKeys = new Set();
+    for (const rawName of rawCharacters) {
+      if (typeof rawName !== 'string') continue;
+      const name = rawName.trim();
+      const nameKey = name.toLocaleLowerCase();
+      if (name && !involvedKeys.has(nameKey)) {
+        involvedNames.push(name);
+        involvedKeys.add(nameKey);
+      }
+    }
+    const eventText = [event.name, event.desc, event.impact]
+      .filter((value) => typeof value === 'string')
+      .join(' ');
+    const matchedCharacterRanges = [];
+
+    for (const character of [...characters].sort((a, b) => b.name.length - a.name.length)) {
+      const name = character.name.trim();
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const namePattern = new RegExp(
+        `(^|[^\\p{L}\\p{N}\\p{M}])${escapedName}(?=$|[^\\p{L}\\p{N}\\p{M}])`,
+        'giu'
+      );
+      const nameKey = name.toLocaleLowerCase();
+      const nameRanges = [];
+      let match;
+      let isMentioned = false;
+
+      while ((match = namePattern.exec(eventText)) !== null) {
+        const start = match.index + match[1].length;
+        const end = start + name.length;
+        if (!matchedCharacterRanges.some((range) => start >= range.start && end <= range.end)) {
+          isMentioned = true;
+          nameRanges.push({ start, end });
+        }
+      }
+
+      if (isMentioned && !involvedKeys.has(nameKey)) {
+        involvedNames.push(name);
+        involvedKeys.add(nameKey);
+      }
+      matchedCharacterRanges.push(...nameRanges);
+    }
+
+    return { ...event, charactersInvolved: involvedNames };
+  });
+}
+
 /**
  * Calls the selected AI provider and normalizes the response text.
  */
@@ -437,10 +500,21 @@ async function generateChapterAndEvents(req, res, next) {
       .join('\n');
 
     // Tổng hợp các node nhân vật, địa điểm, môn phái, vật phẩm hiện có
-    const characters = nodes
-      .filter((n) => n.type === 'character')
-      .slice(0, 15)
-      .map((n) => `${n.name}${n.sect ? ` (${n.sect})` : ''}`);
+    const characterNodes = nodes.filter(
+      (node) => node && node.type === 'character' && typeof node.name === 'string'
+    );
+    const characters = characterNodes
+      .slice(0, 30)
+      .map((node) =>
+        [
+          node.name,
+          node.role && `vai trò: ${node.role}`,
+          node.sect && `môn phái: ${node.sect}`,
+          node.desc && `mô tả: ${node.desc.slice(0, 180)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
     const locations = nodes
       .filter((n) => n.type === 'location')
       .slice(0, 10)
@@ -466,6 +540,13 @@ Các thực thể hiện có trong truyện:
 Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
 2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật và địa điểm hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
+
+QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN (BẮT BUỘC):
+- Mỗi sự kiện phải có trường "charactersInvolved" là một mảng tên nhân vật, không được bỏ trống trường hoặc trả về null.
+- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện.
+- Ưu tiên nhân vật đã có trong danh sách ở trên và dùng chính xác tên của họ; đối chiếu vai trò/mô tả để chọn đúng người, không gán nhân vật không liên quan.
+- Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
+- Chỉ dùng mảng rỗng khi sự kiện thực sự không có nhân vật liên quan; nếu truyện đã có nhân vật thì mỗi sự kiện chính thông thường phải có ít nhất một nhân vật.
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
 BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
@@ -482,7 +563,7 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       "desc": "<Mô tả chi tiết sự kiện diễn ra thế nào>",
       "location": "<Tên địa điểm nơi diễn ra>",
       "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
-      "charactersInvolved": ["<Tên nhân vật 1>", "<Tên nhân vật 2>"],
+      "charactersInvolved": ["<Tên chính xác nhân vật hiện có hoặc nhân vật mới có vai trò trực tiếp>", "<Tên nhân vật khác nếu có>"],
       "impact": "<Tác động hoặc hậu quả sau sự kiện>"
     }
   ]
@@ -527,11 +608,13 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       });
     }
 
+    const events = normalizeEventCharacters(parsedData.events, characterNodes);
+
     return res.status(200).json({
       success: true,
       data: {
         chapter: parsedData.chapter,
-        events: parsedData.events,
+        events,
         model: aiRes.model,
       },
     });
@@ -665,4 +748,5 @@ module.exports = {
   extractCreateNodeResponse,
   generateChapterAndEvents,
   generateChapterStory,
+  normalizeEventCharacters,
 };
