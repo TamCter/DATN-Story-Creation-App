@@ -38,6 +38,8 @@ export interface StoryNode {
   location?: string;
   chapter?: string;
   impact?: string;
+  charactersInvolved?: string;
+  characters?: string;
   statusEvent?: string;
   createdAt?: number;
   updatedAt?: number;
@@ -49,6 +51,9 @@ export interface StoryLink {
   target: string;
   label?: string;
   type?: 'solid' | 'dashed';
+  category?: string;
+  contextNote?: string;
+  tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
 }
 
 export interface StoryTag {
@@ -80,6 +85,7 @@ export interface StoryChapter {
   shortTitle: string;
   watermark: string;
   desc: string;
+  content?: string;
   events: ChapterEvent[];
   nodes: StoryNode[];
   links: StoryLink[];
@@ -738,6 +744,5 @@ export const GENDER_OPTIONS = [
   { label: 'Nữ', value: 'Nữ', icon: '♀️' },
   { label: 'Khác / Chưa rõ', value: 'Khác', icon: '⚧' },
 ];
-
 
 

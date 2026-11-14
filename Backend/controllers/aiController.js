@@ -1,4 +1,4 @@
-﻿const { GoogleGenAI } = require('@google/genai');
+const { GoogleGenAI } = require('@google/genai');
 
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
 const AI_PROVIDER_TIMEOUT_MS = 150000;
@@ -156,6 +156,69 @@ function getNodeCreationRequest(messages) {
   const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba)/iu)?.[1] || '1';
   const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken.toLowerCase()] || 1;
   return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
+}
+
+function normalizeEventCharacters(events, characterNodes) {
+  const characters = characterNodes.filter(
+    (node) => node && node.type === 'character' && typeof node.name === 'string' && node.name.trim()
+  );
+
+  return events.map((event) => {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) {
+      return event;
+    }
+
+    const rawCharacters = Array.isArray(event.charactersInvolved)
+      ? event.charactersInvolved
+      : typeof event.charactersInvolved === 'string'
+        ? event.charactersInvolved.split(/[,;\n]+/)
+        : [];
+    const involvedNames = [];
+    const involvedKeys = new Set();
+    for (const rawName of rawCharacters) {
+      if (typeof rawName !== 'string') continue;
+      const name = rawName.trim();
+      const nameKey = name.toLocaleLowerCase();
+      if (name && !involvedKeys.has(nameKey)) {
+        involvedNames.push(name);
+        involvedKeys.add(nameKey);
+      }
+    }
+    const eventText = [event.name, event.desc, event.impact]
+      .filter((value) => typeof value === 'string')
+      .join(' ');
+    const matchedCharacterRanges = [];
+
+    for (const character of [...characters].sort((a, b) => b.name.length - a.name.length)) {
+      const name = character.name.trim();
+      const escapedName = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const namePattern = new RegExp(
+        `(^|[^\\p{L}\\p{N}\\p{M}])${escapedName}(?=$|[^\\p{L}\\p{N}\\p{M}])`,
+        'giu'
+      );
+      const nameKey = name.toLocaleLowerCase();
+      const nameRanges = [];
+      let match;
+      let isMentioned = false;
+
+      while ((match = namePattern.exec(eventText)) !== null) {
+        const start = match.index + match[1].length;
+        const end = start + name.length;
+        if (!matchedCharacterRanges.some((range) => start >= range.start && end <= range.end)) {
+          isMentioned = true;
+          nameRanges.push({ start, end });
+        }
+      }
+
+      if (isMentioned && !involvedKeys.has(nameKey)) {
+        involvedNames.push(name);
+        involvedKeys.add(nameKey);
+      }
+      matchedCharacterRanges.push(...nameRanges);
+    }
+
+    return { ...event, charactersInvolved: involvedNames };
+  });
 }
 
 /**
@@ -401,7 +464,289 @@ async function chatWithAI(req, res, next) {
   }
 }
 
+/**
+ * Tự động tạo Chương mới và các Sự kiện trong chương dựa trên ngữ cảnh truyện
+ * POST /api/ai/generate-chapter-events
+ * Body: { projectTitle, userIdea, chapters, nodes, writingStyle }
+ */
+async function generateChapterAndEvents(req, res, next) {
+  try {
+    const {
+      projectTitle = 'Vị diện kỳ ảo',
+      userIdea = '',
+      chapters = [],
+      nodes = [],
+      writingStyle = 'Kiếm hiệp / Tiên hiệp / Huyền huyễn',
+    } = req.body || {};
+
+    const provider = (process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini')).trim().toLowerCase();
+    const apiKey = (process.env[provider === 'aimlapi' ? 'AIMLAPI_API_KEY' : 'GEMINI_API_KEY'] || '').trim();
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        message: 'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY hoặc AIMLAPI_API_KEY vào file .env của Backend.',
+      });
+    }
+
+    // Tính toán số thứ tự chương tiếp theo
+    const nextChapterNumber = chapters.length > 0
+      ? Math.max(...chapters.map((c) => Number(c.chapterNumber) || 0)) + 1
+      : 1;
+
+    // Tổng hợp thông tin các chương trước
+    const chaptersSummary = chapters
+      .slice(-3)
+      .map((c) => `- Chương ${c.chapterNumber}: ${c.title} (${c.desc || 'Chưa có tóm tắt'})`)
+      .join('\n');
+
+    // Tổng hợp các node nhân vật, địa điểm, môn phái, vật phẩm hiện có
+    const characterNodes = nodes.filter(
+      (node) => node && node.type === 'character' && typeof node.name === 'string'
+    );
+    const characters = characterNodes
+      .slice(0, 30)
+      .map((node) =>
+        [
+          node.name,
+          node.role && `vai trò: ${node.role}`,
+          node.sect && `môn phái: ${node.sect}`,
+          node.desc && `mô tả: ${node.desc.slice(0, 180)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+    const locations = nodes
+      .filter((n) => n.type === 'location')
+      .slice(0, 10)
+      .map((n) => `${n.name}${n.region ? ` (${n.region})` : ''}`);
+    const factions = nodes
+      .filter((n) => n.type === 'faction')
+      .slice(0, 8)
+      .map((n) => n.name);
+    const items = nodes
+      .filter((n) => n.type === 'item')
+      .slice(0, 8)
+      .map((n) => n.name);
+
+    const contextPrompt = `Bạn là trợ lý AI sáng tạo cốt truyện tài hoa cho tiểu thuyết thể loại: ${writingStyle}.
+Dự án tiểu thuyết: "${projectTitle}".
+${chaptersSummary ? `Các chương gần nhất:\n${chaptersSummary}\n` : ''}
+Các thực thể hiện có trong truyện:
+- Nhân vật: ${characters.join(', ') || 'Chưa có'}
+- Địa điểm: ${locations.join(', ') || 'Chưa có'}
+- Môn phái / Phe phái: ${factions.join(', ') || 'Chưa có'}
+- Bảo vật / Thần binh: ${items.join(', ') || 'Chưa có'}
+
+Nhiệm vụ của bạn:
+1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
+2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật và địa điểm hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
+
+QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN (BẮT BUỘC):
+- Mỗi sự kiện phải có trường "charactersInvolved" là một mảng tên nhân vật, không được bỏ trống trường hoặc trả về null.
+- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện.
+- Ưu tiên nhân vật đã có trong danh sách ở trên và dùng chính xác tên của họ; đối chiếu vai trò/mô tả để chọn đúng người, không gán nhân vật không liên quan.
+- Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
+- Chỉ dùng mảng rỗng khi sự kiện thực sự không có nhân vật liên quan; nếu truyện đã có nhân vật thì mỗi sự kiện chính thông thường phải có ít nhất một nhân vật.
+${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
+
+BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
+\`\`\`json
+{
+  "chapter": {
+    "chapterNumber": ${nextChapterNumber},
+    "title": "Chương ${nextChapterNumber}: <Tiêu đề chương hấp dẫn, hào hùng>",
+    "desc": "<Tóm tắt ngắn gọn diễn biến cốt lõi của chương (2-3 câu)>"
+  },
+  "events": [
+    {
+      "name": "<Tên sự kiện ngắn gọn, hành động>",
+      "desc": "<Mô tả chi tiết sự kiện diễn ra thế nào>",
+      "location": "<Tên địa điểm nơi diễn ra>",
+      "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
+      "charactersInvolved": ["<Tên chính xác nhân vật hiện có hoặc nhân vật mới có vai trò trực tiếp>", "<Tên nhân vật khác nếu có>"],
+      "impact": "<Tác động hoặc hậu quả sau sự kiện>"
+    }
+  ]
+}
+\`\`\``;
+
+    const messages = [
+      {
+        role: 'user',
+        content: `Hãy tạo chương ${nextChapterNumber} và các sự kiện trong chương cho truyện "${projectTitle}".`,
+      },
+    ];
+
+    const aiRes = await generateAIResponse({
+      provider,
+      apiKey,
+      contextText: contextPrompt,
+      messages,
+    });
+
+    // Trích xuất JSON từ kết quả
+    let parsedData = null;
+    try {
+      const jsonMatch = aiRes.text.match(/\{[\s\S]*"chapter"[\s\S]*"events"[\s\S]*\}/);
+      if (jsonMatch) {
+        parsedData = JSON.parse(jsonMatch[0]);
+      } else {
+        const anyJson = aiRes.text.match(/\{[\s\S]*\}/);
+        if (anyJson) {
+          parsedData = JSON.parse(anyJson[0]);
+        }
+      }
+    } catch (parseError) {
+      console.warn('Lỗi parse JSON chương từ AI:', parseError.message);
+    }
+
+    if (!parsedData || !parsedData.chapter || !Array.isArray(parsedData.events)) {
+      return res.status(500).json({
+        success: false,
+        message: 'AI không tạo được cấu trúc chương và sự kiện hợp lệ. Vui lòng thử lại.',
+        raw: aiRes.text,
+      });
+    }
+
+    const events = normalizeEventCharacters(parsedData.events, characterNodes);
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        chapter: parsedData.chapter,
+        events,
+        model: aiRes.model,
+      },
+    });
+  } catch (error) {
+    console.error('Lỗi khi tạo chương & sự kiện bằng AI:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Không thể tạo chương bằng AI. Vui lòng thử lại.',
+    });
+  }
+}
+
+/**
+ * Lấy toàn bộ các node của chương đó và sáng tác nên câu chuyện hoàn chỉnh cho chương
+ * POST /api/ai/generate-chapter-story
+ * Body: { projectTitle, chapter, events, relatedNodes, writingStyle, customPrompt }
+ */
+async function generateChapterStory(req, res, next) {
+  try {
+    const {
+      projectTitle = 'Vị diện kỳ ảo',
+      chapter = {},
+      events = [],
+      relatedNodes = [],
+      writingStyle = 'Tiểu thuyết Kiếm Hiệp / Tiên Hiệp hào sảng, kịch tính, giàu chất thơ',
+      customPrompt = '',
+    } = req.body || {};
+
+    if (!chapter.title) {
+      return res.status(400).json({ success: false, message: 'Thiếu thông tin chương truyện' });
+    }
+
+    const provider = (process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini')).trim().toLowerCase();
+    const apiKey = (process.env[provider === 'aimlapi' ? 'AIMLAPI_API_KEY' : 'GEMINI_API_KEY'] || '').trim();
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        message: 'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY hoặc AIMLAPI_API_KEY vào file .env của Backend.',
+      });
+    }
+
+    // Liệt kê chi tiết các sự kiện trong chương
+    const eventsDetail = events
+      .map((ev, idx) => {
+        let detail = `[Sự kiện ${idx + 1}]: ${ev.name || ev.title || 'Sự kiện'}\n- Diễn biến: ${ev.desc || 'Chưa có mô tả'}`;
+        if (ev.location) detail += `\n- Địa điểm: ${ev.location}`;
+        if (ev.time) detail += `\n- Thời gian: ${ev.time}`;
+        if (ev.impact) detail += `\n- Kết quả/Tác động: ${ev.impact}`;
+        if (Array.isArray(ev.charactersInvolved) && ev.charactersInvolved.length > 0) {
+          detail += `\n- Nhân vật tham gia: ${ev.charactersInvolved.join(', ')}`;
+        }
+        return detail;
+      })
+      .join('\n\n');
+
+    // Liệt kê chi tiết các thực thể liên quan (nhân vật, võ công, vũ khí, tông môn, địa điểm)
+    const nodesDetail = relatedNodes
+      .map((n) => {
+        let detail = `- [${(n.type || 'thực thể').toUpperCase()}] ${n.name}: ${n.desc || ''}`;
+        if (n.role) detail += ` | Vai trò: ${n.role}`;
+        if (n.sect) detail += ` | Môn phái: ${n.sect}`;
+        if (n.weapon) detail += ` | Binh khí: ${n.weapon}`;
+        if (n.personality) detail += ` | Tính cách: ${n.personality}`;
+        if (n.region) detail += ` | Khu vực: ${n.region}`;
+        return detail;
+      })
+      .join('\n');
+
+    const contextPrompt = `Bạn là một đại tác giả viết tiểu thuyết hàng đầu chuyên thể loại: ${writingStyle}.
+Tác phẩm: "${projectTitle}".
+
+Bạn đang viết nội dung đầy đủ cho:
+Tên chương: "${chapter.title}"
+Số thứ tự: Chương ${chapter.chapterNumber || 1}
+Tóm tắt định hướng: "${chapter.desc || ''}"
+
+CÁC SỰ KIỆN TRONG CHƯƠNG BẮT BUỘC PHẢI DIỄN RA THEO MẠCH TRUYỆN:
+${eventsDetail || 'Diễn biến tự nhiên theo tóm tắt chương.'}
+
+CÁC THỰC THỂ (NHÂN VẬT, ĐỊA ĐIỂM, PHÁI, VẬT PHẨM) XUẤT HIỆN TRONG CHƯƠNG:
+${nodesDetail || 'Nhân vật theo sự kiện.'}
+
+${customPrompt ? `Yêu cầu thêm từ tác giả: "${customPrompt}"` : ''}
+
+YÊU CẦU NGHỆ THUẬT KHI VIẾT CÂU CHUYỆN:
+1. Viết một chương truyện HOÀN CHỈNH, liền mạch, cuốn hút (độ dài khoảng 1200 - 2500 từ).
+2. Khắc họa sống động tâm lý nhân vật, lời thoại sắc sảo, tự nhiên, mang khẩu khí giang hồ / tu tiên.
+3. Miêu tả cảnh quan, không khí, các chiêu thức võ công hoặc pháp bảo một cách hoa mỹ, kịch tính.
+4. Lồng ghép khéo léo và tự nhiên TOÀN BỘ các sự kiện đã nêu ở trên theo đúng trình tự thời gian.
+5. Đoạn kết chương đọng lại dư âm hoặc nút thắt bất ngờ để độc giả hồi hộp đón đọc chương sau.
+6. Trình bày văn bản rõ ràng, chia đoạn hợp lý. KHÔNG chèn lời mở đầu hay kết thúc của AI (ví dụ: "Dưới đây là...", "Hy vọng bạn thích..."), CHỈ trả về đúng nội dung câu chuyện của chương.`;
+
+    const messages = [
+      {
+        role: 'user',
+        content: `Hãy viết toàn bộ câu chuyện hoàn chỉnh cho ${chapter.title}. Bắt đầu trực tiếp vào tác phẩm.`,
+      },
+    ];
+
+    const aiRes = await generateAIResponse({
+      provider,
+      apiKey,
+      contextText: contextPrompt,
+      messages,
+    });
+
+    const storyContent = aiRes.text.trim();
+    const wordCount = storyContent.split(/\s+/).filter(Boolean).length;
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        title: chapter.title,
+        chapterNumber: chapter.chapterNumber,
+        storyContent,
+        wordCount,
+        model: aiRes.model,
+      },
+    });
+  } catch (error) {
+    console.error('Lỗi khi sáng tác câu chuyện chương bằng AI:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Không thể sáng tác câu chuyện bằng AI. Vui lòng thử lại.',
+    });
+  }
+}
+
 module.exports = {
   chatWithAI,
   extractCreateNodeResponse,
+  generateChapterAndEvents,
+  generateChapterStory,
+  normalizeEventCharacters,
 };

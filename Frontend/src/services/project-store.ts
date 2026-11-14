@@ -5,6 +5,45 @@ import { api, ApiError } from '@/services/api';
 const CUSTOM_PROJECTS_KEY = '@story_app_custom_projects';
 const PROJECT_CACHE_PREFIX = '@story_app_project_cache_';
 
+function getEventNodesForChapter(project: StoryProject, chapter: StoryChapter): StoryNode[] {
+  const eventIds = new Set((chapter.events || []).map((event) => event.id));
+  const chapterLabels = new Set([
+    chapter.id,
+    chapter.title,
+    `Chương ${chapter.chapterNumber}`,
+  ].map((label) => label.trim().toLocaleLowerCase()));
+
+  return (project.nodes || []).filter(
+    (node) =>
+      node.type === 'event' &&
+      (eventIds.has(node.id) ||
+        (typeof node.chapter === 'string' &&
+          chapterLabels.has(node.chapter.trim().toLocaleLowerCase())))
+  );
+}
+
+function eventNodeBelongsToChapter(eventNode: StoryNode, chapter: StoryChapter): boolean {
+  const eventChapter = eventNode.chapter?.trim().toLocaleLowerCase();
+  return [
+    chapter.id,
+    chapter.title,
+    `Chương ${chapter.chapterNumber}`,
+  ].some((label) => label.trim().toLocaleLowerCase() === eventChapter);
+}
+
+function getReplacementChapter(
+  project: StoryProject,
+  removedChapterId: string,
+  eventNode: StoryNode
+): StoryChapter | undefined {
+  return (project.chapters || []).find(
+    (chapter) =>
+      chapter.id !== removedChapterId &&
+      (chapter.events?.some((event) => event.id === eventNode.id) ||
+        eventNodeBelongsToChapter(eventNode, chapter))
+  );
+}
+
 export class ProjectStore {
   private memoryProjects: Map<string, StoryProject> = new Map();
 
@@ -54,12 +93,33 @@ export class ProjectStore {
    * Lấy thông tin chi tiết dự án kèm Nodes và Links của dự án đó.
    * QUAN TRỌNG: Không bao giờ fallback sang dự án khác nếu không tìm thấy!
    */
-  async getProject(projectId: string): Promise<StoryProject> {
+  async getProject(
+    projectId: string,
+    options: { preferCache?: boolean } = {}
+  ): Promise<StoryProject> {
+    if (options.preferCache && this.memoryProjects.has(projectId)) {
+      const cached = this.memoryProjects.get(projectId)!;
+      return {
+        ...cached,
+        nodes: [...cached.nodes],
+        links: [...cached.links],
+        edges: [...(cached.edges || cached.links)],
+      };
+    }
+
+    if (options.preferCache) {
+      const cached = await this.getCachedProjectLocally(projectId);
+      if (cached) {
+        this.memoryProjects.set(projectId, cached);
+        return cached;
+      }
+    }
+
     // 1. Thử gọi API Backend để lấy dữ liệu mới nhất từ Neo4j
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
-        const { project, nodes = [], links = [], edges, chapters = [] } = res.data;
+        const { project, nodes = [], links = [], edges, chapters } = res.data;
         const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
         const fullProject: StoryProject = {
           ...project,
@@ -68,7 +128,7 @@ export class ProjectStore {
           nodes: nodes as StoryNode[],
           links: actualLinks,
           edges: actualLinks,
-          chapters: Array.isArray(chapters) && chapters.length > 0 ? (chapters as StoryChapter[]) : project.chapters,
+          chapters: Array.isArray(chapters) ? (chapters as StoryChapter[]) : project.chapters,
         };
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject);
@@ -185,6 +245,8 @@ export class ProjectStore {
       time: nodeData.time?.trim() || '',
       location: nodeData.location?.trim() || '',
       chapter: nodeData.chapter?.trim() || '',
+      charactersInvolved: nodeData.charactersInvolved?.trim() || '',
+      characters: nodeData.characters?.trim() || '',
       impact: nodeData.impact?.trim() || '',
       statusEvent: nodeData.statusEvent?.trim() || '',
       createdAt: Date.now(),
@@ -291,6 +353,9 @@ export class ProjectStore {
       target: linkData.target || '',
       label: linkData.label || 'liên hệ',
       type: linkData.type || 'solid',
+      category: linkData.category || '',
+      contextNote: linkData.contextNote || '',
+      tone: linkData.tone || 'loyalty',
     };
 
     // Thử gọi backend để lưu quan hệ vào Neo4j
@@ -301,6 +366,9 @@ export class ProjectStore {
         target: newLink.target,
         label: newLink.label,
         type: newLink.type,
+        category: newLink.category,
+        contextNote: newLink.contextNote,
+        tone: newLink.tone,
       });
       if (res.success && res.data) {
         Object.assign(newLink, res.data);
@@ -386,6 +454,7 @@ export class ProjectStore {
       chapterNumber?: number;
       title: string;
       desc?: string;
+      content?: string;
       events?: any[];
     }
   ): Promise<StoryChapter> {
@@ -400,6 +469,7 @@ export class ProjectStore {
       shortTitle: `C${num} ${chapterData.title.trim()}`,
       watermark: chapterData.title.trim().toUpperCase(),
       desc: chapterData.desc?.trim() || '',
+      content: chapterData.content?.trim() || '',
       events: chapterData.events || [],
       nodes: [],
       links: [],
@@ -410,6 +480,7 @@ export class ProjectStore {
         chapterNumber: num,
         title: newChapter.title,
         desc: newChapter.desc,
+        content: newChapter.content,
         events: newChapter.events,
       });
       if (res.success && res.data) {
@@ -422,6 +493,28 @@ export class ProjectStore {
     project.chapters = [...existingChapters, newChapter];
     await this.saveProject(project);
     return newChapter;
+  }
+
+  /**
+   * Cập nhật nội dung văn bản câu chuyện của Chapter
+   */
+  async updateChapterStoryContent(
+    projectId: string,
+    chapterId: string,
+    content: string
+  ): Promise<void> {
+    const project = await this.getProject(projectId);
+    const chapters = project.chapters || [];
+    const chIdx = chapters.findIndex((c) => c.id === chapterId);
+    if (chIdx === -1) return;
+
+    chapters[chIdx].content = content;
+    try {
+      await api.updateChapter(chapterId, { content });
+    } catch (err) {
+      console.warn('[ProjectStore] Không thể cập nhật nội dung chương lên Backend:', err);
+    }
+    await this.saveProject(project);
   }
 
   /**
@@ -463,6 +556,90 @@ export class ProjectStore {
       project.nodes[nodeIdx] = updatedNode;
     }
     await this.saveProject(project);
+  }
+
+  async removeEventFromChapter(
+    projectId: string,
+    chapterId: string,
+    eventId: string,
+    deleteEvent: boolean
+  ): Promise<void> {
+    const project = await this.getProject(projectId);
+    const chapter = (project.chapters || []).find((item) => item.id === chapterId);
+    if (!chapter) {
+      throw new Error('Không tìm thấy chương cần chỉnh sửa');
+    }
+
+    const updatedEvents = (chapter.events || []).filter((event) => event.id !== eventId);
+    const eventNode = (project.nodes || []).find(
+      (node) => node.id === eventId && node.type === 'event'
+    );
+
+    try {
+      await api.updateChapter(chapterId, { events: updatedEvents });
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      console.warn('[ProjectStore] Không thể cập nhật danh sách sự kiện trên Backend:', err);
+    }
+
+    if (deleteEvent) {
+      if (eventNode) {
+        await this.deleteNode(projectId, eventId);
+      }
+    } else if (eventNode && eventNodeBelongsToChapter(eventNode, chapter)) {
+      const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
+      await this.updateNode(projectId, eventId, {
+        chapter: replacementChapter?.title || '',
+      });
+    }
+
+    const updatedProject = await this.getProject(projectId);
+    const updatedChapter = (updatedProject.chapters || []).find((item) => item.id === chapterId);
+    if (updatedChapter) {
+      updatedChapter.events = updatedEvents;
+    }
+    await this.saveProject(updatedProject);
+  }
+
+  async deleteChapter(
+    projectId: string,
+    chapterId: string,
+    deleteEvents: boolean
+  ): Promise<void> {
+    const project = await this.getProject(projectId);
+    const chapter = (project.chapters || []).find((item) => item.id === chapterId);
+    if (!chapter) {
+      throw new Error('Không tìm thấy chương cần xóa');
+    }
+
+    const eventNodes = getEventNodesForChapter(project, chapter);
+    if (deleteEvents) {
+      for (const eventNode of eventNodes) {
+        await this.deleteNode(projectId, eventNode.id);
+      }
+    } else {
+      for (const eventNode of eventNodes) {
+        if (eventNodeBelongsToChapter(eventNode, chapter)) {
+          const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
+          await this.updateNode(projectId, eventNode.id, {
+            chapter: replacementChapter?.title || '',
+          });
+        }
+      }
+    }
+
+    try {
+      await api.deleteChapter(chapterId);
+    } catch (err) {
+      if (err instanceof ApiError) throw err;
+      console.warn('[ProjectStore] Không thể xóa chương trên Backend, xóa local:', err);
+    }
+
+    const updatedProject = await this.getProject(projectId);
+    updatedProject.chapters = (updatedProject.chapters || []).filter(
+      (item) => item.id !== chapterId
+    );
+    await this.saveProject(updatedProject);
   }
 }
 

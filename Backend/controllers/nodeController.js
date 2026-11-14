@@ -138,6 +138,8 @@ const ALLOWED_NODE_SCALARS = new Set([
   'location',
   'chapter',
   'impact',
+  'charactersInvolved',
+  'characters',
   // Status Event cause
   'statusEvent',
 ]);
@@ -242,6 +244,13 @@ async function createNode(req, res, next) {
   // Strip server-managed fields if sent
   delete body.createdAt;
   delete body.updatedAt;
+
+  if (Array.isArray(body.charactersInvolved)) {
+    body.charactersInvolved = body.charactersInvolved.join(', ');
+  }
+  if (Array.isArray(body.characters)) {
+    body.characters = body.characters.join(', ');
+  }
 
   // Reject invalid keys or non-scalar / nested values
   for (const [key, value] of Object.entries(body)) {
@@ -373,6 +382,13 @@ async function updateNode(req, res, next) {
   delete body.id;
   delete body.createdAt;
   delete body.updatedAt;
+
+  if (Array.isArray(body.charactersInvolved)) {
+    body.charactersInvolved = body.charactersInvolved.join(', ');
+  }
+  if (Array.isArray(body.characters)) {
+    body.characters = body.characters.join(', ');
+  }
 
   for (const [key, value] of Object.entries(body)) {
     if (!ALLOWED_NODE_SCALARS.has(key)) {
@@ -835,18 +851,54 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 5. BIẾN CỐ / SỰ KIỆN (Event)
     if (nodeType === 'event') {
-      // Nơi diễn ra -> Location
+      // 5.1 Nơi diễn ra -> Location
       if (nodeData.location && String(nodeData.location).trim()) {
         const location = String(nodeData.location).trim();
+        // Xóa các link EVENT_LOCATION cũ không còn khớp
         await runQuery(`
           MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode)
           WHERE loc.name <> $location AND loc.id <> $location
           DELETE r
         `, { nodeId, location });
-        await runQuery(`
-          MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
+
+        // Tìm xem node location đã tồn tại trong project chưa
+        const locCheck = await runQuery(`
+          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p:Project { id: $projectId })
           WHERE loc.name = $location OR loc.id = $location
+          RETURN loc.id AS id
+          LIMIT 1
+        `, { projectId, location });
+
+        let locId = locCheck.length > 0 ? locCheck[0].id : null;
+
+        // Nếu chưa có, TỰ ĐỘNG TẠO NODE LOCATION MỚI
+        if (!locId) {
+          locId = 'node-loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+          await runQuery(`
+            MATCH (p:Project { id: $projectId })
+            CREATE (loc:StoryNode:Location {
+              id: $locId,
+              name: $location,
+              type: 'location',
+              role: 'ĐỊA DANH',
+              region: 'Đông Vực',
+              dangerLevel: 'Bình thường',
+              climate: 'Ôn hòa',
+              desc: 'Địa danh diễn ra sự kiện ' + $location,
+              status: 'Hoạt động',
+              createdAt: timestamp(),
+              updatedAt: timestamp(),
+              x: 150 + rand() * 400,
+              y: 150 + rand() * 400
+            })
+            CREATE (loc)-[:BELONGS_TO]->(p)
+          `, { projectId, locId, location });
+        }
+
+        // Tạo / cập nhật liên kết EVENT_LOCATION
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })
+          MATCH (loc:StoryNode { id: $locId })
           MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
           ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
                         r.label = 'Nơi diễn ra',
@@ -855,12 +907,79 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Nơi diễn ra',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, location });
+        `, { nodeId, locId });
       } else {
         await runQuery(`
           MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(:StoryNode)
           DELETE r
         `, { nodeId });
+      }
+
+      // 5.2 Nhân vật tham gia -> Character
+      let rawChars = [];
+      if (Array.isArray(nodeData.charactersInvolved)) {
+        rawChars.push(...nodeData.charactersInvolved);
+      } else if (typeof nodeData.charactersInvolved === 'string' && nodeData.charactersInvolved.trim()) {
+        rawChars.push(...nodeData.charactersInvolved.split(/[,;\n]+/));
+      }
+      if (Array.isArray(nodeData.characters)) {
+        rawChars.push(...nodeData.characters);
+      } else if (typeof nodeData.characters === 'string' && nodeData.characters.trim()) {
+        rawChars.push(...nodeData.characters.split(/[,;\n]+/));
+      }
+      if (typeof nodeData.character === 'string' && nodeData.character.trim()) {
+        rawChars.push(...nodeData.character.split(/[,;\n]+/));
+      }
+
+      const charNames = Array.from(new Set(rawChars.map((s) => String(s).trim()).filter(Boolean)));
+      if (charNames.length > 0) {
+        for (const charName of charNames) {
+          // Tìm xem nhân vật đã tồn tại trong project chưa
+          const charCheck = await runQuery(`
+            MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+            WHERE toLower(c.name) = toLower($charName) OR c.id = $charName
+            RETURN c.id AS id
+            LIMIT 1
+          `, { projectId, charName });
+
+          let charId = charCheck.length > 0 ? charCheck[0].id : null;
+
+          // Nếu chưa có, TỰ ĐỘNG TẠO NODE CHARACTER MỚI
+          if (!charId) {
+            charId = 'node-char-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
+            await runQuery(`
+              MATCH (p:Project { id: $projectId })
+              CREATE (c:StoryNode:Character {
+                id: $charId,
+                name: $charName,
+                type: 'character',
+                role: 'TRUNG LẬP',
+                gender: 'Nam',
+                status: 'Còn sống',
+                desc: 'Nhân vật tham gia sự kiện',
+                createdAt: timestamp(),
+                updatedAt: timestamp(),
+                x: 100 + rand() * 400,
+                y: 100 + rand() * 400
+              })
+              CREATE (c)-[:BELONGS_TO]->(p)
+            `, { projectId, charId, charName });
+          }
+
+          // Tạo mối quan hệ PARTICIPATED_IN từ Nhân vật -> Sự kiện
+          await runQuery(`
+            MATCH (ev:StoryNode { id: $nodeId })
+            MATCH (c:StoryNode { id: $charId })
+            MERGE (c)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+            ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-participated',
+                          r.label = 'Tham gia',
+                          r.type = 'dashed',
+                          r.tone = 'event',
+                          r.createdAt = timestamp()
+            ON MATCH SET r.label = 'Tham gia',
+                         r.updatedAt = timestamp()
+          `, { nodeId, charId });
+        }
       }
     }
 

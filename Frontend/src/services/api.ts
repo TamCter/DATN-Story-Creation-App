@@ -336,6 +336,7 @@ class ApiService {
       chapterNumber?: number;
       title: string;
       desc?: string;
+      content?: string;
       events?: any[];
     }
   ): Promise<{ success: boolean; data: any; message?: string }> {
@@ -387,6 +388,91 @@ class ApiService {
         body: JSON.stringify(payload),
       },
       480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
+    );
+  }
+
+  async generateChapterAndEvents(payload: {
+    projectTitle: string;
+    userIdea?: string;
+    chapters?: any[];
+    nodes?: any[];
+    writingStyle?: string;
+  }): Promise<{
+    success: boolean;
+    data: {
+      chapter: { chapterNumber: number; title: string; desc: string };
+      events: Array<{
+        name: string;
+        desc: string;
+        location?: string;
+        time?: string;
+        charactersInvolved?: string[];
+        impact?: string;
+      }>;
+      model?: string;
+    };
+    message?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      data: {
+        chapter: { chapterNumber: number; title: string; desc: string };
+        events: Array<{
+          name: string;
+          desc: string;
+          location?: string;
+          time?: string;
+          charactersInvolved?: string[];
+          impact?: string;
+        }>;
+        model?: string;
+      };
+      message?: string;
+    }>(
+      '/ai/generate-chapter-events',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      120000
+    );
+  }
+
+  async generateChapterStory(payload: {
+    projectTitle: string;
+    chapter: { chapterNumber?: number; title: string; desc?: string };
+    events?: any[];
+    relatedNodes?: any[];
+    writingStyle?: string;
+    customPrompt?: string;
+  }): Promise<{
+    success: boolean;
+    data: {
+      title: string;
+      chapterNumber?: number;
+      storyContent: string;
+      wordCount: number;
+      model?: string;
+    };
+    message?: string;
+  }> {
+    return this.request<{
+      success: boolean;
+      data: {
+        title: string;
+        chapterNumber?: number;
+        storyContent: string;
+        wordCount: number;
+        model?: string;
+      };
+      message?: string;
+    }>(
+      '/ai/generate-chapter-story',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      180000
     );
   }
 }
