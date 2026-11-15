@@ -442,6 +442,9 @@ async function updateNode(req, res, next) {
       updates[field] = body[field] !== null ? String(body[field]).trim() : '';
     }
   }
+  if (body.charactersInvolved !== undefined && body.characters === undefined) {
+    updates.characters = '';
+  }
 
   updates.updatedAt = Date.now();
 

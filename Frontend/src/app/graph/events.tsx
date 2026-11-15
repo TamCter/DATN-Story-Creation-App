@@ -77,6 +77,7 @@ export default function ChapterDetailScreen() {
   const [targetChapter, setTargetChapter] = useState<StoryChapter | null>(null);
   const [pendingRemoval, setPendingRemoval] = useState<PendingRemoval | null>(null);
   const [isRemoving, setIsRemoving] = useState(false);
+  const [syncingChapterId, setSyncingChapterId] = useState<string | null>(null);
 
   // AI Story Generator & Reader Modals
   const [aiStoryModalOpen, setAiStoryModalOpen] = useState(false);
@@ -154,6 +155,23 @@ export default function ChapterDetailScreen() {
   const handleOpenAssignModal = (chapter: StoryChapter) => {
     setTargetChapter(chapter);
     setAssignModalOpen(true);
+  };
+
+  const handleRetryChapterSync = async (chapter: StoryChapter) => {
+    setSyncingChapterId(chapter.id);
+    try {
+      await projectStore.ensureChapterSynced(projectId, chapter.id);
+      await loadData();
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Không thể đồng bộ chương';
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Lỗi đồng bộ', message);
+      }
+    } finally {
+      setSyncingChapterId(null);
+    }
   };
 
   const handleAssignEvent = async (eventNode: StoryNode) => {
@@ -280,15 +298,11 @@ export default function ChapterDetailScreen() {
             eventBelongsToChapter(event, chapter)
           );
 
-          // Hợp nhất cả sự kiện từ chapter.events nếu chưa có trong node
-          const displayEvents: Array<{ id: string; title: string; desc?: string }> = [
-            ...matchedEvents.map((m) => ({ id: m.id, title: m.name, desc: m.desc })),
-          ];
-          for (const ev of chapter.events || []) {
-            if (!displayEvents.some((d) => d.id === ev.id)) {
-              displayEvents.push(ev);
-            }
-          }
+          const displayEvents = matchedEvents.map((event) => ({
+            id: event.id,
+            title: event.name,
+            desc: event.desc,
+          }));
 
           return (
             <View key={chapter.id} style={styles.chapterItem}>
@@ -305,6 +319,25 @@ export default function ChapterDetailScreen() {
               {/* Chapter Description */}
               {Boolean(chapter.desc) && (
                 <Text style={styles.chapterDesc}>{chapter.desc}</Text>
+              )}
+
+              {chapter.syncStatus === 'pending' && (
+                <View style={styles.pendingSyncRow}>
+                  <Text style={styles.pendingSyncText}>
+                    Chương đang lưu trên thiết bị, chưa đồng bộ với máy chủ.
+                  </Text>
+                  <Pressable
+                    onPress={() => void handleRetryChapterSync(chapter)}
+                    disabled={syncingChapterId === chapter.id}
+                    style={[
+                      styles.retrySyncBtn,
+                      syncingChapterId === chapter.id && { opacity: 0.6 },
+                    ]}>
+                    <Text style={styles.retrySyncBtnText}>
+                      {syncingChapterId === chapter.id ? 'Đang đồng bộ...' : 'Đồng bộ lại'}
+                    </Text>
+                  </Pressable>
+                </View>
               )}
 
               {/* Events in Chapter */}
@@ -529,8 +562,9 @@ export default function ChapterDetailScreen() {
                 </View>
               ) : (
                 eventOnlyNodes.map((evt) => {
-                  const isAlreadyIn = targetChapter?.events?.some((e) => e.id === evt.id) ||
-                    evt.chapter === targetChapter?.title;
+                  const isAlreadyIn = targetChapter
+                    ? eventBelongsToChapter(evt, targetChapter)
+                    : false;
 
                   return (
                     <Pressable
@@ -607,6 +641,7 @@ export default function ChapterDetailScreen() {
                   current ? { ...current, deleteEntity: !current.deleteEntity } : current
                 )
               }
+              disabled={isRemoving}
               accessibilityRole="checkbox"
               accessibilityState={{ checked: pendingRemoval?.deleteEntity ?? false }}>
               <View
@@ -844,6 +879,36 @@ const styles = StyleSheet.create({
     color: '#8f887b',
     fontFamily: AppFonts.sans,
     marginBottom: 14,
+  },
+  pendingSyncRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    padding: 10,
+    marginBottom: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.35)',
+    backgroundColor: 'rgba(229, 169, 60, 0.08)',
+  },
+  pendingSyncText: {
+    flex: 1,
+    color: '#d8b36b',
+    fontSize: 12,
+    fontFamily: AppFonts.sans,
+  },
+  retrySyncBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 6,
+    backgroundColor: 'rgba(229, 169, 60, 0.16)',
+  },
+  retrySyncBtnText: {
+    color: '#e5a93c',
+    fontSize: 12,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
   },
   eventsBlock: {
     borderLeftWidth: 2,

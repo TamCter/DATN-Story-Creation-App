@@ -91,6 +91,7 @@ export interface StoryChapter {
   watermark: string;
   desc: string;
   content?: string;
+  syncStatus?: 'synced' | 'pending';
   events: ChapterEvent[];
   nodes: StoryNode[];
   links: StoryLink[];
@@ -114,7 +115,7 @@ export function eventBelongsToChapter(
     return chapterLabels.has(chapterMembership);
   }
 
-  return (chapter.events || []).some((event) => event.id === node.id);
+  return false;
 }
 
 export interface StoryLocationItem {

@@ -333,6 +333,7 @@ class ApiService {
   async createChapter(
     projectId: string,
     payload: {
+      id?: string;
       chapterNumber?: number;
       title: string;
       desc?: string;

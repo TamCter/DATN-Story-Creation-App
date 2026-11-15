@@ -99,12 +99,30 @@ export class ProjectStore {
       }
     }
 
+    const locallyCachedProject =
+      this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+
     // 1. Thử gọi API Backend để lấy dữ liệu mới nhất từ Neo4j
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
         const { project, nodes = [], links = [], edges, chapters } = res.data;
         const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
+        const remoteChapters = Array.isArray(chapters)
+          ? (chapters as StoryChapter[])
+          : project.chapters || [];
+        const pendingChapters = (locallyCachedProject?.chapters || []).filter(
+          (chapter) => chapter.syncStatus === 'pending'
+        );
+        const mergedChapters = [
+          ...remoteChapters,
+          ...pendingChapters.filter(
+            (pending) =>
+              !remoteChapters.some(
+                (chapter: StoryChapter) => chapter.id === pending.id
+              )
+          ),
+        ];
         const fullProject: StoryProject = {
           ...project,
           nodeCount: nodes.length,
@@ -112,7 +130,7 @@ export class ProjectStore {
           nodes: nodes as StoryNode[],
           links: actualLinks,
           edges: actualLinks,
-          chapters: Array.isArray(chapters) ? (chapters as StoryChapter[]) : project.chapters,
+          chapters: mergedChapters,
         };
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject);
@@ -422,7 +440,17 @@ export class ProjectStore {
     try {
       const res = await api.getChapters(projectId);
       if (res.success && Array.isArray(res.data) && res.data.length > 0) {
-        return res.data as StoryChapter[];
+        const locallyCachedProject =
+          this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+        const pendingChapters = (locallyCachedProject?.chapters || []).filter(
+          (chapter) => chapter.syncStatus === 'pending'
+        );
+        return [
+          ...(res.data as StoryChapter[]),
+          ...pendingChapters.filter(
+            (pending) => !res.data.some((chapter) => chapter.id === pending.id)
+          ),
+        ];
       }
     } catch {}
     const project = await this.getProject(projectId);
@@ -457,19 +485,22 @@ export class ProjectStore {
       events: chapterData.events || [],
       nodes: [],
       links: [],
+      syncStatus: 'pending',
     };
 
     try {
       const res = await api.createChapter(projectId, {
+        id: newChapter.id,
         chapterNumber: num,
         title: newChapter.title,
         desc: newChapter.desc,
         content: newChapter.content,
         events: newChapter.events,
       });
-      if (res.success && res.data) {
-        Object.assign(newChapter, res.data);
+      if (!res.success || !res.data) {
+        throw new Error(res.message || 'Backend không xác nhận đã tạo chương');
       }
+      Object.assign(newChapter, res.data, { syncStatus: 'synced' });
     } catch (err) {
       console.warn('[ProjectStore] Không thể tạo chapter lên Backend, lưu local:', err);
     }
@@ -477,6 +508,70 @@ export class ProjectStore {
     project.chapters = [...existingChapters, newChapter];
     await this.saveProject(project);
     return newChapter;
+  }
+
+  async ensureChapterSynced(projectId: string, chapterId: string): Promise<StoryChapter> {
+    const project = await this.getProject(projectId);
+    const chapters = project.chapters;
+    if (!chapters) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+    const chapterIndex = chapters.findIndex((item) => item.id === chapterId);
+    if (chapterIndex === -1) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+
+    const chapter = chapters[chapterIndex];
+    if (!chapter) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+    if (chapter.syncStatus !== 'pending') return chapter;
+
+    let remoteChapter: StoryChapter | undefined;
+    let createError: unknown;
+    try {
+      const response = await api.createChapter(projectId, {
+        id: chapter.id,
+        chapterNumber: chapter.chapterNumber,
+        title: chapter.title,
+        desc: chapter.desc,
+        content: chapter.content,
+        events: chapter.events,
+      });
+      if (!response.success || !response.data) {
+        throw new Error(response.message || 'Backend không xác nhận đã đồng bộ chương');
+      }
+      remoteChapter = response.data as StoryChapter;
+    } catch (err) {
+      createError = err;
+    }
+
+    if (!remoteChapter) {
+      try {
+        const response = await api.getChapters(projectId);
+        remoteChapter = response.data.find((item) => item.id === chapter.id) as
+          | StoryChapter
+          | undefined;
+      } catch (verifyError) {
+        const createMessage =
+          createError instanceof Error ? createError.message : String(createError);
+        const verifyMessage =
+          verifyError instanceof Error ? verifyError.message : String(verifyError);
+        throw new Error(
+          `Không thể đồng bộ chương: ${createMessage}. Không xác minh được trạng thái trên máy chủ: ${verifyMessage}`
+        );
+      }
+    }
+
+    if (!remoteChapter) {
+      if (createError instanceof Error) throw createError;
+      throw new Error('Backend chưa tạo được chương.');
+    }
+
+    const syncedChapter = { ...chapter, ...remoteChapter, syncStatus: 'synced' as const };
+    chapters[chapterIndex] = syncedChapter;
+    await this.saveProject(project);
+    return syncedChapter;
   }
 
   /**
@@ -487,6 +582,7 @@ export class ProjectStore {
     chapterId: string,
     content: string
   ): Promise<void> {
+    await this.ensureChapterSynced(projectId, chapterId);
     const project = await this.getProject(projectId);
     const chapters = project.chapters || [];
     const chIdx = chapters.findIndex((c) => c.id === chapterId);
@@ -511,30 +607,70 @@ export class ProjectStore {
       throw new Error('Chỉ node có phân loại là Sự kiện mới được gán vào chương');
     }
 
-    const project = await this.getProject(projectId);
-    const chapters = project.chapters || [];
-    const chIdx = chapters.findIndex((c) => c.id === chapterId);
-    if (chIdx === -1) return;
-
-    const chapter = chapters[chIdx];
-    const exists = chapter.events?.some((e) => e.id === eventNode.id);
-    if (!exists) {
-      const updatedEvents = [
-        ...(chapter.events || []),
-        { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
-      ];
-      await api.updateChapter(chapterId, { events: updatedEvents });
-      chapter.events = updatedEvents;
+    await this.ensureChapterSynced(projectId, chapterId);
+    let project = await this.getProject(projectId);
+    const chapter = (project.chapters || []).find((item) => item.id === chapterId);
+    if (!chapter) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
     }
+
+    const previousChapters = (project.chapters || []).filter(
+      (item) =>
+        item.id !== chapterId &&
+        (eventBelongsToChapter(eventNode, item) ||
+          item.events?.some((event) => event.id === eventNode.id))
+    );
+    for (const previousChapter of previousChapters) {
+      const updatedEvents = (previousChapter.events || []).filter(
+        (event) => event.id !== eventNode.id
+      );
+      if (updatedEvents.length !== (previousChapter.events || []).length) {
+        await this.persistChapterEvents(projectId, previousChapter.id, updatedEvents);
+      }
+    }
+
+    project = await this.getProject(projectId);
+    const targetChapter = (project.chapters || []).find((item) => item.id === chapterId);
+    if (!targetChapter) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+    const updatedEvents = [
+      ...(targetChapter.events || []).filter((event) => event.id !== eventNode.id),
+      { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
+    ];
+    await this.persistChapterEvents(projectId, chapterId, updatedEvents);
 
     // Cập nhật trường chapter của node sự kiện
     const updatedNode = await this.updateNode(projectId, eventNode.id, {
-      chapter: chapter.title,
+      chapter: targetChapter.id,
     });
-    const nodeIdx = project.nodes.findIndex((n) => n.id === eventNode.id);
+    project = await this.getProject(projectId);
+    const nodeIdx = project.nodes.findIndex((node) => node.id === eventNode.id);
     if (nodeIdx !== -1) {
       project.nodes[nodeIdx] = updatedNode;
     }
+    await this.saveProject(project);
+  }
+
+  private async persistChapterEvents(
+    projectId: string,
+    chapterId: string,
+    events: StoryChapter['events']
+  ): Promise<void> {
+    await this.ensureChapterSynced(projectId, chapterId);
+    const response = await api.updateChapter(chapterId, { events });
+    if (!response.success) {
+      throw new Error(response.message || 'Không thể cập nhật danh sách sự kiện của chương');
+    }
+
+    const project = await this.getProject(projectId);
+    const chapterIndex = (project.chapters || []).findIndex(
+      (chapter) => chapter.id === chapterId
+    );
+    if (chapterIndex === -1 || !project.chapters) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+    project.chapters[chapterIndex] = { ...project.chapters[chapterIndex], events };
     await this.saveProject(project);
   }
 
@@ -544,6 +680,7 @@ export class ProjectStore {
     eventId: string,
     deleteEvent: boolean
   ): Promise<void> {
+    await this.ensureChapterSynced(projectId, chapterId);
     const project = await this.getProject(projectId);
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
     if (!chapter) {
@@ -569,7 +706,7 @@ export class ProjectStore {
     } else if (eventNode && eventBelongsToChapter(eventNode, chapter)) {
       const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
       await this.updateNode(projectId, eventId, {
-        chapter: replacementChapter?.title || '',
+        chapter: replacementChapter?.id || '',
       });
     }
 
@@ -586,6 +723,7 @@ export class ProjectStore {
     chapterId: string,
     deleteEvents: boolean
   ): Promise<void> {
+    await this.ensureChapterSynced(projectId, chapterId);
     const project = await this.getProject(projectId);
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
     if (!chapter) {
@@ -602,7 +740,7 @@ export class ProjectStore {
         if (eventBelongsToChapter(eventNode, chapter)) {
           const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
           await this.updateNode(projectId, eventNode.id, {
-            chapter: replacementChapter?.title || '',
+            chapter: replacementChapter?.id || '',
           });
         }
       }

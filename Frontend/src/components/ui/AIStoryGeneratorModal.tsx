@@ -56,8 +56,12 @@ export default function AIStoryGeneratorModal({
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const generationSessionRef = useRef(0);
-  const createdChapterIdRef = useRef<string | null>(null);
-  const savedEventNodeIdsRef = useRef<Record<number, string>>({});
+  const draftVersionRef = useRef(0);
+  const createdChapterIdRef = useRef<{ draftVersion: number; chapterId: string } | null>(null);
+  const savedEventNodeIdsRef = useRef<{
+    draftVersion: number;
+    ids: Record<number, string>;
+  }>({ draftVersion: 0, ids: {} });
   const projectNodesRef = useRef(project.nodes);
   const targetChapterKey = `${project.id}:${initialChapter?.id || 'new'}`;
   const previousTargetChapterKeyRef = useRef(targetChapterKey);
@@ -87,15 +91,7 @@ export default function AIStoryGeneratorModal({
       charactersInvolved?: string[];
       impact?: string;
     }>
-  >(() => {
-    if (initialChapter && initialChapter.events) {
-      return initialChapter.events.map((e) => ({
-        name: e.title,
-        desc: e.desc,
-      }));
-    }
-    return [];
-  });
+  >([]);
 
   // Nội dung truyện được sáng tác
   const [storyContent, setStoryContent] = useState<string>('');
@@ -120,10 +116,15 @@ export default function AIStoryGeneratorModal({
   useEffect(() => {
     if (previousTargetChapterKeyRef.current === targetChapterKey) return;
     previousTargetChapterKeyRef.current = targetChapterKey;
+    draftVersionRef.current += 1;
     createdChapterIdRef.current = null;
-    savedEventNodeIdsRef.current = {};
+    savedEventNodeIdsRef.current = {
+      draftVersion: draftVersionRef.current,
+      ids: {},
+    };
     setStoryContent('');
     setWordCount(0);
+    setIsSaving(false);
   }, [targetChapterKey]);
 
   // Reset khi mở lại với initialChapter
@@ -150,23 +151,22 @@ export default function AIStoryGeneratorModal({
             ),
             impact: n.impact,
           }));
-        setGeneratedEvents(
-          matchedEvts.length > 0
-            ? matchedEvts
-            : (initialChapter.events || []).map((e) => ({
-                name: e.title,
-                desc: e.desc,
-              }))
-        );
+        setGeneratedEvents(matchedEvts);
       } else {
-        if (!createdChapterIdRef.current) {
+        if (
+          !createdChapterIdRef.current ||
+          createdChapterIdRef.current.draftVersion !== draftVersionRef.current
+        ) {
           setStep(1);
           setUserIdea('');
           setGeneratedChapter(null);
           setGeneratedEvents([]);
           setStoryContent('');
           setWordCount(0);
-          savedEventNodeIdsRef.current = {};
+          savedEventNodeIdsRef.current = {
+            draftVersion: draftVersionRef.current,
+            ids: {},
+          };
         }
       }
       setCopySuccess(false);
@@ -176,13 +176,15 @@ export default function AIStoryGeneratorModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, project.id, initialChapter?.id]);
 
-  const handleClose = () => {
+  const handleClose = (saveCompleted = false) => {
+    if (isSaving && !saveCompleted) return;
     generationSessionRef.current += 1;
     onClose();
   };
 
   // BƯỚC 1: Gọi AI để phác thảo Chương và các Sự kiện
   const handleGenerateChapterAndEvents = async () => {
+    if (isSaving) return;
     const requestSession = generationSessionRef.current;
     setIsGenerating(true);
     try {
@@ -196,12 +198,16 @@ export default function AIStoryGeneratorModal({
 
       if (requestSession !== generationSessionRef.current) return;
       if (res.success && res.data) {
+        draftVersionRef.current += 1;
         setGeneratedChapter(res.data.chapter);
         setGeneratedEvents(res.data.events || []);
         setStoryContent('');
         setWordCount(0);
         createdChapterIdRef.current = null;
-        savedEventNodeIdsRef.current = {};
+        savedEventNodeIdsRef.current = {
+          draftVersion: draftVersionRef.current,
+          ids: {},
+        };
         setStep(2);
       } else {
         throw new Error(res.message || 'AI không thể tạo cấu trúc chương');
@@ -263,8 +269,13 @@ export default function AIStoryGeneratorModal({
   // BƯỚC 3: Lưu toàn bộ Chương, Sự kiện (Nodes), và Nội dung truyện vào Database & Đồ thị
   const handleSaveAllToProject = async () => {
     if (!generatedChapter) return;
+    const saveDraftVersion = draftVersionRef.current;
     setIsSaving(true);
-    let targetChapterId = initialChapter?.id || createdChapterIdRef.current;
+    let targetChapterId =
+      initialChapter?.id ||
+      (createdChapterIdRef.current?.draftVersion === saveDraftVersion
+        ? createdChapterIdRef.current.chapterId
+        : null);
 
     try {
       if (!targetChapterId) {
@@ -274,8 +285,12 @@ export default function AIStoryGeneratorModal({
           desc: generatedChapter.desc,
           content: storyContent,
         });
+        if (draftVersionRef.current !== saveDraftVersion) return;
         targetChapterId = createdChapter.id;
-        createdChapterIdRef.current = targetChapterId;
+        createdChapterIdRef.current = {
+          draftVersion: saveDraftVersion,
+          chapterId: targetChapterId,
+        };
       } else if (targetChapterId) {
         await projectStore.updateChapterStoryContent(project.id, targetChapterId, storyContent);
       }
@@ -284,9 +299,12 @@ export default function AIStoryGeneratorModal({
         if (!targetChapterId) {
           throw new Error('Không xác định được chương để gán sự kiện.');
         }
+        await projectStore.ensureChapterSynced(project.id, targetChapterId);
+        if (draftVersionRef.current !== saveDraftVersion) return;
         const currentNodes = [...(await projectStore.getProject(project.id)).nodes];
 
         for (const [eventIndex, ev] of generatedEvents.entries()) {
+          if (draftVersionRef.current !== saveDraftVersion) return;
           try {
             if (ev.location && ev.location.trim()) {
               const locTrim = ev.location.trim();
@@ -327,7 +345,13 @@ export default function AIStoryGeneratorModal({
             }
 
             let eventNode: StoryNode | undefined;
-            const savedNodeId = savedEventNodeIdsRef.current[eventIndex];
+            if (savedEventNodeIdsRef.current.draftVersion !== saveDraftVersion) {
+              savedEventNodeIdsRef.current = {
+                draftVersion: saveDraftVersion,
+                ids: {},
+              };
+            }
+            const savedNodeId = savedEventNodeIdsRef.current.ids[eventIndex];
             if (savedNodeId) {
               eventNode = currentNodes.find((node) => node.id === savedNodeId);
               if (!eventNode) {
@@ -347,7 +371,8 @@ export default function AIStoryGeneratorModal({
                 charactersInvolved: participants.join(', '),
               });
               currentNodes.push(eventNode);
-              savedEventNodeIdsRef.current[eventIndex] = eventNode.id;
+              if (draftVersionRef.current !== saveDraftVersion) return;
+              savedEventNodeIdsRef.current.ids[eventIndex] = eventNode.id;
             }
 
             await projectStore.assignEventToChapter(project.id, targetChapterId, eventNode);
@@ -358,16 +383,22 @@ export default function AIStoryGeneratorModal({
         }
       }
 
+      if (draftVersionRef.current !== saveDraftVersion) return;
       await onSuccess();
+      if (draftVersionRef.current !== saveDraftVersion) return;
       createdChapterIdRef.current = null;
-      savedEventNodeIdsRef.current = {};
+      savedEventNodeIdsRef.current = {
+        draftVersion: saveDraftVersion,
+        ids: {},
+      };
       if (Platform.OS === 'web') {
         window.alert('Đã lưu thành công chương và các sự kiện vào dự án!');
       } else {
         Alert.alert('Thành công', 'Đã lưu chương và các sự kiện vào dự án!');
       }
-      handleClose();
+      handleClose(true);
     } catch (saveErr: any) {
+      if (draftVersionRef.current !== saveDraftVersion) return;
       console.error('Lỗi lưu câu chuyện:', saveErr);
       const errorDetail = saveErr?.message || 'Không thể lưu vào dự án';
       const msg = targetChapterId && !initialChapter
@@ -379,7 +410,7 @@ export default function AIStoryGeneratorModal({
         Alert.alert('Lỗi', msg);
       }
     } finally {
-      setIsSaving(false);
+      if (draftVersionRef.current === saveDraftVersion) setIsSaving(false);
     }
   };
 
@@ -399,7 +430,11 @@ export default function AIStoryGeneratorModal({
   if (!visible) return null;
 
   return (
-    <Modal visible={visible} transparent animationType="slide">
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={() => handleClose()}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
@@ -420,7 +455,8 @@ export default function AIStoryGeneratorModal({
             </View>
             <Pressable
               hitSlop={12}
-              onPress={handleClose}
+              onPress={() => handleClose()}
+              disabled={isSaving}
               style={styles.closeBtn}
               accessibilityRole="button"
               accessibilityLabel="Đóng bảng AI sáng tác câu chuyện">
@@ -432,8 +468,8 @@ export default function AIStoryGeneratorModal({
           <View style={styles.stepperRow}>
             <Pressable
               style={[styles.stepItem, step === 1 && styles.stepItemActive]}
-              onPress={() => !initialChapter && setStep(1)}
-              disabled={Boolean(initialChapter)}>
+              onPress={() => !initialChapter && !isSaving && setStep(1)}
+              disabled={Boolean(initialChapter) || isSaving}>
               <Text style={[styles.stepNumber, step === 1 && styles.stepNumberActive]}>1</Text>
               <Text style={[styles.stepLabel, step === 1 && styles.stepLabelActive]}>
                 Ý tưởng & Chương
@@ -442,7 +478,8 @@ export default function AIStoryGeneratorModal({
             <View style={styles.stepLine} />
             <Pressable
               style={[styles.stepItem, step === 2 && styles.stepItemActive]}
-              onPress={() => generatedChapter && setStep(2)}>
+              onPress={() => generatedChapter && !isSaving && setStep(2)}
+              disabled={isSaving}>
               <Text style={[styles.stepNumber, step === 2 && styles.stepNumberActive]}>2</Text>
               <Text style={[styles.stepLabel, step === 2 && styles.stepLabelActive]}>
                 Sự kiện ({generatedEvents.length})
@@ -451,7 +488,8 @@ export default function AIStoryGeneratorModal({
             <View style={styles.stepLine} />
             <Pressable
               style={[styles.stepItem, step === 3 && styles.stepItemActive]}
-              onPress={() => storyContent && setStep(3)}>
+              onPress={() => storyContent && !isSaving && setStep(3)}
+              disabled={isSaving}>
               <Text style={[styles.stepNumber, step === 3 && styles.stepNumberActive]}>3</Text>
               <Text style={[styles.stepLabel, step === 3 && styles.stepLabelActive]}>
                 Câu chuyện
