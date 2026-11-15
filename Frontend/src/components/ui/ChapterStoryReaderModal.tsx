@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { AppFonts } from '@/constants/theme';
 import { StoryChapter } from '@/constants/story-data';
+import * as Clipboard from 'expo-clipboard';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -27,6 +28,7 @@ export default function ChapterStoryReaderModal({
   onRewriteWithAI,
 }: ChapterStoryReaderModalProps) {
   const [copySuccess, setCopySuccess] = useState(false);
+  const [copyError, setCopyError] = useState(false);
 
   if (!visible || !chapter) return null;
 
@@ -35,13 +37,14 @@ export default function ChapterStoryReaderModal({
 
   const handleCopy = async () => {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(content);
-      }
+      await Clipboard.setStringAsync(content);
       setCopySuccess(true);
+      setCopyError(false);
       setTimeout(() => setCopySuccess(false), 2500);
     } catch {
-      setCopySuccess(true);
+      setCopySuccess(false);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 2500);
     }
   };
 
@@ -79,10 +82,18 @@ export default function ChapterStoryReaderModal({
                 </Pressable>
               )}
               <Pressable
-                style={[styles.copyBtn, copySuccess && styles.copyBtnSuccess]}
+                style={[
+                  styles.copyBtn,
+                  copySuccess && styles.copyBtnSuccess,
+                  copyError && styles.copyBtnError,
+                ]}
                 onPress={handleCopy}>
                 <Text style={styles.copyBtnText}>
-                  {copySuccess ? '✓ Đã sao chép' : '📋 Sao chép'}
+                  {copySuccess
+                    ? '✓ Đã sao chép'
+                    : copyError
+                      ? 'Không thể sao chép'
+                      : '📋 Sao chép'}
                 </Text>
               </Pressable>
             </View>
@@ -235,6 +246,10 @@ const styles = StyleSheet.create({
   copyBtnSuccess: {
     backgroundColor: 'rgba(52,211,153,0.15)',
     borderColor: '#34d399',
+  },
+  copyBtnError: {
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderColor: '#f87171',
   },
   copyBtnText: {
     fontSize: 11,

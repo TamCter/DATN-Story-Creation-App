@@ -47,7 +47,7 @@ async function run() {
   assert.deepStrictEqual(normalized[0].charactersInvolved, ['Lăng Tiêu', 'Mộc Lan']);
   assert.deepStrictEqual(normalized[1].charactersInvolved, ['Mộc Lan', 'Lăng Tiêu']);
 
-  const aiResponse = JSON.stringify({
+  let aiResponse = JSON.stringify({
     chapter: { chapterNumber: 1, title: 'Chương 1', desc: 'Một chương mới.' },
     events: [
       {
@@ -101,6 +101,28 @@ async function run() {
   );
   assert.match(capturedPrompt, /QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN/);
   assert.match(capturedPrompt, /Lăng Tiêu/);
+
+  for (const invalidResponse of [
+    { chapter: { title: '   ' }, events: [] },
+    { chapter: { title: 'Chương 1' }, events: [{ name: 'Sự kiện thiếu mô tả' }] },
+    { chapter: { title: 'Chương 1' }, events: [null] },
+  ]) {
+    aiResponse = JSON.stringify(invalidResponse);
+    await generateChapterAndEvents(
+      {
+        body: {
+          projectTitle: 'Kiếm Khách',
+          nodes: characters,
+        },
+      },
+      res,
+      (error) => {
+        throw error;
+      }
+    );
+    assert.strictEqual(responseStatus, 500);
+    assert.strictEqual(responseBody.success, false);
+  }
 
   console.log('AI event character tests passed.');
 }

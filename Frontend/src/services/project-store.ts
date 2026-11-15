@@ -1,34 +1,19 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { INITIAL_PROJECTS, StoryChapter, StoryLink, StoryNode, StoryProject } from '@/constants/story-data';
+import {
+  eventBelongsToChapter,
+  INITIAL_PROJECTS,
+  StoryChapter,
+  StoryLink,
+  StoryNode,
+  StoryProject,
+} from '@/constants/story-data';
 import { api, ApiError } from '@/services/api';
 
 const CUSTOM_PROJECTS_KEY = '@story_app_custom_projects';
 const PROJECT_CACHE_PREFIX = '@story_app_project_cache_';
 
 function getEventNodesForChapter(project: StoryProject, chapter: StoryChapter): StoryNode[] {
-  const eventIds = new Set((chapter.events || []).map((event) => event.id));
-  const chapterLabels = new Set([
-    chapter.id,
-    chapter.title,
-    `Chương ${chapter.chapterNumber}`,
-  ].map((label) => label.trim().toLocaleLowerCase()));
-
-  return (project.nodes || []).filter(
-    (node) =>
-      node.type === 'event' &&
-      (eventIds.has(node.id) ||
-        (typeof node.chapter === 'string' &&
-          chapterLabels.has(node.chapter.trim().toLocaleLowerCase())))
-  );
-}
-
-function eventNodeBelongsToChapter(eventNode: StoryNode, chapter: StoryChapter): boolean {
-  const eventChapter = eventNode.chapter?.trim().toLocaleLowerCase();
-  return [
-    chapter.id,
-    chapter.title,
-    `Chương ${chapter.chapterNumber}`,
-  ].some((label) => label.trim().toLocaleLowerCase() === eventChapter);
+  return (project.nodes || []).filter((node) => eventBelongsToChapter(node, chapter));
 }
 
 function getReplacementChapter(
@@ -39,8 +24,7 @@ function getReplacementChapter(
   return (project.chapters || []).find(
     (chapter) =>
       chapter.id !== removedChapterId &&
-      (chapter.events?.some((event) => event.id === eventNode.id) ||
-        eventNodeBelongsToChapter(eventNode, chapter))
+      eventBelongsToChapter(eventNode, chapter)
   );
 }
 
@@ -506,14 +490,12 @@ export class ProjectStore {
     const project = await this.getProject(projectId);
     const chapters = project.chapters || [];
     const chIdx = chapters.findIndex((c) => c.id === chapterId);
-    if (chIdx === -1) return;
-
-    chapters[chIdx].content = content;
-    try {
-      await api.updateChapter(chapterId, { content });
-    } catch (err) {
-      console.warn('[ProjectStore] Không thể cập nhật nội dung chương lên Backend:', err);
+    if (chIdx === -1) {
+      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
     }
+
+    await api.updateChapter(chapterId, { content });
+    chapters[chIdx] = { ...chapters[chIdx], content };
     await this.saveProject(project);
   }
 
@@ -541,10 +523,8 @@ export class ProjectStore {
         ...(chapter.events || []),
         { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
       ];
+      await api.updateChapter(chapterId, { events: updatedEvents });
       chapter.events = updatedEvents;
-      try {
-        await api.updateChapter(chapterId, { events: updatedEvents });
-      } catch {}
     }
 
     // Cập nhật trường chapter của node sự kiện
@@ -586,7 +566,7 @@ export class ProjectStore {
       if (eventNode) {
         await this.deleteNode(projectId, eventId);
       }
-    } else if (eventNode && eventNodeBelongsToChapter(eventNode, chapter)) {
+    } else if (eventNode && eventBelongsToChapter(eventNode, chapter)) {
       const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
       await this.updateNode(projectId, eventId, {
         chapter: replacementChapter?.title || '',
@@ -619,7 +599,7 @@ export class ProjectStore {
       }
     } else {
       for (const eventNode of eventNodes) {
-        if (eventNodeBelongsToChapter(eventNode, chapter)) {
+        if (eventBelongsToChapter(eventNode, chapter)) {
           const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
           await this.updateNode(projectId, eventNode.id, {
             chapter: replacementChapter?.title || '',

@@ -542,6 +542,48 @@ async function deleteNode(req, res, next) {
   }
 }
 
+async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
+  const label = TYPE_LABELS[type];
+  if (!label) throw new Error(`Loại thực thể không hỗ trợ: ${type}`);
+
+  const entityId = `node-${type.slice(0, 4)}-${Date.now()}-${crypto.randomUUID().slice(0, 5)}`;
+  const properties = {
+    id: entityId,
+    name,
+    type,
+    ...defaults,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    x: 100 + Math.random() * 400,
+    y: 100 + Math.random() * 400,
+  };
+  const query = `
+    MATCH (p:Project { id: $projectId })
+    SET p._entityFindOrCreateLock = coalesce(p._entityFindOrCreateLock, 0) + 1
+    WITH p
+    OPTIONAL MATCH (existing:StoryNode)-[:BELONGS_TO]->(p)
+    WHERE existing.type = $type
+      AND (toLower(existing.name) = toLower($name) OR existing.id = $name)
+    WITH p, collect(existing) AS matches
+    FOREACH (_ IN CASE WHEN size(matches) = 0 THEN [1] ELSE [] END |
+      CREATE (created:StoryNode:${label} $properties)
+      CREATE (created)-[:BELONGS_TO]->(p)
+    )
+    REMOVE p._entityFindOrCreateLock
+    WITH p
+    MATCH (entity:StoryNode)-[:BELONGS_TO]->(p)
+    WHERE entity.type = $type
+      AND (toLower(entity.name) = toLower($name) OR entity.id = $name)
+    RETURN entity.id AS id
+    LIMIT 1
+  `;
+  const records = await runQuery(query, { projectId, name, type, properties });
+  if (!records.length || !records[0].id) {
+    throw new Error(`Không thể tạo hoặc tìm thấy ${type}: ${name}`);
+  }
+  return records[0].id;
+}
+
 /**
  * Tự động đồng bộ các mối quan hệ (edges) trong Neo4j đồ thị:
  * - Nhân vật gán Binh khí (Item), Nơi sinh (Location), Môn phái (Faction), Sự kiện tử nạn/hồi sinh (Event)
@@ -861,39 +903,14 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           DELETE r
         `, { nodeId, location });
 
-        // Tìm xem node location đã tồn tại trong project chưa
-        const locCheck = await runQuery(`
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          WHERE loc.name = $location OR loc.id = $location
-          RETURN loc.id AS id
-          LIMIT 1
-        `, { projectId, location });
-
-        let locId = locCheck.length > 0 ? locCheck[0].id : null;
-
-        // Nếu chưa có, TỰ ĐỘNG TẠO NODE LOCATION MỚI
-        if (!locId) {
-          locId = 'node-loc-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-          await runQuery(`
-            MATCH (p:Project { id: $projectId })
-            CREATE (loc:StoryNode:Location {
-              id: $locId,
-              name: $location,
-              type: 'location',
-              role: 'ĐỊA DANH',
-              region: 'Đông Vực',
-              dangerLevel: 'Bình thường',
-              climate: 'Ôn hòa',
-              desc: 'Địa danh diễn ra sự kiện ' + $location,
-              status: 'Hoạt động',
-              createdAt: timestamp(),
-              updatedAt: timestamp(),
-              x: 150 + rand() * 400,
-              y: 150 + rand() * 400
-            })
-            CREATE (loc)-[:BELONGS_TO]->(p)
-          `, { projectId, locId, location });
-        }
+        const locId = await findOrCreateProjectEntity(projectId, location, 'location', {
+          role: 'ĐỊA DANH',
+          region: 'Đông Vực',
+          dangerLevel: 'Bình thường',
+          climate: 'Ôn hòa',
+          desc: `Địa danh diễn ra sự kiện ${location}`,
+          status: 'Hoạt động',
+        });
 
         // Tạo / cập nhật liên kết EVENT_LOCATION
         await runQuery(`
@@ -932,54 +949,38 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       const charNames = Array.from(new Set(rawChars.map((s) => String(s).trim()).filter(Boolean)));
-      if (charNames.length > 0) {
-        for (const charName of charNames) {
-          // Tìm xem nhân vật đã tồn tại trong project chưa
-          const charCheck = await runQuery(`
-            MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
-            WHERE toLower(c.name) = toLower($charName) OR c.id = $charName
-            RETURN c.id AS id
-            LIMIT 1
-          `, { projectId, charName });
+      const participantIds = [];
+      for (const charName of charNames) {
+        const charId = await findOrCreateProjectEntity(projectId, charName, 'character', {
+          role: 'TRUNG LẬP',
+          gender: 'Nam',
+          status: 'Còn sống',
+          desc: 'Nhân vật tham gia sự kiện',
+        });
+        participantIds.push(charId);
+      }
 
-          let charId = charCheck.length > 0 ? charCheck[0].id : null;
+      await runQuery(`
+        MATCH (ev:StoryNode { id: $nodeId })
+        MATCH (c:StoryNode)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+        MATCH (c)-[:BELONGS_TO]->(p:Project { id: $projectId })
+        WHERE NOT (c.id IN $participantIds)
+        DELETE r
+      `, { nodeId, projectId, participantIds });
 
-          // Nếu chưa có, TỰ ĐỘNG TẠO NODE CHARACTER MỚI
-          if (!charId) {
-            charId = 'node-char-' + Date.now() + '-' + Math.random().toString(36).substring(2, 7);
-            await runQuery(`
-              MATCH (p:Project { id: $projectId })
-              CREATE (c:StoryNode:Character {
-                id: $charId,
-                name: $charName,
-                type: 'character',
-                role: 'TRUNG LẬP',
-                gender: 'Nam',
-                status: 'Còn sống',
-                desc: 'Nhân vật tham gia sự kiện',
-                createdAt: timestamp(),
-                updatedAt: timestamp(),
-                x: 100 + rand() * 400,
-                y: 100 + rand() * 400
-              })
-              CREATE (c)-[:BELONGS_TO]->(p)
-            `, { projectId, charId, charName });
-          }
-
-          // Tạo mối quan hệ PARTICIPATED_IN từ Nhân vật -> Sự kiện
-          await runQuery(`
-            MATCH (ev:StoryNode { id: $nodeId })
-            MATCH (c:StoryNode { id: $charId })
-            MERGE (c)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
-            ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-participated',
-                          r.label = 'Tham gia',
-                          r.type = 'dashed',
-                          r.tone = 'event',
-                          r.createdAt = timestamp()
-            ON MATCH SET r.label = 'Tham gia',
-                         r.updatedAt = timestamp()
-          `, { nodeId, charId });
-        }
+      for (const charId of participantIds) {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })
+          MATCH (c:StoryNode { id: $charId })
+          MERGE (c)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-participated',
+                        r.label = 'Tham gia',
+                        r.type = 'dashed',
+                        r.tone = 'event',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Tham gia',
+                       r.updatedAt = timestamp()
+        `, { nodeId, charId });
       }
     }
 

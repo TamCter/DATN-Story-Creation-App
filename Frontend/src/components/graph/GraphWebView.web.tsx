@@ -38,6 +38,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
   ) => {
     const iframeRef = useRef<HTMLIFrameElement>(null);
     const readyRef = useRef(false);
+    const graphDataSyncedRef = useRef(false);
     const pendingFocusRef = useRef<{ sourceId: string; targetId: string } | null>(null);
 
     const html = useMemo(() => {
@@ -64,6 +65,12 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         '*'
       );
     }, [nodes, edges, links]);
+    const sendGraphDataRef = useRef(sendGraphData);
+    sendGraphDataRef.current = sendGraphData;
+    const onNodeClickRef = useRef(onNodeClick);
+    onNodeClickRef.current = onNodeClick;
+    const onCanvasClickRef = useRef(onCanvasClick);
+    onCanvasClickRef.current = onCanvasClick;
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -79,6 +86,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         );
       },
       resetView: () => {
+        pendingFocusRef.current = null;
         iframeRef.current?.contentWindow?.postMessage(
           JSON.stringify({ type: 'RESET_VIEW' }),
           '*'
@@ -139,7 +147,10 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
 
           if (data.type === 'READY') {
             readyRef.current = true;
-            sendGraphData();
+            if (!graphDataSyncedRef.current) {
+              sendGraphDataRef.current();
+              graphDataSyncedRef.current = true;
+            }
             if (pendingFocusRef.current) {
               iframeRef.current?.contentWindow?.postMessage(
                 JSON.stringify({
@@ -155,9 +166,9 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           }
 
           if (data.type === 'NODE_CLICK') {
-            onNodeClick?.(data.nodeId, data.node);
+            onNodeClickRef.current?.(data.nodeId, data.node);
           } else if (data.type === 'CANVAS_CLICK') {
-            onCanvasClick?.();
+            onCanvasClickRef.current?.();
           }
         } catch (err) {}
       };
@@ -170,7 +181,16 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       return () => {
         window.removeEventListener('message', handleWindowMessage);
       };
-    }, [onNodeClick, onCanvasClick, sendGraphData]);
+    }, []);
+
+    const handleIframeLoad = () => {
+      readyRef.current = false;
+      graphDataSyncedRef.current = false;
+      iframeRef.current?.contentWindow?.postMessage(
+        JSON.stringify({ type: 'REQUEST_READY' }),
+        '*'
+      );
+    };
 
     return (
       <View style={[styles.container, style]}>
@@ -178,12 +198,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
           ref={iframeRef}
           srcDoc={html}
           title="Graph WebView"
-          onLoad={() =>
-            iframeRef.current?.contentWindow?.postMessage(
-              JSON.stringify({ type: 'REQUEST_READY' }),
-              '*'
-            )
-          }
+          onLoad={handleIframeLoad}
           style={{
             width: '100%',
             height: '100%',

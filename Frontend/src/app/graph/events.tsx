@@ -16,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  eventBelongsToChapter,
   getProjectChapters,
   INITIAL_PROJECTS,
   StoryChapter,
@@ -275,18 +276,9 @@ export default function ChapterDetailScreen() {
         {chapters.map((chapter, index) => {
           const isLast = index === chapters.length - 1;
 
-          // Tìm các sự kiện thuộc về chương này (theo chapter.title, chapter.id, hoặc trong chapter.events)
-          const matchedEvents = eventOnlyNodes.filter((evt) => {
-            const chTitle = chapter.title.toLowerCase();
-            const chNum = `chương ${chapter.chapterNumber}`;
-            const evtChapter = (evt.chapter || '').toLowerCase();
-            return (
-              evtChapter === chTitle ||
-              evtChapter === chNum ||
-              evtChapter === chapter.id.toLowerCase() ||
-              (chapter.events && chapter.events.some((e) => e.id === evt.id))
-            );
-          });
+          const matchedEvents = eventOnlyNodes.filter((event) =>
+            eventBelongsToChapter(event, chapter)
+          );
 
           // Hợp nhất cả sự kiện từ chapter.events nếu chưa có trong node
           const displayEvents: Array<{ id: string; title: string; desc?: string }> = [

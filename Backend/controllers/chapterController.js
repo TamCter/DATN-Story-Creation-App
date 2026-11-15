@@ -192,6 +192,20 @@ async function updateChapter(req, res, next) {
   }
 
   try {
+    const ownershipQuery = `
+      MATCH (c:Chapter { id: $id })
+      OPTIONAL MATCH (c)-[:BELONGS_TO]->(p:Project)
+      OPTIONAL MATCH (owner:User)-[:OWNS]->(p)
+      RETURN c, owner.id AS ownerId
+    `;
+    const ownershipRecords = await runQuery(ownershipQuery, { id }, 'READ');
+    if (!ownershipRecords.length || !ownershipRecords[0]?.c) {
+      return res.status(404).json({ success: false, message: `Không tìm thấy chapter với ID: ${id}` });
+    }
+    if (ownershipRecords[0].ownerId && ownershipRecords[0].ownerId !== req.user?.id) {
+      return res.status(403).json({ success: false, message: 'Bạn không có quyền chỉnh sửa chương này' });
+    }
+
     const query = `
       MATCH (c:Chapter { id: $id })
       SET c.chapterNumber = COALESCE($chapterNumber, c.chapterNumber),

@@ -45,6 +45,11 @@ export interface StoryNode {
   updatedAt?: number;
 }
 
+export function parseEventParticipants(value?: string | string[]): string[] {
+  const names = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,;\n]+/) : [];
+  return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
+}
+
 export interface StoryLink {
   id: string;
   source: string;
@@ -90,6 +95,26 @@ export interface StoryChapter {
   nodes: StoryNode[];
   links: StoryLink[];
   edges?: StoryLink[];
+}
+
+export function eventBelongsToChapter(
+  node: Pick<StoryNode, 'id' | 'type' | 'chapter'>,
+  chapter: Pick<StoryChapter, 'id' | 'chapterNumber' | 'title' | 'events'>
+): boolean {
+  if (node.type !== 'event') return false;
+
+  const chapterMembership = node.chapter?.trim().toLocaleLowerCase();
+  const chapterLabels = new Set([
+    chapter.id,
+    chapter.title,
+    `Chương ${chapter.chapterNumber}`,
+  ].map((label) => label.trim().toLocaleLowerCase()));
+
+  if (chapterMembership) {
+    return chapterLabels.has(chapterMembership);
+  }
+
+  return (chapter.events || []).some((event) => event.id === node.id);
 }
 
 export interface StoryLocationItem {

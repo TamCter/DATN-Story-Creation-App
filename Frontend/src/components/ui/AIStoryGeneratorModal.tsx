@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -14,9 +14,16 @@ import {
   View,
 } from 'react-native';
 import { AppFonts, ThemeColors } from '@/constants/theme';
-import { StoryChapter, StoryNode, StoryProject } from '@/constants/story-data';
+import {
+  eventBelongsToChapter,
+  parseEventParticipants,
+  StoryChapter,
+  StoryNode,
+  StoryProject,
+} from '@/constants/story-data';
 import { api } from '@/services/api';
 import { projectStore } from '@/services/project-store';
+import * as Clipboard from 'expo-clipboard';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -48,6 +55,12 @@ export default function AIStoryGeneratorModal({
   const [writingStyle, setWritingStyle] = useState(WRITING_STYLES[0]);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const generationSessionRef = useRef(0);
+  const createdChapterIdRef = useRef<string | null>(null);
+  const savedEventNodeIdsRef = useRef<Record<number, string>>({});
+  const projectNodesRef = useRef(project.nodes);
+  const targetChapterKey = `${project.id}:${initialChapter?.id || 'new'}`;
+  const previousTargetChapterKeyRef = useRef(targetChapterKey);
 
   // Dữ liệu chương & sự kiện được AI tạo ra hoặc nhận từ ban đầu
   const [generatedChapter, setGeneratedChapter] = useState<{
@@ -88,29 +101,53 @@ export default function AIStoryGeneratorModal({
   const [storyContent, setStoryContent] = useState<string>('');
   const [wordCount, setWordCount] = useState<number>(0);
   const [copySuccess, setCopySuccess] = useState(false);
+  const [copyError, setCopyError] = useState(false);
+
+  useEffect(() => {
+    projectNodesRef.current = project.nodes;
+  }, [project.nodes]);
+
+  useEffect(() => {
+    generationSessionRef.current += 1;
+    // Clear the spinner when a pending request belongs to an invalidated modal session.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setIsGenerating(false);
+    return () => {
+      generationSessionRef.current += 1;
+    };
+  }, [visible, project.id, initialChapter?.id]);
+
+  useEffect(() => {
+    if (previousTargetChapterKeyRef.current === targetChapterKey) return;
+    previousTargetChapterKeyRef.current = targetChapterKey;
+    createdChapterIdRef.current = null;
+    savedEventNodeIdsRef.current = {};
+    setStoryContent('');
+    setWordCount(0);
+  }, [targetChapterKey]);
 
   // Reset khi mở lại với initialChapter
-  React.useEffect(() => {
+  useEffect(() => {
     if (visible) {
       if (initialChapter) {
+        // Initialize this modal from the selected chapter when it opens or changes.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setStep(2);
         setGeneratedChapter({
           chapterNumber: initialChapter.chapterNumber,
           title: initialChapter.title,
           desc: initialChapter.desc || '',
         });
-        const matchedEvts = (project.nodes || [])
-          .filter(
-            (n) =>
-              n.type === 'event' &&
-              (n.chapter === initialChapter.title ||
-                initialChapter.events?.some((e) => e.id === n.id))
-          )
+        const matchedEvts = (projectNodesRef.current || [])
+          .filter((node) => eventBelongsToChapter(node, initialChapter))
           .map((n) => ({
             name: n.name,
             desc: n.desc,
             location: n.location,
             time: n.time,
+            charactersInvolved: parseEventParticipants(
+              n.charactersInvolved || n.characters
+            ),
             impact: n.impact,
           }));
         setGeneratedEvents(
@@ -122,18 +159,31 @@ export default function AIStoryGeneratorModal({
               }))
         );
       } else {
-        setStep(1);
-        setUserIdea('');
-        setGeneratedChapter(null);
-        setGeneratedEvents([]);
-        setStoryContent('');
+        if (!createdChapterIdRef.current) {
+          setStep(1);
+          setUserIdea('');
+          setGeneratedChapter(null);
+          setGeneratedEvents([]);
+          setStoryContent('');
+          setWordCount(0);
+          savedEventNodeIdsRef.current = {};
+        }
       }
       setCopySuccess(false);
+      setCopyError(false);
     }
-  }, [visible, initialChapter, project.nodes]);
+    // The target ID identifies when this snapshot should be applied; node refreshes do not reset the draft.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, project.id, initialChapter?.id]);
+
+  const handleClose = () => {
+    generationSessionRef.current += 1;
+    onClose();
+  };
 
   // BƯỚC 1: Gọi AI để phác thảo Chương và các Sự kiện
   const handleGenerateChapterAndEvents = async () => {
+    const requestSession = generationSessionRef.current;
     setIsGenerating(true);
     try {
       const res = await api.generateChapterAndEvents({
@@ -144,14 +194,20 @@ export default function AIStoryGeneratorModal({
         writingStyle,
       });
 
+      if (requestSession !== generationSessionRef.current) return;
       if (res.success && res.data) {
         setGeneratedChapter(res.data.chapter);
         setGeneratedEvents(res.data.events || []);
+        setStoryContent('');
+        setWordCount(0);
+        createdChapterIdRef.current = null;
+        savedEventNodeIdsRef.current = {};
         setStep(2);
       } else {
         throw new Error(res.message || 'AI không thể tạo cấu trúc chương');
       }
     } catch (err: any) {
+      if (requestSession !== generationSessionRef.current) return;
       console.error('Lỗi phác thảo chương:', err);
       const msg = err?.message || 'Không thể tạo chương bằng AI. Hãy kiểm tra kết nối.';
       if (Platform.OS === 'web') {
@@ -160,13 +216,14 @@ export default function AIStoryGeneratorModal({
         Alert.alert('Thông báo', msg);
       }
     } finally {
-      setIsGenerating(false);
+      if (requestSession === generationSessionRef.current) setIsGenerating(false);
     }
   };
 
   // BƯỚC 2: Gọi AI để sáng tác toàn bộ câu chuyện hoàn chỉnh cho chương
   const handleGenerateStoryNarrative = async () => {
     if (!generatedChapter) return;
+    const requestSession = generationSessionRef.current;
     setIsGenerating(true);
 
     try {
@@ -181,6 +238,7 @@ export default function AIStoryGeneratorModal({
         writingStyle,
       });
 
+      if (requestSession !== generationSessionRef.current) return;
       if (res.success && res.data) {
         setStoryContent(res.data.storyContent);
         setWordCount(res.data.wordCount);
@@ -189,6 +247,7 @@ export default function AIStoryGeneratorModal({
         throw new Error(res.message || 'AI không thể sáng tác câu chuyện');
       }
     } catch (err: any) {
+      if (requestSession !== generationSessionRef.current) return;
       console.error('Lỗi sáng tác câu chuyện:', err);
       const msg = err?.message || 'Không thể viết câu chuyện bằng AI. Hãy thử lại.';
       if (Platform.OS === 'web') {
@@ -197,7 +256,7 @@ export default function AIStoryGeneratorModal({
         Alert.alert('Thông báo', msg);
       }
     } finally {
-      setIsGenerating(false);
+      if (requestSession === generationSessionRef.current) setIsGenerating(false);
     }
   };
 
@@ -205,12 +264,10 @@ export default function AIStoryGeneratorModal({
   const handleSaveAllToProject = async () => {
     if (!generatedChapter) return;
     setIsSaving(true);
+    let targetChapterId = initialChapter?.id || createdChapterIdRef.current;
 
     try {
-      let targetChapterId = initialChapter?.id;
-
-      // 1. Tạo hoặc cập nhật Chapter
-      if (!initialChapter) {
+      if (!targetChapterId) {
         const createdChapter = await projectStore.createChapter(project.id, {
           chapterNumber: generatedChapter.chapterNumber,
           title: generatedChapter.title,
@@ -218,105 +275,104 @@ export default function AIStoryGeneratorModal({
           content: storyContent,
         });
         targetChapterId = createdChapter.id;
-      } else {
-        // Cập nhật nội dung câu chuyện cho chương hiện có
-        await projectStore.updateChapterStoryContent(project.id, initialChapter.id, storyContent);
+        createdChapterIdRef.current = targetChapterId;
+      } else if (targetChapterId) {
+        await projectStore.updateChapterStoryContent(project.id, targetChapterId, storyContent);
       }
 
-      // 2. Tạo các Node loại 'event' trong đồ thị nếu là chương mới tạo từ AI
       if (!initialChapter && generatedEvents.length > 0) {
-        // Lấy danh sách nodes hiện có của dự án để kiểm tra
-        const currentNodes = project.nodes || [];
+        if (!targetChapterId) {
+          throw new Error('Không xác định được chương để gán sự kiện.');
+        }
+        const currentNodes = [...(await projectStore.getProject(project.id)).nodes];
 
-        for (const ev of generatedEvents) {
+        for (const [eventIndex, ev] of generatedEvents.entries()) {
           try {
-            // Đảm bảo node Địa điểm (Location) tồn tại
             if (ev.location && ev.location.trim()) {
               const locTrim = ev.location.trim();
               const existingLoc = currentNodes.find(
                 (n) => n.type === 'location' && n.name.toLowerCase() === locTrim.toLowerCase()
               );
               if (!existingLoc) {
-                try {
-                  const createdLoc = await projectStore.createNode(project.id, {
-                    name: locTrim,
-                    type: 'location',
-                    role: 'ĐỊA DANH',
-                    region: 'Đông Vực',
-                    desc: `Địa danh diễn ra sự kiện ${ev.name}`,
-                    status: 'Hoạt động',
-                  });
-                  if (createdLoc) currentNodes.push(createdLoc);
-                } catch (locErr) {
-                  console.warn('Lỗi auto-create location:', locErr);
-                }
+                const createdLoc = await projectStore.createNode(project.id, {
+                  name: locTrim,
+                  type: 'location',
+                  role: 'ĐỊA DANH',
+                  region: 'Đông Vực',
+                  desc: `Địa danh diễn ra sự kiện ${ev.name}`,
+                  status: 'Hoạt động',
+                });
+                currentNodes.push(createdLoc);
               }
             }
 
-            // Đảm bảo các node Nhân vật (Character) tham gia tồn tại
-            if (ev.charactersInvolved && Array.isArray(ev.charactersInvolved)) {
-              for (const charName of ev.charactersInvolved) {
-                const cTrim = String(charName).trim();
-                if (!cTrim) continue;
-                const existingChar = currentNodes.find(
-                  (n) => n.type === 'character' && n.name.toLowerCase() === cTrim.toLowerCase()
-                );
-                if (!existingChar) {
-                  try {
-                    const createdChar = await projectStore.createNode(project.id, {
-                      name: cTrim,
-                      type: 'character',
-                      role: 'TRUNG LẬP',
-                      gender: 'Nam',
-                      desc: `Nhân vật tham gia sự kiện ${ev.name}`,
-                      status: 'Còn sống',
-                    });
-                    if (createdChar) currentNodes.push(createdChar);
-                  } catch (charErr) {
-                    console.warn('Lỗi auto-create character:', charErr);
-                  }
-                }
+            const participants = parseEventParticipants(ev.charactersInvolved);
+            for (const charName of participants) {
+              const existingChar = currentNodes.find(
+                (node) =>
+                  node.type === 'character' &&
+                  node.name.toLocaleLowerCase() === charName.toLocaleLowerCase()
+              );
+              if (!existingChar) {
+                const createdChar = await projectStore.createNode(project.id, {
+                  name: charName,
+                  type: 'character',
+                  role: 'TRUNG LẬP',
+                  gender: 'Nam',
+                  desc: `Nhân vật tham gia sự kiện ${ev.name}`,
+                  status: 'Còn sống',
+                });
+                currentNodes.push(createdChar);
               }
             }
 
-            const charsStr = Array.isArray(ev.charactersInvolved)
-              ? ev.charactersInvolved.join(', ')
-              : (ev.charactersInvolved || '');
-
-            const eventNodeData: Partial<StoryNode> = {
-              name: ev.name,
-              type: 'event',
-              desc: ev.desc,
-              chapter: generatedChapter.title,
-              location: ev.location || '',
-              time: ev.time || '',
-              impact: ev.impact || '',
-              role: 'BIẾN CỐ',
-              status: 'Đã diễn ra',
-              charactersInvolved: charsStr,
-            };
-
-            const createdNode = await projectStore.createNode(project.id, eventNodeData);
-            if (createdNode) currentNodes.push(createdNode);
-            if (targetChapterId && createdNode) {
-              await projectStore.assignEventToChapter(project.id, targetChapterId, createdNode);
+            let eventNode: StoryNode | undefined;
+            const savedNodeId = savedEventNodeIdsRef.current[eventIndex];
+            if (savedNodeId) {
+              eventNode = currentNodes.find((node) => node.id === savedNodeId);
+              if (!eventNode) {
+                throw new Error('Không tìm thấy node sự kiện đã tạo ở lần lưu trước.');
+              }
+            } else {
+              eventNode = await projectStore.createNode(project.id, {
+                name: ev.name,
+                type: 'event',
+                desc: ev.desc,
+                chapter: generatedChapter.title,
+                location: ev.location || '',
+                time: ev.time || '',
+                impact: ev.impact || '',
+                role: 'BIẾN CỐ',
+                status: 'Đã diễn ra',
+                charactersInvolved: participants.join(', '),
+              });
+              currentNodes.push(eventNode);
+              savedEventNodeIdsRef.current[eventIndex] = eventNode.id;
             }
+
+            await projectStore.assignEventToChapter(project.id, targetChapterId, eventNode);
           } catch (nodeErr) {
-            console.warn('Lỗi tạo node sự kiện từ AI:', nodeErr);
+            const detail = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
+            throw new Error(`Không thể lưu sự kiện "${ev.name}": ${detail}`);
           }
         }
       }
 
       await onSuccess();
+      createdChapterIdRef.current = null;
+      savedEventNodeIdsRef.current = {};
       if (Platform.OS === 'web') {
         window.alert('Đã lưu thành công chương và các sự kiện vào dự án!');
       } else {
         Alert.alert('Thành công', 'Đã lưu chương và các sự kiện vào dự án!');
       }
-      onClose();
+      handleClose();
     } catch (saveErr: any) {
       console.error('Lỗi lưu câu chuyện:', saveErr);
-      const msg = saveErr?.message || 'Không thể lưu vào dự án';
+      const errorDetail = saveErr?.message || 'Không thể lưu vào dự án';
+      const msg = targetChapterId && !initialChapter
+        ? `Chương đã được lưu (mã ${targetChapterId}) nhưng chưa lưu hoàn tất sự kiện. Nội dung xem trước vẫn được giữ; nhấn Lưu lại để tiếp tục mà không tạo chương trùng.\n\n${errorDetail}`
+        : errorDetail;
       if (Platform.OS === 'web') {
         window.alert(msg);
       } else {
@@ -329,13 +385,14 @@ export default function AIStoryGeneratorModal({
 
   const handleCopyStory = async () => {
     try {
-      if (typeof navigator !== 'undefined' && navigator.clipboard) {
-        await navigator.clipboard.writeText(storyContent);
-      }
+      await Clipboard.setStringAsync(storyContent);
       setCopySuccess(true);
+      setCopyError(false);
       setTimeout(() => setCopySuccess(false), 3000);
     } catch {
-      setCopySuccess(true);
+      setCopySuccess(false);
+      setCopyError(true);
+      setTimeout(() => setCopyError(false), 3000);
     }
   };
 
@@ -363,7 +420,7 @@ export default function AIStoryGeneratorModal({
             </View>
             <Pressable
               hitSlop={12}
-              onPress={onClose}
+              onPress={handleClose}
               style={styles.closeBtn}
               accessibilityRole="button"
               accessibilityLabel="Đóng bảng AI sáng tác câu chuyện">
@@ -567,10 +624,18 @@ export default function AIStoryGeneratorModal({
                     </Text>
                   </View>
                   <Pressable
-                    style={[styles.copyBtn, copySuccess && styles.copyBtnSuccess]}
+                    style={[
+                      styles.copyBtn,
+                      copySuccess && styles.copyBtnSuccess,
+                      copyError && styles.copyBtnError,
+                    ]}
                     onPress={handleCopyStory}>
                     <Text style={styles.copyBtnText}>
-                      {copySuccess ? '✓ Đã sao chép' : '📋 Sao chép'}
+                      {copySuccess
+                        ? '✓ Đã sao chép'
+                        : copyError
+                          ? 'Không thể sao chép'
+                          : '📋 Sao chép'}
                     </Text>
                   </Pressable>
                 </View>
@@ -1013,6 +1078,10 @@ const styles = StyleSheet.create({
   copyBtnSuccess: {
     backgroundColor: 'rgba(52,211,153,0.15)',
     borderColor: '#34d399',
+  },
+  copyBtnError: {
+    backgroundColor: 'rgba(248,113,113,0.12)',
+    borderColor: '#f87171',
   },
   copyBtnText: {
     fontSize: 11.5,

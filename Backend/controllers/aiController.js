@@ -600,7 +600,28 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       console.warn('Lỗi parse JSON chương từ AI:', parseError.message);
     }
 
-    if (!parsedData || !parsedData.chapter || !Array.isArray(parsedData.events)) {
+    const hasValidChapterTitle =
+      typeof parsedData?.chapter?.title === 'string' &&
+      parsedData.chapter.title.trim().length > 0;
+    const hasValidEvents =
+      Array.isArray(parsedData?.events) &&
+      parsedData.events.every((event) =>
+        event &&
+        typeof event === 'object' &&
+        !Array.isArray(event) &&
+        typeof event.name === 'string' &&
+        event.name.trim().length > 0 &&
+        typeof event.desc === 'string' &&
+        (!('location' in event) || typeof event.location === 'string') &&
+        (!('time' in event) || typeof event.time === 'string') &&
+        (!('impact' in event) || typeof event.impact === 'string') &&
+        (!('charactersInvolved' in event) ||
+          typeof event.charactersInvolved === 'string' ||
+          (Array.isArray(event.charactersInvolved) &&
+            event.charactersInvolved.every((name) => typeof name === 'string')))
+      );
+
+    if (!parsedData || !hasValidChapterTitle || !hasValidEvents) {
       return res.status(500).json({
         success: false,
         message: 'AI không tạo được cấu trúc chương và sự kiện hợp lệ. Vui lòng thử lại.',

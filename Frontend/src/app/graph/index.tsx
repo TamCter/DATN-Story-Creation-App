@@ -22,12 +22,14 @@ import { GraphWebView, GraphWebViewRef } from '@/components/graph/GraphWebView';
 import {
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
+  eventBelongsToChapter,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
   GENDER_OPTIONS,
   generateUniqueNodeId,
   getProjectChapters,
   INITIAL_PROJECTS,
+  parseEventParticipants,
   ITEM_RARITY_OPTIONS,
   LOCATION_CLIMATE_OPTIONS,
   LOCATION_DANGER_OPTIONS,
@@ -200,9 +202,8 @@ export default function GraphScreen() {
   }, [links, focusedRelation]);
 
   const [chapterFilter, setChapterFilter] = useState<string | null>(null); // null = Tất cả
-  const activeChapterFilter = chapters.some((chapter) => chapter.title === chapterFilter)
-    ? chapterFilter
-    : null;
+  const activeChapterFilter =
+    chapters.find((chapter) => chapter.id === chapterFilter)?.id ?? null;
   const [showRelationships, setShowRelationships] = useState<boolean>(true);
   const [aiStoryModalOpen, setAiStoryModalOpen] = useState<boolean>(false);
   const [zoomLevel, setZoomLevel] = useState<number>(1);
@@ -291,24 +292,12 @@ export default function GraphScreen() {
 
   const filteredNodes = useMemo(() => {
     if (!activeChapterFilter) return visibleNodes;
-    const chapter = chapters.find((item) => item.title === activeChapterFilter);
+    const chapter = chapters.find((item) => item.id === activeChapterFilter);
     if (!chapter) return visibleNodes;
 
-    const chapterLabels = new Set([
-      chapter.id,
-      chapter.title,
-      `Chương ${chapter.chapterNumber}`,
-    ].map((label) => label.trim().toLocaleLowerCase()));
-    const chapterEventIds = new Set((chapter.events || []).map((event) => event.id));
     const eventNodeIds = new Set(
       visibleNodes
-        .filter(
-          (node) =>
-            node.type === 'event' &&
-            (chapterEventIds.has(node.id) ||
-              (typeof node.chapter === 'string' &&
-                chapterLabels.has(node.chapter.trim().toLocaleLowerCase())))
-        )
+        .filter((node) => eventBelongsToChapter(node, chapter))
         .map((node) => node.id)
     );
     const relatedNodeIds = new Set(eventNodeIds);
@@ -448,6 +437,9 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   if (nodeData.time) setFormTime(nodeData.time);
   if (nodeData.location) setFormLocation(nodeData.location);
   if (nodeData.impact) setFormImpact(nodeData.impact);
+  setFormCharactersInvolved(
+    parseEventParticipants(nodeData.charactersInvolved || nodeData.characters)
+  );
   setAiChatOpen(false);
 };
 
@@ -530,12 +522,7 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormTime(node.time || node.chapter || '');
   setFormLocation(node.location || '');
   setFormImpact(node.impact || '');
-  setFormCharactersInvolved(
-    (node.charactersInvolved || node.characters || '')
-      .split(',')
-      .map((name) => name.trim())
-      .filter(Boolean)
-  );
+  setFormCharactersInvolved(parseEventParticipants(node.charactersInvolved || node.characters));
   setDetailModalOpen(false);
   setNodeModalOpen(true);
 };
@@ -739,7 +726,7 @@ return (
         </Pressable>
 
         {chapters.map((chapter) => {
-          const isActive = activeChapterFilter === chapter.title;
+          const isActive = activeChapterFilter === chapter.id;
           return (
             <Pressable
               key={chapter.id}
@@ -750,7 +737,7 @@ return (
                   backgroundColor: 'rgba(91,142,194,0.12)',
                 },
               ]}
-              onPress={() => setChapterFilter(isActive ? null : chapter.title)}>
+              onPress={() => setChapterFilter(isActive ? null : chapter.id)}>
               <Text style={[styles.filterChipSymbol, { color: '#5b8ec2' }]}>📖</Text>
               <Text style={[styles.filterChipText, isActive && { color: '#5b8ec2' }]}>
                 Chương {chapter.chapterNumber}

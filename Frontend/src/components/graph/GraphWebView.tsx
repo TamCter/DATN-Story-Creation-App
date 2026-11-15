@@ -79,6 +79,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         );
       },
       resetView: () => {
+        pendingFocusRef.current = null;
         webViewRef.current?.injectJavaScript(
           `window.postMessage(JSON.stringify({ type: 'RESET_VIEW' }), '*'); true;`
         );
