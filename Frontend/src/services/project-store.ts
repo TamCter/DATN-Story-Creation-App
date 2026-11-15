@@ -867,9 +867,12 @@ export class ProjectStore {
       const rollbackErrors: string[] = [];
       if (nodeUpdateAttempted) {
         try {
-          await this.updateNode(projectId, eventNode.id, {
-            chapter: currentEventNode.chapter || '',
-          });
+          await this.updateNode(
+            projectId,
+            eventNode.id,
+            { chapter: currentEventNode.chapter || '' },
+            { requireBackend: true }
+          );
         } catch (rollbackErr) {
           rollbackErrors.push(
             rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
