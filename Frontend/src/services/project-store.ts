@@ -32,11 +32,35 @@ export class ProjectStore {
   private memoryProjects: Map<string, StoryProject> = new Map();
   private projectVersions: Map<string, number> = new Map();
   private graphRequestVersions: Map<string, number> = new Map();
+  private chapterMutationTails: Map<string, Promise<void>> = new Map();
 
   constructor() {
     // Nạp sẵn INITIAL_PROJECTS vào memory
     for (const p of INITIAL_PROJECTS) {
       this.memoryProjects.set(p.id, { ...p });
+    }
+  }
+
+  private async withSerializedChapterMutations<T>(
+    projectId: string,
+    mutation: () => Promise<T>
+  ): Promise<T> {
+    const previousMutation = this.chapterMutationTails.get(projectId) || Promise.resolve();
+    let release!: () => void;
+    const currentMutation = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const queuedMutation = previousMutation.then(() => currentMutation);
+    this.chapterMutationTails.set(projectId, queuedMutation);
+
+    await previousMutation;
+    try {
+      return await mutation();
+    } finally {
+      release();
+      if (this.chapterMutationTails.get(projectId) === queuedMutation) {
+        this.chapterMutationTails.delete(projectId);
+      }
     }
   }
 
@@ -387,16 +411,27 @@ export class ProjectStore {
       );
     }
 
-    const syncedNode = { ...node, ...remoteNode, syncStatus: 'synced' as const };
-    project.nodes[nodeIndex] = syncedNode;
-    await this.saveProject(project);
+    const latestProject = await this.getProject(projectId, { preferCache: true });
+    const latestNodeIndex = latestProject.nodes.findIndex((item) => item.id === nodeId);
+    if (latestNodeIndex === -1) {
+      throw new Error(`Node ${nodeId} đã bị xóa trong lúc đồng bộ`);
+    }
+    const latestNode = latestProject.nodes[latestNodeIndex];
+    const syncedNode = { ...remoteNode, ...latestNode, syncStatus: 'synced' as const };
+    latestProject.nodes[latestNodeIndex] = syncedNode;
+    await this.saveProject(latestProject);
     return syncedNode;
   }
 
   /**
    * Cập nhật thông tin của một Node
    */
-  async updateNode(projectId: string, nodeId: string, updates: Partial<StoryNode>): Promise<StoryNode> {
+  async updateNode(
+    projectId: string,
+    nodeId: string,
+    updates: Partial<StoryNode>,
+    options: { requireBackend?: boolean } = {}
+  ): Promise<StoryNode> {
     const project = await this.getProject(projectId);
     const index = project.nodes.findIndex((n) => n.id === nodeId);
     if (index === -1) {
@@ -417,11 +452,14 @@ export class ProjectStore {
     try {
       const { id, createdAt, updatedAt, ...updatesForBackend } = effectiveUpdates;
       const res = await api.updateNode(nodeId, updatesForBackend);
+      if (!res.success && options.requireBackend) {
+        throw new Error(res.message || 'Backend không xác nhận đã cập nhật node');
+      }
       if (res.success && res.data) {
         Object.assign(updatedNode, res.data);
       }
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (options.requireBackend || err instanceof ApiError) {
         throw err;
       }
       console.warn('[ProjectStore] Không thể cập nhật node lên Backend, cập nhật local:', err);
@@ -699,9 +737,21 @@ export class ProjectStore {
       throw new Error('Backend chưa tạo được chương.');
     }
 
-    const syncedChapter = { ...chapter, ...remoteChapter, syncStatus: 'synced' as const };
-    chapters[chapterIndex] = syncedChapter;
-    await this.saveProject(project);
+    const latestProject = await this.getProject(projectId, { preferCache: true });
+    const latestChapters = latestProject.chapters || [];
+    const latestChapterIndex = latestChapters.findIndex((item) => item.id === chapterId);
+    if (latestChapterIndex === -1) {
+      throw new Error(`Chương ${chapterId} đã bị xóa trong lúc đồng bộ`);
+    }
+    const latestChapter = latestChapters[latestChapterIndex];
+    const syncedChapter = {
+      ...remoteChapter,
+      ...latestChapter,
+      syncStatus: 'synced' as const,
+    };
+    latestChapters[latestChapterIndex] = syncedChapter;
+    latestProject.chapters = latestChapters;
+    await this.saveProject(latestProject);
     return syncedChapter;
   }
 
@@ -730,6 +780,16 @@ export class ProjectStore {
    * Gán Node sự kiện vào Chapter (chỉ node sự kiện type === 'event' mới được gán)
    */
   async assignEventToChapter(
+    projectId: string,
+    chapterId: string,
+    eventNode: StoryNode
+  ): Promise<void> {
+    return this.withSerializedChapterMutations(projectId, () =>
+      this.assignEventToChapterLocked(projectId, chapterId, eventNode)
+    );
+  }
+
+  private async assignEventToChapterLocked(
     projectId: string,
     chapterId: string,
     eventNode: StoryNode
@@ -793,9 +853,12 @@ export class ProjectStore {
     let nodeUpdateAttempted = false;
     try {
       nodeUpdateAttempted = true;
-      await this.updateNode(projectId, eventNode.id, {
-        chapter: targetChapter.id,
-      });
+      await this.updateNode(
+        projectId,
+        eventNode.id,
+        { chapter: targetChapter.id },
+        { requireBackend: true }
+      );
       for (const update of chapterEventUpdates) {
         attemptedChapterUpdates.push(update.chapterId);
         await this.persistChapterEvents(projectId, update.chapterId, update.events);
@@ -855,6 +918,17 @@ export class ProjectStore {
   }
 
   async removeEventFromChapter(
+    projectId: string,
+    chapterId: string,
+    eventId: string,
+    deleteEvent: boolean
+  ): Promise<void> {
+    return this.withSerializedChapterMutations(projectId, () =>
+      this.removeEventFromChapterLocked(projectId, chapterId, eventId, deleteEvent)
+    );
+  }
+
+  private async removeEventFromChapterLocked(
     projectId: string,
     chapterId: string,
     eventId: string,
@@ -959,6 +1033,16 @@ export class ProjectStore {
   }
 
   async deleteChapter(
+    projectId: string,
+    chapterId: string,
+    deleteEvents: boolean
+  ): Promise<void> {
+    return this.withSerializedChapterMutations(projectId, () =>
+      this.deleteChapterLocked(projectId, chapterId, deleteEvents)
+    );
+  }
+
+  private async deleteChapterLocked(
     projectId: string,
     chapterId: string,
     deleteEvents: boolean
