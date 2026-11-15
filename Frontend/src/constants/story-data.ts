@@ -38,9 +38,27 @@ export interface StoryNode {
   location?: string;
   chapter?: string;
   impact?: string;
+  charactersInvolved?: string;
+  characters?: string;
   statusEvent?: string;
+  syncStatus?: 'synced' | 'pending';
   createdAt?: number;
   updatedAt?: number;
+}
+
+export function parseEventParticipants(value?: string | string[]): string[] {
+  let names: string[] = [];
+  if (Array.isArray(value)) {
+    names = value;
+  } else if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      names = Array.isArray(parsed) ? parsed : value.split(/[,;\n]+/);
+    } catch {
+      names = value.split(/[,;\n]+/);
+    }
+  }
+  return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
 }
 
 export interface StoryLink {
@@ -49,6 +67,9 @@ export interface StoryLink {
   target: string;
   label?: string;
   type?: 'solid' | 'dashed';
+  category?: string;
+  contextNote?: string;
+  tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
 }
 
 export interface StoryTag {
@@ -80,10 +101,32 @@ export interface StoryChapter {
   shortTitle: string;
   watermark: string;
   desc: string;
+  content?: string;
+  syncStatus?: 'synced' | 'pending';
   events: ChapterEvent[];
   nodes: StoryNode[];
   links: StoryLink[];
   edges?: StoryLink[];
+}
+
+export function eventBelongsToChapter(
+  node: Pick<StoryNode, 'id' | 'type' | 'chapter'>,
+  chapter: Pick<StoryChapter, 'id' | 'chapterNumber' | 'title' | 'events'>
+): boolean {
+  if (node.type !== 'event') return false;
+
+  const chapterMembership = node.chapter?.trim().toLocaleLowerCase();
+  const chapterLabels = new Set([
+    chapter.id,
+    chapter.title,
+    `Chương ${chapter.chapterNumber}`,
+  ].map((label) => label.trim().toLocaleLowerCase()));
+
+  if (chapterMembership) {
+    return chapterLabels.has(chapterMembership);
+  }
+
+  return false;
 }
 
 export interface StoryLocationItem {
@@ -738,6 +781,5 @@ export const GENDER_OPTIONS = [
   { label: 'Nữ', value: 'Nữ', icon: '♀️' },
   { label: 'Khác / Chưa rõ', value: 'Khác', icon: '⚧' },
 ];
-
 
 

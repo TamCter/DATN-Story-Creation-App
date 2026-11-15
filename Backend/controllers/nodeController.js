@@ -10,6 +10,24 @@ const TYPE_LABELS = {
   location: 'Location',
 };
 
+function parseParticipantNames(value) {
+  if (Array.isArray(value)) {
+    return value.filter((name) => typeof name === 'string');
+  }
+  if (typeof value !== 'string' || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((name) => typeof name === 'string');
+    }
+  } catch {
+    // Legacy participant strings use commas, semicolons, or newlines as separators.
+  }
+
+  return value.split(/[,;\n]+/);
+}
+
 /**
  * Lấy danh sách Nodes của một Project (có thể lọc theo ?type=character&search=...)
  */
@@ -138,6 +156,8 @@ const ALLOWED_NODE_SCALARS = new Set([
   'location',
   'chapter',
   'impact',
+  'charactersInvolved',
+  'characters',
   // Status Event cause
   'statusEvent',
 ]);
@@ -242,6 +262,13 @@ async function createNode(req, res, next) {
   // Strip server-managed fields if sent
   delete body.createdAt;
   delete body.updatedAt;
+
+  if (Array.isArray(body.charactersInvolved)) {
+    body.charactersInvolved = JSON.stringify(body.charactersInvolved);
+  }
+  if (Array.isArray(body.characters)) {
+    body.characters = JSON.stringify(body.characters);
+  }
 
   // Reject invalid keys or non-scalar / nested values
   for (const [key, value] of Object.entries(body)) {
@@ -374,6 +401,13 @@ async function updateNode(req, res, next) {
   delete body.createdAt;
   delete body.updatedAt;
 
+  if (Array.isArray(body.charactersInvolved)) {
+    body.charactersInvolved = JSON.stringify(body.charactersInvolved);
+  }
+  if (Array.isArray(body.characters)) {
+    body.characters = JSON.stringify(body.characters);
+  }
+
   for (const [key, value] of Object.entries(body)) {
     if (!ALLOWED_NODE_SCALARS.has(key)) {
       return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
@@ -426,6 +460,9 @@ async function updateNode(req, res, next) {
       updates[field] = body[field] !== null ? String(body[field]).trim() : '';
     }
   }
+  if (body.charactersInvolved !== undefined && body.characters === undefined) {
+    updates.characters = '';
+  }
 
   updates.updatedAt = Date.now();
 
@@ -447,6 +484,15 @@ async function updateNode(req, res, next) {
     }
 
     let query;
+    const participantFieldsChanged =
+      body.charactersInvolved !== undefined ||
+      body.characters !== undefined ||
+      body.character !== undefined;
+    const currentType = body.type?.toLowerCase() || checkResult[0].n.type;
+    if (participantFieldsChanged && currentType === 'event') {
+      updates._participantSyncRevision = crypto.randomUUID();
+    }
+
     if (newSecondaryLabel) {
       query = `
         MATCH (n:StoryNode { id: $id })
@@ -524,6 +570,48 @@ async function deleteNode(req, res, next) {
   } catch (error) {
     next(error);
   }
+}
+
+async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
+  const label = TYPE_LABELS[type];
+  if (!label) throw new Error(`Loại thực thể không hỗ trợ: ${type}`);
+
+  const entityId = `node-${type.slice(0, 4)}-${Date.now()}-${crypto.randomUUID().slice(0, 5)}`;
+  const properties = {
+    id: entityId,
+    name,
+    type,
+    ...defaults,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+    x: 100 + Math.random() * 400,
+    y: 100 + Math.random() * 400,
+  };
+  const query = `
+    MATCH (p:Project { id: $projectId })
+    SET p._entityFindOrCreateLock = coalesce(p._entityFindOrCreateLock, 0) + 1
+    WITH p
+    OPTIONAL MATCH (existing:StoryNode)-[:BELONGS_TO]->(p)
+    WHERE existing.type = $type
+      AND (toLower(existing.name) = toLower($name) OR existing.id = $name)
+    WITH p, collect(existing) AS matches
+    FOREACH (_ IN CASE WHEN size(matches) = 0 THEN [1] ELSE [] END |
+      CREATE (created:StoryNode:${label} $properties)
+      CREATE (created)-[:BELONGS_TO]->(p)
+    )
+    REMOVE p._entityFindOrCreateLock
+    WITH p
+    MATCH (entity:StoryNode)-[:BELONGS_TO]->(p)
+    WHERE entity.type = $type
+      AND (toLower(entity.name) = toLower($name) OR entity.id = $name)
+    RETURN entity.id AS id
+    LIMIT 1
+  `;
+  const records = await runQuery(query, { projectId, name, type, properties });
+  if (!records.length || !records[0].id) {
+    throw new Error(`Không thể tạo hoặc tìm thấy ${type}: ${name}`);
+  }
+  return records[0].id;
 }
 
 /**
@@ -835,18 +923,29 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 5. BIẾN CỐ / SỰ KIỆN (Event)
     if (nodeType === 'event') {
-      // Nơi diễn ra -> Location
+      // 5.1 Nơi diễn ra -> Location
       if (nodeData.location && String(nodeData.location).trim()) {
         const location = String(nodeData.location).trim();
+        // Xóa các link EVENT_LOCATION cũ không còn khớp
         await runQuery(`
           MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode)
           WHERE loc.name <> $location AND loc.id <> $location
           DELETE r
         `, { nodeId, location });
+
+        const locId = await findOrCreateProjectEntity(projectId, location, 'location', {
+          role: 'ĐỊA DANH',
+          region: 'Đông Vực',
+          dangerLevel: 'Bình thường',
+          climate: 'Ôn hòa',
+          desc: `Địa danh diễn ra sự kiện ${location}`,
+          status: 'Hoạt động',
+        });
+
+        // Tạo / cập nhật liên kết EVENT_LOCATION
         await runQuery(`
-          MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
-          WHERE loc.name = $location OR loc.id = $location
+          MATCH (ev:StoryNode { id: $nodeId })
+          MATCH (loc:StoryNode { id: $locId })
           MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
           ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
                         r.label = 'Nơi diễn ra',
@@ -855,13 +954,63 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Nơi diễn ra',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, location });
+        `, { nodeId, locId });
       } else {
         await runQuery(`
           MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(:StoryNode)
           DELETE r
         `, { nodeId });
       }
+
+      // 5.2 Nhân vật tham gia -> Character
+      const rawChars = [
+        ...parseParticipantNames(nodeData.charactersInvolved),
+        ...parseParticipantNames(nodeData.characters),
+        ...parseParticipantNames(nodeData.character),
+      ];
+
+      const charNames = Array.from(new Set(rawChars.map((s) => String(s).trim()).filter(Boolean)));
+      const participantIds = [];
+      for (const charName of charNames) {
+        const charId = await findOrCreateProjectEntity(projectId, charName, 'character', {
+          role: 'TRUNG LẬP',
+          gender: 'Nam',
+          status: 'Còn sống',
+          desc: 'Nhân vật tham gia sự kiện',
+        });
+        participantIds.push(charId);
+      }
+
+      await runQuery(`
+        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
+        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
+        OPTIONAL MATCH (c:StoryNode)-[old:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+        WHERE isCurrent AND NOT (c.id IN $participantIds)
+        OPTIONAL MATCH (c)-[:BELONGS_TO]->(p:Project { id: $projectId })
+        WITH ev, isCurrent, collect(CASE WHEN p IS NOT NULL THEN old ELSE null END) AS staleLinks
+        FOREACH (staleLink IN staleLinks | DELETE staleLink)
+        OPTIONAL MATCH (participant:StoryNode)-[:BELONGS_TO]->(project:Project { id: $projectId })
+        WHERE isCurrent AND participant.id IN $participantIds
+        WITH ev, isCurrent, collect(participant) AS participants
+        FOREACH (participantNode IN participants |
+          MERGE (participantNode)-[participantLink:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+          ON CREATE SET participantLink.id = 'link-' + participantNode.id + '-' + ev.id + '-participated',
+                        participantLink.label = 'Tham gia',
+                        participantLink.type = 'dashed',
+                        participantLink.tone = 'event',
+                        participantLink.createdAt = timestamp()
+          ON MATCH SET participantLink.label = 'Tham gia',
+                       participantLink.updatedAt = timestamp()
+        )
+        REMOVE ev._participantSyncLock
+        RETURN isCurrent
+      `, {
+        nodeId,
+        projectId,
+        participantIds,
+        revision: nodeData._participantSyncRevision || null,
+      });
     }
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
@@ -930,14 +1079,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(ev.location, '') <> loc.name AND coalesce(ev.location, '') <> loc.id
+        WHERE toLower(coalesce(ev.location, '')) <> toLower(loc.name)
+          AND coalesce(ev.location, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (ev.location = loc.name OR ev.location = loc.id) AND ev.location IS NOT NULL AND ev.location <> ''
+        WHERE (toLower(ev.location) = toLower(loc.name) OR ev.location = loc.id)
+          AND ev.location IS NOT NULL AND ev.location <> ''
         MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
         ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
                       r.label = 'Nơi diễn ra',

@@ -2,7 +2,11 @@ const crypto = require('crypto');
 const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
-const { chatWithAI } = require('../controllers/aiController');
+const {
+  chatWithAI,
+  generateChapterAndEvents,
+  generateChapterStory,
+} = require('../controllers/aiController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
 const getRequestRateLimitKey = (req) => {
@@ -57,6 +61,8 @@ const aiChatAggregateLimiter = rateLimit({
 
 router.use(verifyToken);
 router.post('/chat', aiChatLimiter, aiChatAggregateLimiter, chatWithAI);
+router.post('/generate-chapter-events', aiChatLimiter, aiChatAggregateLimiter, generateChapterAndEvents);
+router.post('/generate-chapter-story', aiChatLimiter, aiChatAggregateLimiter, generateChapterStory);
 
 module.exports = router;
 

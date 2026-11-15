@@ -324,6 +324,28 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         isPhysicsActive = true;
       }
 
+      function focusRelation(sourceId, targetId) {
+        var source = nodeMap[String(sourceId)];
+        var target = nodeMap[String(targetId)];
+        if (!source || !target) return;
+
+        var spacing = Math.max(72, Math.min(width * 0.22, 120));
+        source.x = width / 2 - spacing;
+        source.y = height / 2;
+        source.vx = 0;
+        source.vy = 0;
+        target.x = width / 2 + spacing;
+        target.y = height / 2;
+        target.vx = 0;
+        target.vy = 0;
+        selectedId = String(sourceId);
+        camera.x = 0;
+        camera.y = 0;
+        camera.zoom = 1;
+        energy = 0;
+        isPhysicsActive = false;
+      }
+
       // Convert Screen coordinates to World coordinates
       function screenToWorld(sx, sy) {
         return {
@@ -724,6 +746,9 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
           if (!data || !data.type) return;
 
           switch (data.type) {
+            case 'REQUEST_READY':
+              sendToApp({ type: 'READY' });
+              break;
             case 'SELECT_NODE':
               selectedId = data.nodeId || null;
               break;
@@ -740,6 +765,9 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
               camera.x = 0;
               camera.y = 0;
               camera.zoom = 1.0;
+              break;
+            case 'FOCUS_RELATION':
+              focusRelation(data.sourceId, data.targetId);
               break;
             case 'UPDATE_DATA':
               if (data.nodes) initNodes(data.nodes);
@@ -766,4 +794,3 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
 </body>
 </html>`;
 }
-
