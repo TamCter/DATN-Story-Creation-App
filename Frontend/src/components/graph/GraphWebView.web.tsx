@@ -1,4 +1,12 @@
-import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef } from 'react';
+import React, {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+} from 'react';
 import { StyleSheet, View } from 'react-native';
 import { generateGraphHtml } from './generateGraphHtml';
 
@@ -66,11 +74,13 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       );
     }, [nodes, edges, links]);
     const sendGraphDataRef = useRef(sendGraphData);
-    sendGraphDataRef.current = sendGraphData;
     const onNodeClickRef = useRef(onNodeClick);
-    onNodeClickRef.current = onNodeClick;
     const onCanvasClickRef = useRef(onCanvasClick);
-    onCanvasClickRef.current = onCanvasClick;
+    useLayoutEffect(() => {
+      sendGraphDataRef.current = sendGraphData;
+      onNodeClickRef.current = onNodeClick;
+      onCanvasClickRef.current = onCanvasClick;
+    }, [sendGraphData, onNodeClick, onCanvasClick]);
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {

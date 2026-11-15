@@ -385,7 +385,7 @@ export default function ChapterDetailScreen() {
                       pressed && styles.readStoryBtnPressed,
                     ]}
                     onPress={() => {
-                      setReadingChapter(chapter);
+                      setReadingChapter({ ...chapter, events: displayEvents });
                       setReaderModalOpen(true);
                     }}>
                     <Text style={styles.readStoryBtnText}>📖 Đọc truyện</Text>

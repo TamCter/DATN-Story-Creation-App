@@ -41,12 +41,23 @@ export interface StoryNode {
   charactersInvolved?: string;
   characters?: string;
   statusEvent?: string;
+  syncStatus?: 'synced' | 'pending';
   createdAt?: number;
   updatedAt?: number;
 }
 
 export function parseEventParticipants(value?: string | string[]): string[] {
-  const names = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,;\n]+/) : [];
+  let names: string[] = [];
+  if (Array.isArray(value)) {
+    names = value;
+  } else if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      names = Array.isArray(parsed) ? parsed : value.split(/[,;\n]+/);
+    } catch {
+      names = value.split(/[,;\n]+/);
+    }
+  }
   return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
 }
 

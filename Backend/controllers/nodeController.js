@@ -10,6 +10,24 @@ const TYPE_LABELS = {
   location: 'Location',
 };
 
+function parseParticipantNames(value) {
+  if (Array.isArray(value)) {
+    return value.filter((name) => typeof name === 'string');
+  }
+  if (typeof value !== 'string' || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((name) => typeof name === 'string');
+    }
+  } catch {
+    // Legacy participant strings use commas, semicolons, or newlines as separators.
+  }
+
+  return value.split(/[,;\n]+/);
+}
+
 /**
  * Lấy danh sách Nodes của một Project (có thể lọc theo ?type=character&search=...)
  */
@@ -246,10 +264,10 @@ async function createNode(req, res, next) {
   delete body.updatedAt;
 
   if (Array.isArray(body.charactersInvolved)) {
-    body.charactersInvolved = body.charactersInvolved.join(', ');
+    body.charactersInvolved = JSON.stringify(body.charactersInvolved);
   }
   if (Array.isArray(body.characters)) {
-    body.characters = body.characters.join(', ');
+    body.characters = JSON.stringify(body.characters);
   }
 
   // Reject invalid keys or non-scalar / nested values
@@ -384,10 +402,10 @@ async function updateNode(req, res, next) {
   delete body.updatedAt;
 
   if (Array.isArray(body.charactersInvolved)) {
-    body.charactersInvolved = body.charactersInvolved.join(', ');
+    body.charactersInvolved = JSON.stringify(body.charactersInvolved);
   }
   if (Array.isArray(body.characters)) {
-    body.characters = body.characters.join(', ');
+    body.characters = JSON.stringify(body.characters);
   }
 
   for (const [key, value] of Object.entries(body)) {
@@ -466,6 +484,15 @@ async function updateNode(req, res, next) {
     }
 
     let query;
+    const participantFieldsChanged =
+      body.charactersInvolved !== undefined ||
+      body.characters !== undefined ||
+      body.character !== undefined;
+    const currentType = body.type?.toLowerCase() || checkResult[0].n.type;
+    if (participantFieldsChanged && currentType === 'event') {
+      updates._participantSyncRevision = crypto.randomUUID();
+    }
+
     if (newSecondaryLabel) {
       query = `
         MATCH (n:StoryNode { id: $id })
@@ -936,20 +963,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // 5.2 Nhân vật tham gia -> Character
-      let rawChars = [];
-      if (Array.isArray(nodeData.charactersInvolved)) {
-        rawChars.push(...nodeData.charactersInvolved);
-      } else if (typeof nodeData.charactersInvolved === 'string' && nodeData.charactersInvolved.trim()) {
-        rawChars.push(...nodeData.charactersInvolved.split(/[,;\n]+/));
-      }
-      if (Array.isArray(nodeData.characters)) {
-        rawChars.push(...nodeData.characters);
-      } else if (typeof nodeData.characters === 'string' && nodeData.characters.trim()) {
-        rawChars.push(...nodeData.characters.split(/[,;\n]+/));
-      }
-      if (typeof nodeData.character === 'string' && nodeData.character.trim()) {
-        rawChars.push(...nodeData.character.split(/[,;\n]+/));
-      }
+      const rawChars = [
+        ...parseParticipantNames(nodeData.charactersInvolved),
+        ...parseParticipantNames(nodeData.characters),
+        ...parseParticipantNames(nodeData.character),
+      ];
 
       const charNames = Array.from(new Set(rawChars.map((s) => String(s).trim()).filter(Boolean)));
       const participantIds = [];
@@ -964,27 +982,35 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       await runQuery(`
-        MATCH (ev:StoryNode { id: $nodeId })
-        MATCH (c:StoryNode)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
-        MATCH (c)-[:BELONGS_TO]->(p:Project { id: $projectId })
-        WHERE NOT (c.id IN $participantIds)
-        DELETE r
-      `, { nodeId, projectId, participantIds });
-
-      for (const charId of participantIds) {
-        await runQuery(`
-          MATCH (ev:StoryNode { id: $nodeId })
-          MATCH (c:StoryNode { id: $charId })
-          MERGE (c)-[r:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
-          ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-participated',
-                        r.label = 'Tham gia',
-                        r.type = 'dashed',
-                        r.tone = 'event',
-                        r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Tham gia',
-                       r.updatedAt = timestamp()
-        `, { nodeId, charId });
-      }
+        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
+        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
+        OPTIONAL MATCH (c:StoryNode)-[old:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+        WHERE isCurrent AND NOT (c.id IN $participantIds)
+        OPTIONAL MATCH (c)-[:BELONGS_TO]->(p:Project { id: $projectId })
+        WITH ev, isCurrent, collect(CASE WHEN p IS NOT NULL THEN old ELSE null END) AS staleLinks
+        FOREACH (staleLink IN staleLinks | DELETE staleLink)
+        OPTIONAL MATCH (participant:StoryNode)-[:BELONGS_TO]->(project:Project { id: $projectId })
+        WHERE isCurrent AND participant.id IN $participantIds
+        WITH ev, isCurrent, collect(participant) AS participants
+        FOREACH (participantNode IN participants |
+          MERGE (participantNode)-[participantLink:RELATES_TO { category: 'PARTICIPATED_IN' }]->(ev)
+          ON CREATE SET participantLink.id = 'link-' + participantNode.id + '-' + ev.id + '-participated',
+                        participantLink.label = 'Tham gia',
+                        participantLink.type = 'dashed',
+                        participantLink.tone = 'event',
+                        participantLink.createdAt = timestamp()
+          ON MATCH SET participantLink.label = 'Tham gia',
+                       participantLink.updatedAt = timestamp()
+        )
+        REMOVE ev._participantSyncLock
+        RETURN isCurrent
+      `, {
+        nodeId,
+        projectId,
+        participantIds,
+        revision: nodeData._participantSyncRevision || null,
+      });
     }
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
@@ -1053,14 +1079,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(ev.location, '') <> loc.name AND coalesce(ev.location, '') <> loc.id
+        WHERE toLower(coalesce(ev.location, '')) <> toLower(loc.name)
+          AND coalesce(ev.location, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (ev.location = loc.name OR ev.location = loc.id) AND ev.location IS NOT NULL AND ev.location <> ''
+        WHERE (toLower(ev.location) = toLower(loc.name) OR ev.location = loc.id)
+          AND ev.location IS NOT NULL AND ev.location <> ''
         MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
         ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
                       r.label = 'Nơi diễn ra',

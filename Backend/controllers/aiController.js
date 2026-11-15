@@ -168,11 +168,19 @@ function normalizeEventCharacters(events, characterNodes) {
       return event;
     }
 
-    const rawCharacters = Array.isArray(event.charactersInvolved)
-      ? event.charactersInvolved
-      : typeof event.charactersInvolved === 'string'
-        ? event.charactersInvolved.split(/[,;\n]+/)
-        : [];
+    let rawCharacters = [];
+    if (Array.isArray(event.charactersInvolved)) {
+      rawCharacters = event.charactersInvolved;
+    } else if (typeof event.charactersInvolved === 'string') {
+      try {
+        const parsed = JSON.parse(event.charactersInvolved);
+        rawCharacters = Array.isArray(parsed)
+          ? parsed
+          : event.charactersInvolved.split(/[,;\n]+/);
+      } catch {
+        rawCharacters = event.charactersInvolved.split(/[,;\n]+/);
+      }
+    }
     const involvedNames = [];
     const involvedKeys = new Set();
     for (const rawName of rawCharacters) {

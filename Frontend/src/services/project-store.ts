@@ -30,6 +30,8 @@ function getReplacementChapter(
 
 export class ProjectStore {
   private memoryProjects: Map<string, StoryProject> = new Map();
+  private projectVersions: Map<string, number> = new Map();
+  private graphRequestVersions: Map<string, number> = new Map();
 
   constructor() {
     // Nạp sẵn INITIAL_PROJECTS vào memory
@@ -99,19 +101,43 @@ export class ProjectStore {
       }
     }
 
-    const locallyCachedProject =
-      this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+    const requestVersion = this.projectVersions.get(projectId) || 0;
+    const graphRequestVersion = (this.graphRequestVersions.get(projectId) || 0) + 1;
+    this.graphRequestVersions.set(projectId, graphRequestVersion);
 
     // 1. Thử gọi API Backend để lấy dữ liệu mới nhất từ Neo4j
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
+        let latestLocalProject =
+          this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+        if (
+          this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
+          (this.projectVersions.get(projectId) || 0) !== requestVersion
+        ) {
+          if (latestLocalProject) return latestLocalProject;
+        }
+
         const { project, nodes = [], links = [], edges, chapters } = res.data;
         const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
         const remoteChapters = Array.isArray(chapters)
           ? (chapters as StoryChapter[])
           : project.chapters || [];
-        const pendingChapters = (locallyCachedProject?.chapters || []).filter(
+        const remoteNodes = nodes as StoryNode[];
+        const pendingNodes = (latestLocalProject?.nodes || []).filter(
+          (node) => node.syncStatus === 'pending'
+        );
+        const mergedNodes = [
+          ...remoteNodes.map((remoteNode) =>
+            pendingNodes.some((pending) => pending.id === remoteNode.id)
+              ? { ...remoteNode, syncStatus: 'synced' as const }
+              : remoteNode
+          ),
+          ...pendingNodes.filter(
+            (pending) => !remoteNodes.some((node) => node.id === pending.id)
+          ),
+        ];
+        const pendingChapters = (latestLocalProject?.chapters || []).filter(
           (chapter) => chapter.syncStatus === 'pending'
         );
         const mergedChapters = [
@@ -125,15 +151,26 @@ export class ProjectStore {
         ];
         const fullProject: StoryProject = {
           ...project,
-          nodeCount: nodes.length,
+          nodeCount: mergedNodes.length,
           linkCount: actualLinks.length,
-          nodes: nodes as StoryNode[],
+          nodes: mergedNodes,
           links: actualLinks,
           edges: actualLinks,
           chapters: mergedChapters,
         };
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject);
+        if (
+          this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
+          (this.projectVersions.get(projectId) || 0) !== requestVersion
+        ) {
+          latestLocalProject =
+            this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+          if (latestLocalProject) {
+            await this.cacheProjectLocally(latestLocalProject);
+            return latestLocalProject;
+          }
+        }
         return fullProject;
       }
     } catch {
@@ -182,6 +219,10 @@ export class ProjectStore {
    * Lưu hoặc cập nhật một dự án
    */
   async saveProject(project: StoryProject): Promise<void> {
+    this.projectVersions.set(
+      project.id,
+      (this.projectVersions.get(project.id) || 0) + 1
+    );
     this.memoryProjects.set(project.id, { ...project });
     await this.cacheProjectLocally(project);
 
@@ -251,16 +292,17 @@ export class ProjectStore {
       characters: nodeData.characters?.trim() || '',
       impact: nodeData.impact?.trim() || '',
       statusEvent: nodeData.statusEvent?.trim() || '',
+      syncStatus: 'pending',
       createdAt: Date.now(),
       updatedAt: Date.now(),
     };
 
     // Thử gọi backend để lưu vào Neo4j (không truyền createdAt / updatedAt thủ công)
     try {
-      const { createdAt, updatedAt, ...payloadForBackend } = newNode;
+      const { createdAt, updatedAt, syncStatus, ...payloadForBackend } = newNode;
       const res = await api.createNode(projectId, payloadForBackend);
       if (res.success && res.data) {
-        Object.assign(newNode, res.data);
+        Object.assign(newNode, res.data, { syncStatus: 'synced' });
       }
     } catch (err) {
       if (err instanceof ApiError) {
@@ -278,6 +320,79 @@ export class ProjectStore {
     return newNode;
   }
 
+  async ensureNodeSynced(projectId: string, nodeId: string): Promise<StoryNode> {
+    const project = await this.getProject(projectId);
+    const nodeIndex = project.nodes.findIndex((node) => node.id === nodeId);
+    if (nodeIndex === -1) {
+      throw new Error(`Không tìm thấy node với ID: ${nodeId} trong dự án`);
+    }
+
+    const node = project.nodes[nodeIndex];
+    if (!node || node.syncStatus !== 'pending') return node;
+
+    const verifyRemoteNode = async (): Promise<StoryNode | undefined> => {
+      const response = await api.getNode(nodeId);
+      if (!response.success || !response.data) return undefined;
+      if (response.data.id !== nodeId) {
+        const error = new Error(`Backend trả về node không khớp ID ${nodeId}`);
+        error.name = 'NodeProjectMismatchError';
+        throw error;
+      }
+      if (response.data.projectId !== projectId) {
+        const error = new Error(`Node ${nodeId} không thuộc dự án ${projectId}`);
+        error.name = 'NodeProjectMismatchError';
+        throw error;
+      }
+      return response.data as StoryNode;
+    };
+
+    let remoteNode: StoryNode | undefined;
+    try {
+      remoteNode = await verifyRemoteNode();
+    } catch (err) {
+      if (err instanceof Error && err.name === 'NodeProjectMismatchError') throw err;
+    }
+
+    let createError: unknown;
+    if (!remoteNode) {
+      try {
+        const { syncStatus, createdAt, updatedAt, ...payload } = node;
+        const response = await api.createNode(projectId, payload);
+        if (!response.success || !response.data) {
+          throw new Error(response.message || 'Backend không xác nhận đã tạo node');
+        }
+        remoteNode = response.data as StoryNode;
+        if (remoteNode.id !== nodeId) {
+          throw new Error(`Backend đã tạo node với ID khác ${nodeId}`);
+        }
+      } catch (err) {
+        createError = err;
+        try {
+          remoteNode = await verifyRemoteNode();
+        } catch (verifyError) {
+          const createMessage =
+            createError instanceof Error ? createError.message : String(createError);
+          const verifyMessage =
+            verifyError instanceof Error ? verifyError.message : String(verifyError);
+          throw new Error(
+            `Không thể đồng bộ node: ${createMessage}. Không xác minh được trạng thái trên máy chủ: ${verifyMessage}`
+          );
+        }
+      }
+    }
+
+    if (!remoteNode) {
+      throw new Error(
+        createError instanceof Error ? createError.message : 'Backend chưa tạo được node.'
+      );
+    }
+
+    const syncedNode = { ...node, ...remoteNode, syncStatus: 'synced' as const };
+    project.nodes[nodeIndex] = syncedNode;
+    await this.saveProject(project);
+    return syncedNode;
+  }
+
   /**
    * Cập nhật thông tin của một Node
    */
@@ -288,15 +403,19 @@ export class ProjectStore {
       throw new Error(`Không tìm thấy node với ID: ${nodeId} trong dự án`);
     }
 
+    const effectiveUpdates =
+      updates.charactersInvolved !== undefined && updates.characters === undefined
+        ? { ...updates, characters: '' }
+        : updates;
     const updatedNode: StoryNode = {
       ...project.nodes[index],
-      ...updates,
+      ...effectiveUpdates,
       updatedAt: Date.now(),
     };
 
     // Thử gọi backend để cập nhật vào Neo4j (không truyền id / createdAt / updatedAt)
     try {
-      const { id, createdAt, updatedAt, ...updatesForBackend } = updates;
+      const { id, createdAt, updatedAt, ...updatesForBackend } = effectiveUpdates;
       const res = await api.updateNode(nodeId, updatesForBackend);
       if (res.success && res.data) {
         Object.assign(updatedNode, res.data);
@@ -488,6 +607,18 @@ export class ProjectStore {
       syncStatus: 'pending',
     };
 
+    for (const event of newChapter.events) {
+      if (!event || typeof event.id !== 'string') {
+        throw new Error('Dữ liệu sự kiện của chương mới không hợp lệ');
+      }
+      const eventNode = project.nodes.find((node) => node.id === event.id);
+      if (!eventNode || !eventBelongsToChapter(eventNode, newChapter)) {
+        throw new Error(
+          `Sự kiện ${event.id} không thuộc chương mới theo nhãn chương của node`
+        );
+      }
+    }
+
     try {
       const res = await api.createChapter(projectId, {
         id: newChapter.id,
@@ -607,11 +738,18 @@ export class ProjectStore {
       throw new Error('Chỉ node có phân loại là Sự kiện mới được gán vào chương');
     }
 
+    if (eventNode.syncStatus === 'pending') {
+      eventNode = await this.ensureNodeSynced(projectId, eventNode.id);
+    }
     await this.ensureChapterSynced(projectId, chapterId);
-    let project = await this.getProject(projectId);
+    const project = await this.getProject(projectId);
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
+    const currentEventNode = project.nodes.find((node) => node.id === eventNode.id);
     if (!chapter) {
       throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
+    }
+    if (!currentEventNode) {
+      throw new Error(`Không tìm thấy node sự kiện với ID: ${eventNode.id}`);
     }
 
     const previousChapters = (project.chapters || []).filter(
@@ -620,36 +758,78 @@ export class ProjectStore {
         (eventBelongsToChapter(eventNode, item) ||
           item.events?.some((event) => event.id === eventNode.id))
     );
+    const chapterEventUpdates: Array<{
+      chapterId: string;
+      events: StoryChapter['events'];
+      previousEvents: StoryChapter['events'];
+    }> = [];
     for (const previousChapter of previousChapters) {
-      const updatedEvents = (previousChapter.events || []).filter(
+      const previousEvents = previousChapter.events || [];
+      const updatedEvents = previousEvents.filter(
         (event) => event.id !== eventNode.id
       );
-      if (updatedEvents.length !== (previousChapter.events || []).length) {
-        await this.persistChapterEvents(projectId, previousChapter.id, updatedEvents);
+      if (updatedEvents.length !== previousEvents.length) {
+        chapterEventUpdates.push({
+          chapterId: previousChapter.id,
+          events: updatedEvents,
+          previousEvents,
+        });
       }
     }
 
-    project = await this.getProject(projectId);
-    const targetChapter = (project.chapters || []).find((item) => item.id === chapterId);
-    if (!targetChapter) {
-      throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
-    }
+    const targetChapter = chapter;
+    const previousTargetEvents = targetChapter.events || [];
     const updatedEvents = [
-      ...(targetChapter.events || []).filter((event) => event.id !== eventNode.id),
+      ...previousTargetEvents.filter((event) => event.id !== eventNode.id),
       { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
     ];
-    await this.persistChapterEvents(projectId, chapterId, updatedEvents);
-
-    // Cập nhật trường chapter của node sự kiện
-    const updatedNode = await this.updateNode(projectId, eventNode.id, {
-      chapter: targetChapter.id,
+    chapterEventUpdates.push({
+      chapterId,
+      events: updatedEvents,
+      previousEvents: previousTargetEvents,
     });
-    project = await this.getProject(projectId);
-    const nodeIdx = project.nodes.findIndex((node) => node.id === eventNode.id);
-    if (nodeIdx !== -1) {
-      project.nodes[nodeIdx] = updatedNode;
+
+    const attemptedChapterUpdates: string[] = [];
+    let nodeUpdateAttempted = false;
+    try {
+      nodeUpdateAttempted = true;
+      await this.updateNode(projectId, eventNode.id, {
+        chapter: targetChapter.id,
+      });
+      for (const update of chapterEventUpdates) {
+        attemptedChapterUpdates.push(update.chapterId);
+        await this.persistChapterEvents(projectId, update.chapterId, update.events);
+      }
+    } catch (err) {
+      const rollbackErrors: string[] = [];
+      if (nodeUpdateAttempted) {
+        try {
+          await this.updateNode(projectId, eventNode.id, {
+            chapter: currentEventNode.chapter || '',
+          });
+        } catch (rollbackErr) {
+          rollbackErrors.push(
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+          );
+        }
+      }
+      for (const chapterId of attemptedChapterUpdates.reverse()) {
+        const snapshot = chapterEventUpdates.find((item) => item.chapterId === chapterId);
+        if (!snapshot) continue;
+        try {
+          await this.persistChapterEvents(projectId, chapterId, snapshot.previousEvents);
+        } catch (rollbackErr) {
+          rollbackErrors.push(
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+          );
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`${message}; rollback failed: ${rollbackErrors.join('; ')}`);
+      }
+      throw err;
     }
-    await this.saveProject(project);
   }
 
   private async persistChapterEvents(
@@ -691,31 +871,91 @@ export class ProjectStore {
     const eventNode = (project.nodes || []).find(
       (node) => node.id === eventId && node.type === 'event'
     );
-
-    try {
-      await api.updateChapter(chapterId, { events: updatedEvents });
-    } catch (err) {
-      if (err instanceof ApiError) throw err;
-      console.warn('[ProjectStore] Không thể cập nhật danh sách sự kiện trên Backend:', err);
+    const previousEvents = chapter.events || [];
+    const replacementChapter =
+      eventNode && eventBelongsToChapter(eventNode, chapter)
+        ? getReplacementChapter(project, chapterId, eventNode)
+        : undefined;
+    const chapterUpdates: Array<{
+      chapterId: string;
+      events: StoryChapter['events'];
+      previousEvents: StoryChapter['events'];
+    }> = [];
+    if (updatedEvents.length !== previousEvents.length) {
+      chapterUpdates.push({ chapterId, events: updatedEvents, previousEvents });
     }
 
-    if (deleteEvent) {
-      if (eventNode) {
-        await this.deleteNode(projectId, eventId);
+    if (replacementChapter && eventNode) {
+      const replacementEvents = replacementChapter.events || [];
+      if (!replacementEvents.some((event) => event.id === eventId)) {
+        chapterUpdates.push({
+          chapterId: replacementChapter.id,
+          events: [
+            ...replacementEvents,
+            { id: eventNode.id, title: eventNode.name, desc: eventNode.desc },
+          ],
+          previousEvents: replacementEvents,
+        });
       }
-    } else if (eventNode && eventBelongsToChapter(eventNode, chapter)) {
-      const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
-      await this.updateNode(projectId, eventId, {
-        chapter: replacementChapter?.id || '',
-      });
     }
 
-    const updatedProject = await this.getProject(projectId);
-    const updatedChapter = (updatedProject.chapters || []).find((item) => item.id === chapterId);
-    if (updatedChapter) {
-      updatedChapter.events = updatedEvents;
+    const attemptedChapterUpdates: string[] = [];
+    let nodeUpdateAttempted = false;
+    try {
+      if (deleteEvent) {
+        for (const update of chapterUpdates) {
+          attemptedChapterUpdates.push(update.chapterId);
+          await this.persistChapterEvents(projectId, update.chapterId, update.events);
+        }
+        if (eventNode) await this.deleteNode(projectId, eventId);
+      } else {
+        if (eventNode && eventBelongsToChapter(eventNode, chapter)) {
+          nodeUpdateAttempted = true;
+          await this.updateNode(projectId, eventId, {
+            chapter: replacementChapter?.id || '',
+          });
+        }
+        for (const update of chapterUpdates) {
+          attemptedChapterUpdates.push(update.chapterId);
+          await this.persistChapterEvents(projectId, update.chapterId, update.events);
+        }
+      }
+    } catch (err) {
+      const rollbackErrors: string[] = [];
+      if (!deleteEvent && nodeUpdateAttempted && eventNode) {
+        try {
+          await this.updateNode(projectId, eventId, {
+            chapter: eventNode.chapter || '',
+          });
+        } catch (rollbackErr) {
+          rollbackErrors.push(
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+          );
+        }
+      }
+      for (const attemptedChapterId of attemptedChapterUpdates.reverse()) {
+        const snapshot = chapterUpdates.find(
+          (update) => update.chapterId === attemptedChapterId
+        );
+        if (!snapshot) continue;
+        try {
+          await this.persistChapterEvents(
+            projectId,
+            attemptedChapterId,
+            snapshot.previousEvents
+          );
+        } catch (rollbackErr) {
+          rollbackErrors.push(
+            rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
+          );
+        }
+      }
+      if (rollbackErrors.length > 0) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new Error(`${message}; rollback failed: ${rollbackErrors.join('; ')}`);
+      }
+      throw err;
     }
-    await this.saveProject(updatedProject);
   }
 
   async deleteChapter(

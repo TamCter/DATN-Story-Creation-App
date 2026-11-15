@@ -603,7 +603,7 @@ const handleSaveNode = async () => {
     payload.time = chVal;
     payload.location = formLocation.trim();
     payload.impact = formImpact.trim();
-    payload.charactersInvolved = formCharactersInvolved.join(', ');
+    payload.charactersInvolved = JSON.stringify(formCharactersInvolved);
   }
 
   try {
@@ -1861,7 +1861,9 @@ return (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Nhân vật tham gia:</Text>
                                     <Text style={styles.detailItemVal}>
-                                      {selectedNode.charactersInvolved || selectedNode.characters}
+                                      {parseEventParticipants(
+                                        selectedNode.charactersInvolved || selectedNode.characters
+                                      ).join(', ')}
                                     </Text>
                                   </View>
                                 ) : null}
