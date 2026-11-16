@@ -181,6 +181,13 @@ function normalizeEventCharacters(events, characterNodes) {
         rawCharacters = event.charactersInvolved.split(/[,;\n]+/);
       }
     }
+    if (Array.isArray(event.characterStatusChanges)) {
+      rawCharacters.push(
+        ...event.characterStatusChanges
+          .map((change) => change?.characterName)
+          .filter((name) => typeof name === 'string')
+      );
+    }
     const involvedNames = [];
     const involvedKeys = new Set();
     for (const rawName of rawCharacters) {
@@ -516,6 +523,7 @@ async function generateChapterAndEvents(req, res, next) {
       .map((node) =>
         [
           node.name,
+          node.status && `trạng thái: ${node.status}`,
           node.role && `vai trò: ${node.role}`,
           node.sect && `môn phái: ${node.sect}`,
           node.desc && `mô tả: ${node.desc.slice(0, 180)}`,
@@ -555,6 +563,8 @@ QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN (BẮT BUỘC):
 - Ưu tiên nhân vật đã có trong danh sách ở trên và dùng chính xác tên của họ; đối chiếu vai trò/mô tả để chọn đúng người, không gán nhân vật không liên quan.
 - Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
 - Chỉ dùng mảng rỗng khi sự kiện thực sự không có nhân vật liên quan; nếu truyện đã có nhân vật thì mỗi sự kiện chính thông thường phải có ít nhất một nhân vật.
+- Mỗi sự kiện phải có "characterStatusChanges" là một mảng. Chỉ thêm nhân vật vào đây khi sự kiện trong chương làm thay đổi trạng thái thực sự của họ: dùng "Đã chết" khi họ chết thật sự trong diễn biến hiện tại, hoặc "Hồi sinh" khi họ được hồi sinh. Không đánh dấu chết vì tin đồn, giả chết, hồi tưởng, nguy cơ hay cách nói ẩn dụ. Không đưa nhân vật vào nếu trạng thái không đổi; dùng [] khi không có thay đổi.
+- Mỗi thay đổi phải có "characterName" (tên chính xác), "status" ("Đã chết" hoặc "Hồi sinh"), và "statusEvent" là tên sự kiện này. Nhân vật có thay đổi trạng thái phải có trong "charactersInvolved". Không tạo thay đổi trái với trạng thái hiện tại nếu mạch truyện không có sự kiện hồi sinh.
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
 BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
@@ -572,6 +582,13 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       "location": "<Tên địa điểm nơi diễn ra>",
       "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
       "charactersInvolved": ["<Tên chính xác nhân vật hiện có hoặc nhân vật mới có vai trò trực tiếp>", "<Tên nhân vật khác nếu có>"],
+      "characterStatusChanges": [
+        {
+          "characterName": "<Tên nhân vật có trạng thái thay đổi>",
+          "status": "Đã chết",
+          "statusEvent": "<Tên sự kiện này>"
+        }
+      ],
       "impact": "<Tác động hoặc hậu quả sau sự kiện>"
     }
   ]
@@ -623,6 +640,16 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
         (!('location' in event) || typeof event.location === 'string') &&
         (!('time' in event) || typeof event.time === 'string') &&
         (!('impact' in event) || typeof event.impact === 'string') &&
+        Array.isArray(event.characterStatusChanges) &&
+        event.characterStatusChanges.every((change) =>
+          change &&
+          typeof change === 'object' &&
+          !Array.isArray(change) &&
+          typeof change.characterName === 'string' &&
+          change.characterName.trim().length > 0 &&
+          ['Đã chết', 'Hồi sinh'].includes(change.status) &&
+          (!('statusEvent' in change) || typeof change.statusEvent === 'string')
+        ) &&
         (!('charactersInvolved' in event) ||
           typeof event.charactersInvolved === 'string' ||
           (Array.isArray(event.charactersInvolved) &&
@@ -637,7 +664,14 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       });
     }
 
-    const events = normalizeEventCharacters(parsedData.events, characterNodes);
+    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event) => ({
+      ...event,
+      characterStatusChanges: event.characterStatusChanges.map((change) => ({
+        ...change,
+        characterName: change.characterName.trim(),
+        statusEvent: event.name,
+      })),
+    }));
 
     return res.status(200).json({
       success: true,
@@ -695,6 +729,11 @@ async function generateChapterStory(req, res, next) {
         if (Array.isArray(ev.charactersInvolved) && ev.charactersInvolved.length > 0) {
           detail += `\n- Nhân vật tham gia: ${ev.charactersInvolved.join(', ')}`;
         }
+        if (Array.isArray(ev.characterStatusChanges) && ev.characterStatusChanges.length > 0) {
+          detail += `\n- Thay đổi trạng thái nhân vật: ${ev.characterStatusChanges
+            .map((change) => `${change.characterName}: ${change.status}`)
+            .join(', ')}`;
+        }
         return detail;
       })
       .join('\n\n');
@@ -703,6 +742,7 @@ async function generateChapterStory(req, res, next) {
     const nodesDetail = relatedNodes
       .map((n) => {
         let detail = `- [${(n.type || 'thực thể').toUpperCase()}] ${n.name}: ${n.desc || ''}`;
+        if (n.status) detail += ` | Trạng thái: ${n.status}`;
         if (n.role) detail += ` | Vai trò: ${n.role}`;
         if (n.sect) detail += ` | Môn phái: ${n.sect}`;
         if (n.weapon) detail += ` | Binh khí: ${n.weapon}`;
@@ -734,7 +774,8 @@ YÊU CẦU NGHỆ THUẬT KHI VIẾT CÂU CHUYỆN:
 3. Miêu tả cảnh quan, không khí, các chiêu thức võ công hoặc pháp bảo một cách hoa mỹ, kịch tính.
 4. Lồng ghép khéo léo và tự nhiên TOÀN BỘ các sự kiện đã nêu ở trên theo đúng trình tự thời gian.
 5. Đoạn kết chương đọng lại dư âm hoặc nút thắt bất ngờ để độc giả hồi hộp đón đọc chương sau.
-6. Trình bày văn bản rõ ràng, chia đoạn hợp lý. KHÔNG chèn lời mở đầu hay kết thúc của AI (ví dụ: "Dưới đây là...", "Hy vọng bạn thích..."), CHỈ trả về đúng nội dung câu chuyện của chương.`;
+6. Trình bày văn bản rõ ràng, chia đoạn hợp lý. KHÔNG chèn lời mở đầu hay kết thúc của AI (ví dụ: "Dưới đây là...", "Hy vọng bạn thích..."), CHỈ trả về đúng nội dung câu chuyện của chương.
+7. Nếu sự kiện có thay đổi trạng thái nhân vật, diễn biến trong truyện phải thể hiện đúng thay đổi đó; không tự ý để nhân vật đã chết tiếp tục hành động như còn sống hoặc tự ý thay đổi trạng thái khác với sự kiện.`;
 
     const messages = [
       {

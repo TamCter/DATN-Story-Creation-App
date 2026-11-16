@@ -92,6 +92,11 @@ export default function AIStoryGeneratorModal({
       location?: string;
       time?: string;
       charactersInvolved?: string[];
+      characterStatusChanges?: Array<{
+        characterName: string;
+        status: 'Đã chết' | 'Hồi sinh';
+        statusEvent?: string;
+      }>;
       impact?: string;
     }>
   >([]);
@@ -361,7 +366,13 @@ export default function AIStoryGeneratorModal({
             }
 
             const participants = parseEventParticipants(ev.charactersInvolved);
-            for (const charName of participants) {
+            const charactersToEnsure = [
+              ...new Set([
+                ...participants,
+                ...(ev.characterStatusChanges || []).map((change) => change.characterName),
+              ]),
+            ];
+            for (const charName of charactersToEnsure) {
               let existingChar = currentNodes.find(
                 (node) =>
                   node.type === 'character' &&
@@ -424,6 +435,29 @@ export default function AIStoryGeneratorModal({
             eventNode = await projectStore.ensureNodeSynced(project.id, eventNode.id);
             if (draftVersionRef.current !== saveDraftVersion) return;
             await projectStore.assignEventToChapter(project.id, targetChapterId, eventNode);
+            for (const change of ev.characterStatusChanges || []) {
+              const character = currentNodes.find(
+                (node) =>
+                  node.type === 'character' &&
+                  node.name.toLocaleLowerCase() === change.characterName.toLocaleLowerCase()
+              );
+              if (!character) {
+                throw new Error(`Không tìm thấy nhân vật "${change.characterName}"`);
+              }
+              const updatedCharacter = await projectStore.updateNode(
+                project.id,
+                character.id,
+                {
+                  status: change.status,
+                  statusEvent: eventNode.name,
+                },
+                { requireBackend: true }
+              );
+              const characterIndex = currentNodes.findIndex(
+                (node) => node.id === updatedCharacter.id
+              );
+              if (characterIndex !== -1) currentNodes[characterIndex] = updatedCharacter;
+            }
           } catch (nodeErr) {
             const detail = nodeErr instanceof Error ? nodeErr.message : String(nodeErr);
             throw new Error(`Không thể lưu sự kiện "${ev.name}": ${detail}`);
@@ -677,6 +711,13 @@ export default function AIStoryGeneratorModal({
                           {Boolean(ev.charactersInvolved?.length) && (
                             <Text style={styles.eventMetaTag}>
                               👤 {ev.charactersInvolved?.join(', ')}
+                            </Text>
+                          )}
+                          {Boolean(ev.characterStatusChanges?.length) && (
+                            <Text style={styles.eventMetaTag}>
+                              {ev.characterStatusChanges
+                                ?.map((change) => `${change.characterName}: ${change.status}`)
+                                .join(' · ')}
                             </Text>
                           )}
                         </View>
