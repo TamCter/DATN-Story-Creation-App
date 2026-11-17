@@ -408,6 +408,11 @@ class ApiService {
         location?: string;
         time?: string;
         charactersInvolved?: string[];
+        characterStatusChanges?: Array<{
+          characterName: string;
+          status: 'Đã chết' | 'Hồi sinh';
+          statusEvent?: string;
+        }>;
         impact?: string;
       }>;
       model?: string;
@@ -424,6 +429,11 @@ class ApiService {
           location?: string;
           time?: string;
           charactersInvolved?: string[];
+          characterStatusChanges?: Array<{
+            characterName: string;
+            status: 'Đã chết' | 'Hồi sinh';
+            statusEvent?: string;
+          }>;
           impact?: string;
         }>;
         model?: string;
