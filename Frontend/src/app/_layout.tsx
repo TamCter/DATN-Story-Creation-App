@@ -30,6 +30,13 @@ function AppNavigator() {
     }
   }, [isAuthenticated, isAuthScreen, isLoading, router]);
 
+  const canRenderStack =
+    !isLoading && (isAuthenticated ? !isAuthScreen : isAuthScreen);
+
+  if (!canRenderStack) {
+    return <View style={styles.navigationGuard} />;
+  }
+
   return (
     <View style={styles.container}>
       <Stack
@@ -54,11 +61,6 @@ function AppNavigator() {
         <Stack.Screen name="graph/items" />
         <Stack.Screen name="graph/links" />
       </Stack>
-      {(isLoading ||
-        (!isAuthenticated && !isAuthScreen) ||
-        (isAuthenticated && isAuthScreen)) && (
-        <View pointerEvents="auto" style={styles.navigationGuard} />
-      )}
     </View>
   );
 }
@@ -66,7 +68,7 @@ function AppNavigator() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   navigationGuard: {
-    ...StyleSheet.absoluteFill,
+    flex: 1,
     backgroundColor: '#0e0d0b',
   },
 });

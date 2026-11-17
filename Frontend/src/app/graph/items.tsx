@@ -1,6 +1,7 @@
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -180,6 +181,7 @@ export default function ItemsScreen() {
   const [newItemName, setNewItemName] = useState('');
   const [newItemRole, setNewItemRole] = useState('Vật phẩm');
   const [newItemDesc, setNewItemDesc] = useState('');
+  const [isCreatingItem, setIsCreatingItem] = useState(false);
 
   const filteredItems = useMemo(() => {
     return items.filter((item) => {
@@ -199,11 +201,9 @@ export default function ItemsScreen() {
     });
   }, [items, searchQuery, selectedFilter]);
 
-  const handleAddItem = () => {
+  const handleAddItem = async () => {
     if (!newItemName.trim()) return;
-    const newId = `item-${Date.now()}`;
-    const newItem: StoryNode = {
-      id: newId,
+    const newItem: Omit<StoryNode, 'id'> = {
       name: newItemName.trim(),
       type: 'item',
       role: newItemRole.trim() || 'Vật phẩm',
@@ -213,11 +213,25 @@ export default function ItemsScreen() {
       y: 420,
     };
 
-    setItems((prev) => [...prev, newItem]);
-    setAddModalOpen(false);
-    setNewItemName('');
-    setNewItemRole('Vật phẩm');
-    setNewItemDesc('');
+    setIsCreatingItem(true);
+    try {
+      const createdItem = await projectStore.createNode(projectId, newItem);
+      setItems((prev) => [...prev, createdItem]);
+      setCurrentProject((prev) => ({
+        ...prev,
+        nodes: [...prev.nodes.filter((node) => node.id !== createdItem.id), createdItem],
+      }));
+      setAddModalOpen(false);
+      setNewItemName('');
+      setNewItemRole('Vật phẩm');
+      setNewItemDesc('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể tạo vật phẩm.';
+      if (Platform.OS === 'web') window.alert(message);
+      else Alert.alert('Lỗi', message);
+    } finally {
+      setIsCreatingItem(false);
+    }
   };
 
   return (
@@ -579,13 +593,17 @@ export default function ItemsScreen() {
             <View style={styles.modalActionRow}>
               <Pressable
                 style={styles.modalCancelBtn}
-                onPress={() => setAddModalOpen(false)}>
+                onPress={() => setAddModalOpen(false)}
+                disabled={isCreatingItem}>
                 <Text style={styles.modalCancelText}>Hủy</Text>
               </Pressable>
               <Pressable
-                style={styles.modalSubmitBtn}
-                onPress={handleAddItem}>
-                <Text style={styles.modalSubmitText}>Thêm vật phẩm</Text>
+                style={[styles.modalSubmitBtn, isCreatingItem && { opacity: 0.6 }]}
+                onPress={handleAddItem}
+                disabled={isCreatingItem}>
+                <Text style={styles.modalSubmitText}>
+                  {isCreatingItem ? 'Đang thêm...' : 'Thêm vật phẩm'}
+                </Text>
               </Pressable>
             </View>
           </View>

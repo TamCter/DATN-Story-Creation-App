@@ -362,7 +362,7 @@ useEffect(() => {
 useEffect(() => {
   if (!focusedNodeId || isLoading) return;
   graphRef.current?.focusNode(focusedNodeId);
-}, [focusedNodeId, isLoading]);
+}, [focusedNodeId, isLoading, filteredNodes, filteredLinks]);
 
 const handleZoomIn = () => {
   graphRef.current?.zoomIn();

@@ -441,7 +441,10 @@ export default function LinksScreen() {
                   styles.filterChip,
                   isSelected && styles.filterChipSelected,
                 ]}
-                onPress={() => setSelectedCategory(item.id)}>
+                onPress={() => {
+                  setSelectedCategory(item.id);
+                  if (item.id === 'all') setSelectedEntityFilter('all');
+                }}>
                 <Text
                   style={[
                     styles.filterChipText,

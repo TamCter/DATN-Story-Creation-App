@@ -9,7 +9,7 @@ import {
 } from '@/constants/story-data';
 import { api, ApiError } from '@/services/api';
 
-const CUSTOM_PROJECTS_KEY = '@story_app_custom_projects';
+const CUSTOM_PROJECTS_KEY_PREFIX = '@story_app_custom_projects_';
 const PROJECT_CACHE_PREFIX = '@story_app_project_cache_';
 
 function getEventNodesForChapter(project: StoryProject, chapter: StoryChapter): StoryNode[] {
@@ -30,6 +30,8 @@ function getReplacementChapter(
 
 export class ProjectStore {
   private memoryProjects: Map<string, StoryProject> = new Map();
+  private accountId: string | null = null;
+  private accountVersion = 0;
   private projectVersions: Map<string, number> = new Map();
   private graphRequestVersions: Map<string, number> = new Map();
   private chapterMutationTails: Map<string, Promise<void>> = new Map();
@@ -39,6 +41,32 @@ export class ProjectStore {
     for (const p of INITIAL_PROJECTS) {
       this.memoryProjects.set(p.id, { ...p });
     }
+  }
+
+  setAccountId(accountId: string | null): void {
+    const nextAccountId = accountId?.trim() || null;
+    if (this.accountId === nextAccountId) return;
+
+    this.accountId = nextAccountId;
+    this.accountVersion += 1;
+    this.memoryProjects.clear();
+    this.projectVersions.clear();
+    this.graphRequestVersions.clear();
+    for (const project of INITIAL_PROJECTS) {
+      this.memoryProjects.set(project.id, { ...project });
+    }
+  }
+
+  private getLocalProjectsKey(accountId: string | null): string | null {
+    return accountId
+      ? `${CUSTOM_PROJECTS_KEY_PREFIX}${encodeURIComponent(accountId)}`
+      : null;
+  }
+
+  private getProjectCacheKey(projectId: string, accountId: string | null): string | null {
+    return accountId
+      ? `${PROJECT_CACHE_PREFIX}${encodeURIComponent(accountId)}_${encodeURIComponent(projectId)}`
+      : null;
   }
 
   private async withSerializedChapterMutations<T>(
@@ -68,8 +96,13 @@ export class ProjectStore {
    * Lấy toàn bộ danh sách dự án
    */
   async getProjects(): Promise<StoryProject[]> {
+    const accountId = this.accountId;
+    const accountVersion = this.accountVersion;
+    if (!accountId) return [];
+
     try {
       const res = await api.getProjects();
+      if (this.accountVersion !== accountVersion) return [];
       if (res.success && Array.isArray(res.data)) {
         // Lưu cache các dự án từ server
         for (const item of res.data) {
@@ -87,7 +120,8 @@ export class ProjectStore {
       // Backend không phản hồi, dùng cache / local
     }
 
-    const localProjects = await this.getLocalProjects();
+    const localProjects = await this.getLocalProjects(accountId);
+    if (this.accountVersion !== accountVersion) return [];
     if (localProjects.length > 0) {
       return localProjects;
     }
@@ -103,6 +137,9 @@ export class ProjectStore {
     projectId: string,
     options: { preferCache?: boolean } = {}
   ): Promise<StoryProject> {
+    const accountId = this.accountId;
+    const accountVersion = this.accountVersion;
+
     if (options.preferCache && this.memoryProjects.has(projectId)) {
       const cached = this.memoryProjects.get(projectId)!;
       return {
@@ -114,7 +151,10 @@ export class ProjectStore {
     }
 
     if (options.preferCache) {
-      const cached = await this.getCachedProjectLocally(projectId);
+      const cached = await this.getCachedProjectLocally(projectId, accountId);
+      if (this.accountVersion !== accountVersion) {
+        throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+      }
       if (cached) {
         this.memoryProjects.set(projectId, cached);
         return cached;
@@ -130,7 +170,10 @@ export class ProjectStore {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
         let latestLocalProject =
-          this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+          this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId, accountId));
+        if (this.accountVersion !== accountVersion) {
+          throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+        }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
           (this.projectVersions.get(projectId) || 0) !== requestVersion
@@ -179,21 +222,30 @@ export class ProjectStore {
           chapters: mergedChapters,
         };
         this.memoryProjects.set(projectId, fullProject);
-        await this.cacheProjectLocally(fullProject);
+        await this.cacheProjectLocally(fullProject, accountId);
+        if (this.accountVersion !== accountVersion) {
+          throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+        }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
           (this.projectVersions.get(projectId) || 0) !== requestVersion
         ) {
           latestLocalProject =
-            this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+            this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId, accountId));
           if (latestLocalProject) {
-            await this.cacheProjectLocally(latestLocalProject);
+            await this.cacheProjectLocally(latestLocalProject, accountId);
+            if (this.accountVersion !== accountVersion) {
+              throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+            }
             return latestLocalProject;
           }
         }
         return fullProject;
       }
     } catch {
+      if (this.accountVersion !== accountVersion) {
+        throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+      }
       // Bỏ qua lỗi mạng, chuyển sang lấy từ cache / local storage
     }
 
@@ -205,7 +257,10 @@ export class ProjectStore {
     }
 
     // 3. Kiểm tra Local Storage (AsyncStorage)
-    const cached = await this.getCachedProjectLocally(projectId);
+    const cached = await this.getCachedProjectLocally(projectId, accountId);
+    if (this.accountVersion !== accountVersion) {
+      throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+    }
     if (cached) {
       this.memoryProjects.set(projectId, cached);
       return cached;
@@ -239,22 +294,30 @@ export class ProjectStore {
    * Lưu hoặc cập nhật một dự án
    */
   async saveProject(project: StoryProject): Promise<void> {
+    const accountId = this.accountId;
+    if (!accountId) {
+      throw new Error('Cần đăng nhập trước khi lưu dự án.');
+    }
+
     this.projectVersions.set(
       project.id,
       (this.projectVersions.get(project.id) || 0) + 1
     );
     this.memoryProjects.set(project.id, { ...project });
-    await this.cacheProjectLocally(project);
+    await this.cacheProjectLocally(project, accountId);
 
     // Cập nhật danh sách local projects
-    const locals = await this.getLocalProjects();
+    const locals = await this.getLocalProjects(accountId);
     const idx = locals.findIndex((p) => p.id === project.id);
     if (idx >= 0) {
       locals[idx] = { ...locals[idx], ...project };
     } else {
       locals.unshift(project);
     }
-    await AsyncStorage.setItem(CUSTOM_PROJECTS_KEY, JSON.stringify(locals));
+    const localProjectsKey = this.getLocalProjectsKey(accountId);
+    if (localProjectsKey) {
+      await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
+    }
   }
 
   /**
@@ -529,6 +592,9 @@ export class ProjectStore {
         Object.assign(newLink, res.data);
       }
     } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể lưu link lên Backend, lưu tạm local:', err);
     }
 
@@ -550,6 +616,9 @@ export class ProjectStore {
     try {
       await api.deleteLink(linkId);
     } catch (err) {
+      if (err instanceof ApiError) {
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể xóa link trên Backend, xóa local:', err);
     }
 
@@ -559,27 +628,39 @@ export class ProjectStore {
     await this.saveProject(project);
   }
 
-  private async getLocalProjects(): Promise<StoryProject[]> {
+  private async getLocalProjects(accountId: string | null): Promise<StoryProject[]> {
+    const key = this.getLocalProjectsKey(accountId);
+    if (!key) return [];
+
     try {
-      const raw = await AsyncStorage.getItem(CUSTOM_PROJECTS_KEY);
+      const raw = await AsyncStorage.getItem(key);
       return raw ? JSON.parse(raw) : [];
     } catch {
       return [];
     }
   }
 
-  private async cacheProjectLocally(project: StoryProject): Promise<void> {
+  private async cacheProjectLocally(
+    project: StoryProject,
+    accountId: string | null
+  ): Promise<void> {
+    const key = this.getProjectCacheKey(project.id, accountId);
+    if (!key) return;
+
     try {
-      await AsyncStorage.setItem(
-        `${PROJECT_CACHE_PREFIX}${project.id}`,
-        JSON.stringify(project)
-      );
+      await AsyncStorage.setItem(key, JSON.stringify(project));
     } catch {}
   }
 
-  private async getCachedProjectLocally(projectId: string): Promise<StoryProject | null> {
+  private async getCachedProjectLocally(
+    projectId: string,
+    accountId: string | null
+  ): Promise<StoryProject | null> {
+    const key = this.getProjectCacheKey(projectId, accountId);
+    if (!key) return null;
+
     try {
-      const raw = await AsyncStorage.getItem(`${PROJECT_CACHE_PREFIX}${projectId}`);
+      const raw = await AsyncStorage.getItem(key);
       return raw ? JSON.parse(raw) : null;
     } catch {
       return null;
@@ -590,11 +671,20 @@ export class ProjectStore {
    * Lấy danh sách Chapter của một dự án
    */
   async getChapters(projectId: string): Promise<StoryChapter[]> {
+    const accountId = this.accountId;
+    const accountVersion = this.accountVersion;
     try {
       const res = await api.getChapters(projectId);
+      if (this.accountVersion !== accountVersion) {
+        throw new Error('Tài khoản đã thay đổi trong lúc tải chương.');
+      }
       if (res.success && Array.isArray(res.data) && res.data.length > 0) {
         const locallyCachedProject =
-          this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId));
+          this.memoryProjects.get(projectId) ||
+          (await this.getCachedProjectLocally(projectId, accountId));
+        if (this.accountVersion !== accountVersion) {
+          throw new Error('Tài khoản đã thay đổi trong lúc tải chương.');
+        }
         const pendingChapters = (locallyCachedProject?.chapters || []).filter(
           (chapter) => chapter.syncStatus === 'pending'
         );
@@ -605,7 +695,11 @@ export class ProjectStore {
           ),
         ];
       }
-    } catch {}
+    } catch {
+      if (this.accountVersion !== accountVersion) {
+        throw new Error('Tài khoản đã thay đổi trong lúc tải chương.');
+      }
+    }
     const project = await this.getProject(projectId);
     return project.chapters || [];
   }

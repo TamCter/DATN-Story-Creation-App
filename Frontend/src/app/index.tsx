@@ -341,7 +341,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
-                    key={`password-${showPassword}-${tab}`}
+                    key={`password-${tab}`}
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}
@@ -366,7 +366,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'confirmPassword' && styles.inputWrapperFocused]}>
                   <TextInput
-                    key={`confirm-password-${showConfirmPassword}-${tab}`}
+                    key={`confirm-password-${tab}`}
                     style={styles.textInputWithIcon}
                     value={confirmPassword}
                     onChangeText={(val) =>
@@ -411,7 +411,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
-                    key={`password-${showPassword}-${tab}`}
+                    key={`password-${tab}`}
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}

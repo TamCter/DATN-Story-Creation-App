@@ -126,7 +126,8 @@ export default function CharactersScreen() {
         !q ||
         c.name.toLowerCase().includes(q) ||
         c.desc.toLowerCase().includes(q) ||
-        c.role.toLowerCase().includes(q);
+        c.role.toLowerCase().includes(q) ||
+        (c.subType?.toLowerCase().includes(q) ?? false);
 
       if (!matchesSearch) return false;
       if (selectedRole === 'main' && !MAIN_ROLES.has(c.role)) return false;

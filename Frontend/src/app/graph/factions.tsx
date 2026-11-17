@@ -1,6 +1,7 @@
 import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -168,6 +169,7 @@ export default function FactionsScreen() {
   const [newFactionAlignment, setNewFactionAlignment] = useState<FactionAlignment>('ĐỒNG MINH');
   const [newFactionLeader, setNewFactionLeader] = useState('');
   const [newFactionDesc, setNewFactionDesc] = useState('');
+  const [isCreatingFaction, setIsCreatingFaction] = useState(false);
 
   const filteredFactions = useMemo(() => {
     return factions.filter((f) => {
@@ -195,35 +197,35 @@ export default function FactionsScreen() {
     return counts;
   }, [factions]);
 
-  const handleCreateFaction = () => {
+  const handleCreateFaction = async () => {
     if (!newFactionName.trim()) return;
-    const newId = `faction-${Date.now()}`;
-    const newFaction: StoryNode = {
-      id: newId,
+    const newFaction: Omit<StoryNode, 'id'> = {
       name: newFactionName.trim(),
       type: 'faction',
       role: newFactionAlignment,
       subType: newFactionAlignment,
       desc: newFactionDesc.trim() || 'Một tổ chức mới trong câu chuyện.',
+      leader: newFactionLeader.trim(),
       x: 200,
       y: 300,
     };
 
-    if (newFactionLeader.trim()) {
-      FACTION_EXTRAS[newId] = {
-        leader: newFactionLeader.trim(),
-        headquarters: 'Chưa xác định',
-        motto: 'Chưa có thông tin',
-        alignment: newFactionAlignment,
-        relations: [],
-      };
+    setIsCreatingFaction(true);
+    try {
+      const createdFaction = await projectStore.createNode(projectId, newFaction);
+      setFactions((prev) => [...prev, createdFaction]);
+      setCurrentProject(await projectStore.getProject(projectId, { preferCache: true }));
+      setAddModalOpen(false);
+      setNewFactionName('');
+      setNewFactionLeader('');
+      setNewFactionDesc('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể tạo tổ chức.';
+      if (Platform.OS === 'web') window.alert(message);
+      else Alert.alert('Lỗi', message);
+    } finally {
+      setIsCreatingFaction(false);
     }
-
-    setFactions((prev) => [...prev, newFaction]);
-    setAddModalOpen(false);
-    setNewFactionName('');
-    setNewFactionLeader('');
-    setNewFactionDesc('');
   };
 
   return (
@@ -581,13 +583,17 @@ export default function FactionsScreen() {
             <View style={styles.modalActionRow}>
               <Pressable
                 style={styles.modalCancelBtn}
-                onPress={() => setAddModalOpen(false)}>
+                onPress={() => setAddModalOpen(false)}
+                disabled={isCreatingFaction}>
                 <Text style={styles.modalCancelText}>Hủy</Text>
               </Pressable>
               <Pressable
-                style={styles.modalSubmitBtn}
-                onPress={handleCreateFaction}>
-                <Text style={styles.modalSubmitText}>Tạo thế lực</Text>
+                style={[styles.modalSubmitBtn, isCreatingFaction && { opacity: 0.6 }]}
+                onPress={handleCreateFaction}
+                disabled={isCreatingFaction}>
+                <Text style={styles.modalSubmitText}>
+                  {isCreatingFaction ? 'Đang tạo...' : 'Tạo tổ chức'}
+                </Text>
               </Pressable>
             </View>
           </View>

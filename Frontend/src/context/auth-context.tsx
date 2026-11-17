@@ -10,6 +10,7 @@ import React, {
 import { Platform } from 'react-native';
 
 import { api, AuthUser } from '@/services/api';
+import { projectStore } from '@/services/project-store';
 
 const TOKEN_KEY = 'story_app_auth_token';
 const USER_KEY = '@story_app_auth_user';
@@ -82,6 +83,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             parsedUser.id === 'user-guest-demo' ||
             parsedUser.email?.toLowerCase() === 'guest@storyapp.vn'
           ) {
+            projectStore.setAccountId(null);
             api.setToken(null);
             await Promise.all([
               removeStoredToken(),
@@ -90,6 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             return;
           }
 
+          projectStore.setAccountId(parsedUser.id);
           setToken(savedToken);
           setUser(parsedUser);
           api.setToken(savedToken);
@@ -108,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (status === 401 || status === 403) {
               setToken(null);
               setUser(null);
+              projectStore.setAccountId(null);
               api.setToken(null);
               await Promise.all([
                 removeStoredToken(),
@@ -127,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveSession = async (newToken: string, newUser: AuthUser) => {
+    projectStore.setAccountId(newUser.id);
     setToken(newToken);
     setUser(newUser);
     api.setToken(newToken);
@@ -183,6 +188,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = async () => {
+    projectStore.setAccountId(null);
     setToken(null);
     setUser(null);
     api.setToken(null);
