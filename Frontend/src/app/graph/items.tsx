@@ -21,6 +21,7 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 interface FragmentItem {
   id: string;
@@ -128,6 +129,7 @@ function hasFragments(item: StoryNode): boolean {
 export default function ItemsScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -229,8 +231,8 @@ export default function ItemsScreen() {
               styles.backBtn,
               pressed && styles.backBtnPressed,
             ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Vật phẩm</Text>
@@ -589,6 +591,12 @@ export default function ItemsScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="items"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }

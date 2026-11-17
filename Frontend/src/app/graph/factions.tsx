@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Modal,
@@ -21,6 +21,7 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 interface FactionExtendedData {
   leader?: string;
@@ -88,6 +89,28 @@ const FACTION_EXTRAS: Record<string, FactionExtendedData> = {
   },
 };
 
+function getFactionLeader(faction: StoryNode, project: StoryProject): string | undefined {
+  const leaderLink = project.links.find(
+    (link) => link.category === 'LEADER_OF' && link.target === faction.id
+  );
+  return (
+    faction.leader ||
+    project.nodes.find((node) => node.id === leaderLink?.source)?.name ||
+    FACTION_EXTRAS[faction.id]?.leader
+  );
+}
+
+function getFactionHeadquarters(faction: StoryNode, project: StoryProject): string | undefined {
+  const headquartersLink = project.links.find(
+    (link) => link.category === 'HEADQUARTERS' && link.source === faction.id
+  );
+  return (
+    faction.headquarters ||
+    project.nodes.find((node) => node.id === headquartersLink?.target)?.name ||
+    FACTION_EXTRAS[faction.id]?.headquarters
+  );
+}
+
 export default function FactionsScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
@@ -113,24 +136,28 @@ export default function FactionsScreen() {
     currentProject.nodes.filter((n) => n.type === 'faction')
   );
 
-  useEffect(() => {
-    let isMounted = true;
-    async function load() {
-      try {
-        const proj = await projectStore.getProject(projectId);
-        if (isMounted) {
-          setCurrentProject(proj);
-          setFactions(proj.nodes.filter((n) => n.type === 'faction'));
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isFocused = true;
+      async function load() {
+        try {
+          const proj = await projectStore.getProject(projectId);
+          if (isFocused) {
+            setCurrentProject(proj);
+            setFactions(proj.nodes.filter((n) => n.type === 'faction'));
+          }
+        } catch (err) {
+          console.warn('Lỗi tải danh sách tổ chức:', err);
         }
-      } catch (err) {
-        console.warn('Lỗi tải danh sách tổ chức:', err);
       }
-    }
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId]);
+      void load();
+      return () => {
+        isFocused = false;
+      };
+    }, [projectId])
+  );
   const [selectedAlignment, setSelectedAlignment] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [activeFactionDetail, setActiveFactionDetail] = useState<StoryNode | null>(null);
@@ -144,17 +171,16 @@ export default function FactionsScreen() {
 
   const filteredFactions = useMemo(() => {
     return factions.filter((f) => {
-      const extra = FACTION_EXTRAS[f.id];
       const matchesAlignment = selectedAlignment === 'all' || getFactionAlignment(f) === selectedAlignment;
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !q ||
         f.name.toLowerCase().includes(q) ||
         f.desc.toLowerCase().includes(q) ||
-        (extra?.leader && extra.leader.toLowerCase().includes(q));
+        (getFactionLeader(f, currentProject)?.toLowerCase().includes(q) ?? false);
       return matchesAlignment && matchesSearch;
     });
-  }, [factions, selectedAlignment, searchQuery]);
+  }, [currentProject, factions, selectedAlignment, searchQuery]);
 
   const alignmentCounts = useMemo(() => {
     const counts: Record<FactionAlignment, number> = {
@@ -207,12 +233,9 @@ export default function FactionsScreen() {
         <View style={styles.headerLeftGroup}>
           <Pressable
             hitSlop={12}
-            style={({ pressed }) => [
-              styles.backBtn,
-              pressed && styles.backBtnPressed,
-            ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Tổ chức</Text>
@@ -287,10 +310,13 @@ export default function FactionsScreen() {
         {/* Faction Cards List */}
         <View style={styles.cardsContainer}>
           {filteredFactions.map((faction) => {
-            const extra = FACTION_EXTRAS[faction.id] || {
-              leader: 'Chưa cập nhật',
-              headquarters: 'Chưa cập nhật',
-              relations: [],
+            const staticExtra = FACTION_EXTRAS[faction.id];
+            const extra = {
+              ...staticExtra,
+              leader: getFactionLeader(faction, currentProject) || 'Chưa cập nhật',
+              headquarters: getFactionHeadquarters(faction, currentProject) || 'Chưa cập nhật',
+              motto: faction.motto || staticExtra?.motto,
+              relations: staticExtra?.relations || [],
             };
             const factionLinks = currentProject.links.filter(
               (link) => link.source === faction.id || link.target === faction.id
@@ -462,6 +488,13 @@ export default function FactionsScreen() {
           )}
         </View>
       </ScrollView>
+
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="factions"
+        onClose={() => setSidebarVisible(false)}
+      />
 
       {/* Add Faction Modal */}
       <Modal visible={addModalOpen} transparent animationType="slide">

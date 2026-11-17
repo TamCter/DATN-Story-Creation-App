@@ -38,7 +38,7 @@ function AppNavigator() {
           contentStyle: { backgroundColor: '#0e0d0b' },
           animation: Platform.OS === 'web' ? 'none' : 'slide_from_right',
           animationDuration: 220,
-          freezeOnBlur: false,
+          freezeOnBlur: true,
           gestureEnabled: true,
           fullScreenGestureEnabled: true,
         }}>

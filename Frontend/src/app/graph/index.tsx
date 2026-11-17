@@ -1,4 +1,4 @@
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GraphWebView, GraphWebViewRef } from '@/components/graph/GraphWebView';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 
 import {
@@ -962,157 +963,12 @@ return (
                 )}
               </View>
 
-              {/* Left Drawer / Sidebar Menu */ }
-              <Modal visible={drawerOpen} transparent animationType="none">
-                <View style={styles.drawerBackdrop}>
-                  <Pressable
-                    style={styles.drawerBackdropClickable}
-                    onPress={() => setDrawerOpen(false)}
-                  />
-
-                  <View style={styles.drawerContainer}>
-                    <ScrollView
-                      contentContainerStyle={styles.drawerScroll}
-                      showsVerticalScrollIndicator={false}>
-                      <View style={styles.drawerHeader}>
-                        <Text style={styles.drawerHeaderSub}>DỰ ÁN</Text>
-                        <Text style={styles.drawerProjectTitle}>{currentProject.title}</Text>
-                        <Text style={styles.drawerProjectGenre}>{currentProject.genre}</Text>
-                      </View>
-
-                      <View style={styles.drawerDivider} />
-
-                      <View style={styles.menuItemsList}>
-                        {[
-                          {
-                            num: '01',
-                            title: 'Bản đồ node',
-                            sub: 'Màn hình đồ thị',
-                            active: true,
-                          },
-                          {
-                            num: '02',
-                            title: 'Chi tiết node',
-                            sub: 'Danh sách các node',
-                            badge: `${nodes.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/nodes' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '03',
-                            title: 'Chi tiết chương',
-                            sub: 'Dòng thời gian & sự kiện',
-                            badge: `${chapters.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/events' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '04',
-                            title: 'Địa điểm',
-                            badge: `${nodes.filter((n) => n.type === 'location').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/locations' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '05',
-                            title: 'Nhân vật',
-                            badge: `${nodes.filter((n) => n.type === 'character').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/characters' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '06',
-                            title: 'Tổ chức',
-                            badge: `${nodes.filter((n) => n.type === 'faction').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/factions' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '07',
-                            title: 'Vật phẩm',
-                            badge: `${nodes.filter((n) => n.type === 'item').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/items' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '08',
-                            title: 'Mối liên kết',
-                            sub: 'Tất cả cạnh',
-                            badge: `${links.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/links' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                        ].map((item) => (
-                          <Pressable
-                            key={item.num}
-                            style={[styles.drawerMenuItem, item.active && styles.drawerMenuItemActive]}
-                            onPress={() => {
-                              if (item.onPress) item.onPress();
-                              else setDrawerOpen(false);
-                            }}>
-                            <Text style={[styles.menuNum, item.active && styles.menuNumActive]}>
-                              {item.num}
-                            </Text>
-                            <View style={styles.menuTitleBox}>
-                              <Text style={[styles.menuTitle, item.active && styles.menuTitleActive]}>
-                                {item.title}
-                              </Text>
-                              {item.sub && <Text style={styles.menuSub}>{item.sub}</Text>}
-                            </View>
-                            {item.badge && <Text style={styles.menuBadgeText}>{item.badge}</Text>}
-                          </Pressable>
-                        ))}
-                      </View>
-
-                      <View style={styles.drawerDivider} />
-
-                      <Pressable
-                        style={styles.drawerBackBtn}
-                        onPress={() => {
-                          setDrawerOpen(false);
-                          router.push('/projects' as any);
-                        }}>
-                        <Text style={styles.drawerBackText}>〈 Về danh sách dự án</Text>
-                      </Pressable>
-                    </ScrollView>
-                  </View>
-                </View>
-              </Modal>
+              <GraphSidebar
+                visible={drawerOpen}
+                project={{ ...currentProject, nodes, links }}
+                activeSection="graph"
+                onClose={() => setDrawerOpen(false)}
+              />
 
               {/* Dynamic Add / Edit Node Modal */ }
               <Modal visible={nodeModalOpen} transparent animationType="slide">
@@ -2372,117 +2228,6 @@ return (
         color: '#e05252',
       fontSize: 12,
       fontWeight: '600',
-  },
-      drawerBackdrop: {
-        flex: 1,
-      flexDirection: 'row',
-      backgroundColor: 'rgba(0, 0, 0, 0.65)',
-  },
-      drawerBackdropClickable: {
-        position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      right: 0,
-  },
-      drawerContainer: {
-        width: '78%',
-      maxWidth: 340,
-      height: '100%',
-      backgroundColor: '#13110e',
-      borderRightWidth: 1,
-      borderRightColor: '#6a5323',
-  },
-      drawerScroll: {
-        paddingHorizontal: 20,
-      paddingTop: 36,
-      paddingBottom: 40,
-  },
-      drawerHeader: {
-        marginBottom: 16,
-  },
-      drawerHeaderSub: {
-        fontSize: 10.5,
-      letterSpacing: 3,
-      color: '#a88137',
-      fontWeight: '700',
-      fontFamily: AppFonts.mono,
-      marginBottom: 8,
-  },
-      drawerProjectTitle: {
-        fontSize: 24,
-      color: ThemeColors.textPrimary,
-      fontFamily: AppFonts.serif,
-      fontWeight: '700',
-      lineHeight: 30,
-  },
-      drawerProjectGenre: {
-        fontSize: 12.5,
-      color: '#7a7263',
-      marginTop: 4,
-      fontFamily: AppFonts.sans,
-  },
-      drawerDivider: {
-        height: 1,
-      backgroundColor: '#26221a',
-      marginVertical: 14,
-  },
-      menuItemsList: {
-        gap: 4,
-  },
-      drawerMenuItem: {
-        flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 10,
-      borderRadius: 6,
-  },
-      drawerMenuItemActive: {
-        backgroundColor: 'rgba(229,169,60,0.1)',
-  },
-      menuNum: {
-        fontSize: 11,
-      fontFamily: AppFonts.mono,
-      color: '#6b6455',
-      width: 28,
-  },
-      menuNumActive: {
-        color: '#db9d33',
-      fontWeight: '700',
-  },
-      menuTitleBox: {
-        flex: 1,
-  },
-      menuTitle: {
-        fontSize: 14.5,
-      fontWeight: '600',
-      color: '#c2b9aa',
-      fontFamily: AppFonts.sans,
-  },
-      menuTitleActive: {
-        color: '#db9d33',
-      fontWeight: '700',
-  },
-      menuSub: {
-        fontSize: 11,
-      color: '#665f52',
-      marginTop: 2,
-      fontFamily: AppFonts.sans,
-  },
-      menuBadgeText: {
-        fontSize: 12,
-      color: '#8f887b',
-      fontFamily: AppFonts.mono,
-  },
-      drawerBackBtn: {
-        paddingVertical: 14,
-      paddingHorizontal: 8,
-  },
-      drawerBackText: {
-        fontSize: 13.5,
-      color: '#a88137',
-      fontWeight: '600',
-      fontFamily: AppFonts.sans,
   },
       modalOverlay: {
         flex: 1,

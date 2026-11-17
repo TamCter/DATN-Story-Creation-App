@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -19,6 +19,7 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 interface CharacterExtra {
   title: string;
@@ -91,21 +92,25 @@ export default function CharactersScreen() {
     );
   });
 
-  useEffect(() => {
-    let isMounted = true;
-    async function load() {
-      try {
-        const proj = await projectStore.getProject(projectId);
-        if (isMounted) setCurrentProject(proj);
-      } catch (err) {
-        console.warn('Lỗi tải nhân vật:', err);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isFocused = true;
+      async function load() {
+        try {
+          const proj = await projectStore.getProject(projectId);
+          if (isFocused) setCurrentProject(proj);
+        } catch (err) {
+          console.warn('Lỗi tải nhân vật:', err);
+        }
       }
-    }
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId]);
+      void load();
+      return () => {
+        isFocused = false;
+      };
+    }, [projectId])
+  );
 
   const characters = useMemo(() => {
     return currentProject.nodes.filter((n) => n.type === 'character');
@@ -139,17 +144,14 @@ export default function CharactersScreen() {
         <View style={styles.headerLeftGroup}>
           <Pressable
             hitSlop={12}
-            style={({ pressed }) => [
-              styles.backBtn,
-              pressed && styles.backBtnPressed,
-            ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Nhân vật</Text>
             <Text style={styles.headerSubtitle}>
-              {currentProject.title} · {characters.length} ANH HÙNG HÀO KIỆT
+              {currentProject.title} · {characters.length} NHÂN VẬT
             </Text>
           </View>
         </View>
@@ -158,30 +160,6 @@ export default function CharactersScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {/* World Characters Banner */}
-        <View style={styles.statsBanner}>
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
-              {characters.length}
-            </Text>
-            <Text style={styles.statLabel}>NHÂN VẬT</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
-              {characters.filter((c) => MAIN_ROLES.has(c.role)).length}
-            </Text>
-            <Text style={styles.statLabel}>CHÍNH DIỆN</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e05252' }]}>
-              {characters.filter((c) => c.role === 'PHẢN DIỆN').length}
-            </Text>
-            <Text style={styles.statLabel}>PHẢN DIỆN</Text>
-          </View>
-        </View>
-
         {/* Search */}
         <View style={styles.searchBarContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
@@ -202,10 +180,22 @@ export default function CharactersScreen() {
         {/* Filter chips */}
         <View style={styles.filterRow}>
           {[
-            { id: 'all', label: `Tất cả (${characters.length})` },
-            { id: 'main', label: 'Chính diện' },
-            { id: 'ally', label: 'Đồng hành' },
-            { id: 'villain', label: 'Phản diện' },
+            { id: 'all', label: 'Tất cả', count: characters.length },
+            {
+              id: 'main',
+              label: 'Chính diện',
+              count: characters.filter((c) => MAIN_ROLES.has(c.role)).length,
+            },
+            {
+              id: 'ally',
+              label: 'Đồng hành',
+              count: characters.filter((c) => c.role === 'ĐỒNG HÀNH').length,
+            },
+            {
+              id: 'villain',
+              label: 'Phản diện',
+              count: characters.filter((c) => c.role === 'PHẢN DIỆN').length,
+            },
           ].map((item) => {
             const isSelected = selectedRole === item.id;
             return (
@@ -221,7 +211,7 @@ export default function CharactersScreen() {
                     styles.filterChipText,
                     isSelected && styles.filterChipTextSelected,
                   ]}>
-                  {item.label}
+                  {item.label} ({item.count})
                 </Text>
               </Pressable>
             );
@@ -381,6 +371,13 @@ export default function CharactersScreen() {
           })}
         </View>
       </ScrollView>
+
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="characters"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -447,38 +444,6 @@ const styles = StyleSheet.create({
     maxWidth: 580,
     width: '100%',
     alignSelf: 'center',
-  },
-  statsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: '#14120e',
-    borderWidth: 1,
-    borderColor: '#252119',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  statBox: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    fontFamily: AppFonts.mono,
-  },
-  statLabel: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: '#7a7263',
-    fontFamily: AppFonts.mono,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#252119',
   },
   searchBarContainer: {
     flexDirection: 'row',

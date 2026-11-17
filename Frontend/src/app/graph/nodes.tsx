@@ -37,6 +37,7 @@ import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ export default function NodesDetailScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
   const initialType = (params.type as string) || 'all';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -376,8 +378,8 @@ export default function NodesDetailScreen() {
           <Pressable
             hitSlop={12}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Chi tiết node</Text>
@@ -1099,6 +1101,12 @@ export default function NodesDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={{ ...currentProject, nodes, links: currentProject.links || [] }}
+        activeSection="nodes"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }
