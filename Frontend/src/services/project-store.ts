@@ -589,9 +589,9 @@ export class ProjectStore {
     projectId: string,
     nodeId: string,
     updates: Partial<StoryNode>,
-    options: { requireBackend?: boolean } = {}
+    options: { requireBackend?: boolean; context?: AccountContext } = {}
   ): Promise<StoryNode> {
-    const accountContext = this.captureAccountContext();
+    const accountContext = options.context || this.captureAccountContext();
     const project = await this.getProject(projectId);
     this.assertAccountContext(
       accountContext,
@@ -1221,7 +1221,7 @@ export class ProjectStore {
         projectId,
         eventNode.id,
         { chapter: targetChapter.id },
-        { requireBackend: true }
+        { requireBackend: true, context: accountContext }
       );
       for (const update of chapterEventUpdates) {
         attemptedChapterUpdates.push(update.chapterId);
@@ -1231,11 +1231,15 @@ export class ProjectStore {
       const rollbackErrors: string[] = [];
       if (nodeUpdateAttempted) {
         try {
+          this.assertAccountContext(
+            accountContext,
+            'Tài khoản đã thay đổi trong lúc hoàn tác node.'
+          );
           await this.updateNode(
             projectId,
             eventNode.id,
             { chapter: currentEventNode.chapter || '' },
-            { requireBackend: true }
+            { requireBackend: true, context: accountContext }
           );
         } catch (rollbackErr) {
           rollbackErrors.push(
@@ -1367,9 +1371,14 @@ export class ProjectStore {
       } else {
         if (eventNode && eventBelongsToChapter(eventNode, chapter)) {
           nodeUpdateAttempted = true;
-          await this.updateNode(projectId, eventId, {
-            chapter: replacementChapter?.id || '',
-          });
+          await this.updateNode(
+            projectId,
+            eventId,
+            {
+              chapter: replacementChapter?.id || '',
+            },
+            { requireBackend: true, context: accountContext }
+          );
         }
         for (const update of chapterUpdates) {
           attemptedChapterUpdates.push(update.chapterId);
@@ -1380,9 +1389,18 @@ export class ProjectStore {
       const rollbackErrors: string[] = [];
       if (!deleteEvent && nodeUpdateAttempted && eventNode) {
         try {
-          await this.updateNode(projectId, eventId, {
-            chapter: eventNode.chapter || '',
-          });
+          this.assertAccountContext(
+            accountContext,
+            'Tài khoản đã thay đổi trong lúc hoàn tác node.'
+          );
+          await this.updateNode(
+            projectId,
+            eventId,
+            {
+              chapter: eventNode.chapter || '',
+            },
+            { requireBackend: true, context: accountContext }
+          );
         } catch (rollbackErr) {
           rollbackErrors.push(
             rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
@@ -1442,38 +1460,53 @@ export class ProjectStore {
     const eventNodes = getEventNodesForChapter(project, chapter);
     const updatedNodesSnapshot: Array<{ id: string; chapter: string }> = [];
 
-    if (deleteEvents) {
-      for (const eventNode of eventNodes) {
-        await this.deleteNode(projectId, eventNode.id);
-      }
-    } else {
-      for (const eventNode of eventNodes) {
-        if (eventBelongsToChapter(eventNode, chapter)) {
-          const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
-          const originalChapter = eventNode.chapter || '';
-          await this.updateNode(projectId, eventNode.id, {
-            chapter: replacementChapter?.id || '',
-          });
-          updatedNodesSnapshot.push({ id: eventNode.id, chapter: originalChapter });
+    try {
+      if (deleteEvents) {
+        for (const eventNode of eventNodes) {
+          await this.deleteNode(projectId, eventNode.id);
+        }
+      } else {
+        for (const eventNode of eventNodes) {
+          if (eventBelongsToChapter(eventNode, chapter)) {
+            const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
+            const originalChapter = eventNode.chapter || '';
+            await this.updateNode(
+              projectId,
+              eventNode.id,
+              {
+                chapter: replacementChapter?.id || '',
+              },
+              { requireBackend: true, context: accountContext }
+            );
+            updatedNodesSnapshot.push({ id: eventNode.id, chapter: originalChapter });
+          }
         }
       }
-    }
 
-    try {
       this.assertAccountContext(accountContext, 'Tài khoản đã thay đổi trong lúc xóa chương.');
       await api.deleteChapter(chapterId);
     } catch (err) {
-      if (err instanceof ApiError) {
+      if (err instanceof ApiError || updatedNodesSnapshot.length > 0) {
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc hoàn tác thao tác chương.'
+        );
         const rollbackErrors: string[] = [];
         for (const snap of updatedNodesSnapshot) {
           try {
-            await this.updateNode(projectId, snap.id, { chapter: snap.chapter });
+            await this.updateNode(
+              projectId,
+              snap.id,
+              { chapter: snap.chapter },
+              { requireBackend: true, context: accountContext }
+            );
           } catch (rbErr) {
             rollbackErrors.push(rbErr instanceof Error ? rbErr.message : String(rbErr));
           }
         }
         if (rollbackErrors.length > 0) {
-          throw new Error(`${err.message}; rollback failed: ${rollbackErrors.join('; ')}`);
+          const errMsg = err instanceof Error ? err.message : String(err);
+          throw new Error(`${errMsg}; rollback failed: ${rollbackErrors.join('; ')}`);
         }
         throw err;
       }

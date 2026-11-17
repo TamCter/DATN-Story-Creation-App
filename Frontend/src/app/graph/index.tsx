@@ -1819,7 +1819,7 @@ return (
       />
 
       {/* Floating AI Action Buttons - Góc dưới bên phải */}
-      <View style={styles.aiFabContainer}>
+      <View style={[styles.aiFabContainer, selectedNode && styles.aiFabContainerShifted]}>
         <Pressable
           style={styles.aiFabBtnSecondary}
           onPress={() => setAiChatOpen(true)}
@@ -2527,6 +2527,9 @@ const styles = StyleSheet.create({
     gap: 10,
     alignItems: 'flex-end',
     zIndex: 999,
+  },
+  aiFabContainerShifted: {
+    bottom: 236,
   },
   aiFabBtn: {
     flexDirection: 'row',
