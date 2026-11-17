@@ -21,6 +21,7 @@ export interface GraphWebViewRef {
   selectNode: (nodeId: string | null) => void;
   setFilter: (filter: string | null) => void;
   focusRelation: (sourceId: string, targetId: string) => void;
+  focusNode: (nodeId: string) => void;
 }
 
 export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
@@ -41,6 +42,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     const RNWebView = WebView as any;
     const readyRef = useRef(false);
     const pendingFocusRef = useRef<{ sourceId: string; targetId: string } | null>(null);
+    const pendingFocusNodeRef = useRef<string | null>(null);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -80,6 +82,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       },
       resetView: () => {
         pendingFocusRef.current = null;
+        pendingFocusNodeRef.current = null;
         webViewRef.current?.injectJavaScript(
           `window.postMessage(JSON.stringify({ type: 'RESET_VIEW' }), '*'); true;`
         );
@@ -107,6 +110,17 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
             )}, targetId: ${JSON.stringify(targetId)} }), '*'); true;`
           );
           pendingFocusRef.current = null;
+        }
+      },
+      focusNode: (nodeId: string) => {
+        pendingFocusNodeRef.current = nodeId;
+        if (readyRef.current) {
+          webViewRef.current?.injectJavaScript(
+            `window.postMessage(JSON.stringify({ type: 'FOCUS_NODE', nodeId: ${JSON.stringify(
+              nodeId
+            )} }), '*'); true;`
+          );
+          pendingFocusNodeRef.current = null;
         }
       },
     }));
@@ -162,6 +176,14 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
               )}, targetId: ${JSON.stringify(targetId)} }), '*'); true;`
             );
             pendingFocusRef.current = null;
+          }
+          if (pendingFocusNodeRef.current) {
+            webViewRef.current?.injectJavaScript(
+              `window.postMessage(JSON.stringify({ type: 'FOCUS_NODE', nodeId: ${JSON.stringify(
+                pendingFocusNodeRef.current
+              )} }), '*'); true;`
+            );
+            pendingFocusNodeRef.current = null;
           }
           return;
         }

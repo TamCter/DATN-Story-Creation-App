@@ -22,16 +22,16 @@ async function getProjectGraph(req, res, next) {
     const nodeRecords = await runQuery(nodesQuery, { projectId }, 'READ');
     const nodes = nodeRecords.map((r) => r.n);
 
-    // 2.5 Tự động liên kết các node có quan hệ thuộc tính (Binh khí, Nơi sinh, Nguồn gốc, Nơi diễn ra...) nếu chưa có link
+    // 2.5 Tự động liên kết các node có quan hệ thuộc tính (vật dụng, nơi sinh, nguồn gốc, nơi diễn ra...) nếu chưa có link
     try {
       const syncCypher = `
         MATCH (p:Project { id: $projectId })
-        // Nhân vật -> Binh khí (Item)
+        // Nhân vật -> Vật dụng (Item)
         OPTIONAL MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p), (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p)
         WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
         FOREACH (_ IN CASE WHEN c IS NOT NULL AND item IS NOT NULL THEN [1] ELSE [] END |
           MERGE (c)-[r1:RELATES_TO { category: 'EQUIPPED' }]->(item)
-          ON CREATE SET r1.id = 'link-' + c.id + '-' + item.id + '-weapon', r1.label = 'Binh khí', r1.type = 'solid', r1.tone = 'possession', r1.createdAt = timestamp()
+          ON CREATE SET r1.id = 'link-' + c.id + '-' + item.id + '-weapon', r1.label = 'Vật dụng', r1.type = 'solid', r1.tone = 'possession', r1.createdAt = timestamp()
         )
         // Nhân vật -> Nơi sinh (Location)
         WITH DISTINCT p
@@ -41,13 +41,13 @@ async function getProjectGraph(req, res, next) {
           MERGE (c)-[r2:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
           ON CREATE SET r2.id = 'link-' + c.id + '-' + loc.id + '-birthplace', r2.label = 'Nơi sinh', r2.type = 'dashed', r2.tone = 'location', r2.createdAt = timestamp()
         )
-        // Nhân vật -> Môn phái (Faction)
+        // Nhân vật -> Tổ chức (Faction)
         WITH DISTINCT p
         OPTIONAL MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p), (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
         WHERE (c.sect = fac.name OR c.sect = fac.id) AND c.sect IS NOT NULL AND c.sect <> ''
         FOREACH (_ IN CASE WHEN c IS NOT NULL AND fac IS NOT NULL THEN [1] ELSE [] END |
           MERGE (c)-[r3:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
-          ON CREATE SET r3.id = 'link-' + c.id + '-' + fac.id + '-sect', r3.label = 'Môn phái', r3.type = 'solid', r3.tone = 'sect', r3.createdAt = timestamp()
+          ON CREATE SET r3.id = 'link-' + c.id + '-' + fac.id + '-sect', r3.label = 'Tổ chức', r3.type = 'solid', r3.tone = 'sect', r3.createdAt = timestamp()
         )
         // Vật phẩm -> Nguồn gốc (Location)
         WITH DISTINCT p

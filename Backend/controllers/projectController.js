@@ -2,55 +2,33 @@ const crypto = require('crypto');
 const { runQuery } = require('../config/neo4j');
 
 /**
- * Lấy danh sách Project thuộc về User hiện tại (hoặc public nếu chưa đăng nhập)
+ * Lấy danh sách Project thuộc về User hiện tại
  */
 async function getAllProjects(req, res, next) {
   try {
     // Chỉ sử dụng req.user?.id từ Token xác thực, không dùng query hay body
     const userId = req.user?.id;
-
-    let query;
-    let params = {};
-
-    if (userId) {
-      // Phân tách dự án: Chỉ lấy các dự án thuộc quyền sở hữu của User này
-      query = `
-        MATCH (u:User { id: $userId })-[:OWNS]->(p:Project)
-        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
-        WITH p, count(DISTINCT n) AS nodeCount
-        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-        WITH p, nodeCount, count(DISTINCT c) AS chapterCount
-        OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
-        OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
-        WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
-        RETURN p,
-               nodeCount,
-               linkCount,
-               chapterCount
-        ORDER BY p.createdAt DESC
-      `;
-      params = { userId };
-    } else {
-      // Nếu chưa có token, chỉ xem các dự án mẫu chung (không bị user nào sở hữu riêng)
-      query = `
-        MATCH (p:Project)
-        WHERE NOT (p)<-[:OWNS]-(:User)
-        OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
-        WITH p, count(DISTINCT n) AS nodeCount
-        OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-        WITH p, nodeCount, count(DISTINCT c) AS chapterCount
-        OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
-        OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
-        WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
-        RETURN p,
-               nodeCount,
-               linkCount,
-               chapterCount
-        ORDER BY p.createdAt DESC
-      `;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: 'Vui lòng đăng nhập để xem dự án.' });
     }
 
-    const records = await runQuery(query, params, 'READ');
+    const query = `
+      MATCH (u:User { id: $userId })-[:OWNS]->(p:Project)
+      OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+      WITH p, count(DISTINCT n) AS nodeCount
+      OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
+      WITH p, nodeCount, count(DISTINCT c) AS chapterCount
+      OPTIONAL MATCH (n1:StoryNode)-[:BELONGS_TO]->(p)
+      OPTIONAL MATCH (n1)-[r:RELATES_TO]->(n2:StoryNode)
+      WITH p, nodeCount, chapterCount, count(DISTINCT r) AS linkCount
+      RETURN p,
+             nodeCount,
+             linkCount,
+             chapterCount
+      ORDER BY p.createdAt DESC
+    `;
+
+    const records = await runQuery(query, { userId }, 'READ');
     const projects = records.map((row) => ({
       ...row.p,
       nodeCount: row.nodeCount || 0,

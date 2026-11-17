@@ -9,7 +9,8 @@ import React, {
 } from 'react';
 import { Platform } from 'react-native';
 
-import { api, ApiError, AuthUser } from '@/services/api';
+import { api, AuthUser } from '@/services/api';
+import { projectStore } from '@/services/project-store';
 
 const TOKEN_KEY = 'story_app_auth_token';
 const USER_KEY = '@story_app_auth_user';
@@ -52,7 +53,6 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<{ success: boolean; message?: string }>;
   register: (penName: string, email: string, password: string) => Promise<{ success: boolean; message?: string }>;
-  guestLogin: () => Promise<{ success: boolean; message?: string }>;
   logout: () => Promise<void>;
   clearError: () => void;
 }
@@ -79,6 +79,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         if (savedToken && savedUserJson) {
           const parsedUser = JSON.parse(savedUserJson) as AuthUser;
+          if (
+            parsedUser.id === 'user-guest-demo' ||
+            parsedUser.email?.toLowerCase() === 'guest@storyapp.vn'
+          ) {
+            projectStore.setAccountId(null);
+            api.setToken(null);
+            await Promise.all([
+              removeStoredToken(),
+              AsyncStorage.removeItem(USER_KEY),
+            ]);
+            return;
+          }
+
+          projectStore.setAccountId(parsedUser.id);
           setToken(savedToken);
           setUser(parsedUser);
           api.setToken(savedToken);
@@ -97,6 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             if (status === 401 || status === 403) {
               setToken(null);
               setUser(null);
+              projectStore.setAccountId(null);
               api.setToken(null);
               await Promise.all([
                 removeStoredToken(),
@@ -116,6 +131,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const saveSession = async (newToken: string, newUser: AuthUser) => {
+    projectStore.setAccountId(newUser.id);
     setToken(newToken);
     setUser(newUser);
     api.setToken(newToken);
@@ -171,28 +187,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
-  const guestLogin = async () => {
-    setError(null);
-    setIsSubmitting(true);
-    try {
-      const res = await api.guestLogin();
-      if (res.success && res.data) {
-        await saveSession(res.data.token, res.data.user);
-        return { success: true, message: res.message };
-      }
-      const msg = res.message || 'Đăng nhập tài khoản mẫu không thành công.';
-      setError(msg);
-      return { success: false, message: msg };
-    } catch (err: any) {
-      const msg = err.message || 'Không thể đăng nhập tài khoản mẫu.';
-      setError(msg);
-      return { success: false, message: msg };
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
   const logout = async () => {
+    projectStore.setAccountId(null);
     setToken(null);
     setUser(null);
     api.setToken(null);
@@ -218,7 +214,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         isAuthenticated: !!token && !!user,
         login,
         register,
-        guestLogin,
         logout,
         clearError,
       }}>

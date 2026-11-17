@@ -28,6 +28,7 @@ export interface GraphWebViewRef {
   selectNode: (nodeId: string | null) => void;
   setFilter: (filter: string | null) => void;
   focusRelation: (sourceId: string, targetId: string) => void;
+  focusNode: (nodeId: string) => void;
 }
 
 export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
@@ -48,6 +49,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     const readyRef = useRef(false);
     const graphDataSyncedRef = useRef(false);
     const pendingFocusRef = useRef<{ sourceId: string; targetId: string } | null>(null);
+    const pendingFocusNodeRef = useRef<string | null>(null);
 
     const html = useMemo(() => {
       return generateGraphHtml({
@@ -97,6 +99,7 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
       },
       resetView: () => {
         pendingFocusRef.current = null;
+        pendingFocusNodeRef.current = null;
         iframeRef.current?.contentWindow?.postMessage(
           JSON.stringify({ type: 'RESET_VIEW' }),
           '*'
@@ -122,6 +125,16 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
             '*'
           );
           pendingFocusRef.current = null;
+        }
+      },
+      focusNode: (nodeId: string) => {
+        pendingFocusNodeRef.current = nodeId;
+        if (readyRef.current) {
+          iframeRef.current?.contentWindow?.postMessage(
+            JSON.stringify({ type: 'FOCUS_NODE', nodeId }),
+            '*'
+          );
+          pendingFocusNodeRef.current = null;
         }
       },
     }));
@@ -170,6 +183,16 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
                 '*'
               );
               pendingFocusRef.current = null;
+            }
+            if (pendingFocusNodeRef.current) {
+              iframeRef.current?.contentWindow?.postMessage(
+                JSON.stringify({
+                  type: 'FOCUS_NODE',
+                  nodeId: pendingFocusNodeRef.current,
+                }),
+                '*'
+              );
+              pendingFocusNodeRef.current = null;
             }
             iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'READY' }), '*');
             return;

@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { runQuery } = require('../config/neo4j');
-const { JWT_SECRET } = require('../middlewares/authMiddleware');
+const { JWT_SECRET, isDisabledAccount } = require('../middlewares/authMiddleware');
 
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
 
@@ -29,6 +29,13 @@ async function register(req, res, next) {
 
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     const cleanEmail = email.trim().toLowerCase();
+    if (isDisabledAccount({ email: cleanEmail })) {
+      return res.status(409).json({
+        success: false,
+        message: 'Email này đã được sử dụng. Vui lòng đăng nhập hoặc dùng email khác.',
+      });
+    }
+
     if (!emailRegex.test(cleanEmail)) {
       return res.status(400).json({
         success: false,
@@ -145,6 +152,12 @@ async function login(req, res, next) {
     }
 
     const cleanEmail = email.trim().toLowerCase();
+    if (isDisabledAccount({ email: cleanEmail })) {
+      return res.status(401).json({
+        success: false,
+        message: 'Email hoặc mật khẩu không chính xác.',
+      });
+    }
 
     const findQuery = `
       MATCH (u:User { email: $email })
@@ -244,84 +257,8 @@ async function getMe(req, res, next) {
   }
 }
 
-/**
- * Đăng nhập nhanh với tài khoản mẫu (Khách / Guest)
- */
-async function guestLogin(req, res, next) {
-  try {
-    const guestEmail = 'guest@storyapp.vn';
-    const guestPenName = 'Lăng Tiêu Khách';
-
-    const findQuery = `
-      MATCH (u:User { email: $email })
-      RETURN u
-      LIMIT 1
-    `;
-    let records = await runQuery(findQuery, { email: guestEmail }, 'READ');
-
-    let user;
-    if (!records.length || !records[0]?.u) {
-      const passwordHash = await bcrypt.hash('guest123456', 10);
-      const userId = 'user-guest-demo';
-      const now = Date.now();
-
-      const createQuery = `
-        CREATE (u:User {
-          id: $id,
-          penName: $penName,
-          email: $email,
-          passwordHash: $passwordHash,
-          createdAt: $createdAt
-        })
-        RETURN u
-      `;
-      const createRes = await runQuery(
-        createQuery,
-        {
-          id: userId,
-          penName: guestPenName,
-          email: guestEmail,
-          passwordHash,
-          createdAt: now,
-        },
-        'WRITE'
-      );
-      user = createRes[0]?.u;
-    } else {
-      user = records[0].u;
-    }
-
-    const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        penName: user.penName,
-      },
-      JWT_SECRET,
-      { expiresIn: JWT_EXPIRES_IN }
-    );
-
-    return res.json({
-      success: true,
-      message: 'Đăng nhập với tài khoản mẫu thành công!',
-      data: {
-        user: {
-          id: user.id,
-          penName: user.penName,
-          email: user.email,
-          createdAt: user.createdAt,
-        },
-        token,
-      },
-    });
-  } catch (error) {
-    next(error);
-  }
-}
-
 module.exports = {
   register,
   login,
   getMe,
-  guestLogin,
 };

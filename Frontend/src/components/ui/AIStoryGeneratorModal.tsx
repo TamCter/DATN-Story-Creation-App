@@ -36,10 +36,10 @@ interface AIStoryGeneratorModalProps {
 }
 
 const WRITING_STYLES = [
-  'Kiếm hiệp Kim Dung cổ điển, trượng nghĩa hào hiệp',
-  'Tiên hiệp tu chân, ngộ đạo, huyền ảo thâm sâu',
-  'Huyền huyễn dị giới, nhiệt huyết, combat kịch tính',
-  'Cung đình mưu lược, giang hồ bí ẩn, đấu trí',
+  'Trinh thám tâm lý, giàu manh mối và bất ngờ',
+  'Chính kịch hiện thực, tập trung vào chiều sâu nhân vật',
+  'Kỳ ảo giàu hình ảnh, nhịp truyện kịch tính',
+  'Mưu lược và đấu trí, chú trọng xung đột giữa các nhân vật',
 ];
 
 export default function AIStoryGeneratorModal({
@@ -255,7 +255,7 @@ export default function AIStoryGeneratorModal({
     setIsGenerating(true);
 
     try {
-      // Tìm các node liên quan (nhân vật, môn phái, địa điểm)
+      // Tìm các node liên quan (nhân vật, tổ chức, địa điểm)
       const relatedNodes = (project.nodes || []).filter((n) => n.type !== 'event').slice(0, 20);
 
       const res = await api.generateChapterStory({
@@ -347,7 +347,7 @@ export default function AIStoryGeneratorModal({
                   name: locTrim,
                   type: 'location',
                   role: 'ĐỊA DANH',
-                  region: 'Đông Vực',
+                  region: 'Miền Đông',
                   desc: `Địa danh diễn ra sự kiện ${ev.name}`,
                   status: 'Hoạt động',
                 });
@@ -647,7 +647,7 @@ export default function AIStoryGeneratorModal({
                   </Text>
                   <TextInput
                     style={styles.ideaTextInput}
-                    placeholder="Ví dụ: Lăng Tiêu đột phá cảnh giới thì bị kẻ thù truy sát, may mắn được một nữ kiếm khách bí ẩn Bắc Vực giải cứu..."
+                    placeholder="Ví dụ: nhân vật chính phát hiện một bằng chứng mới và phải quyết định có công bố hay không..."
                     placeholderTextColor="#685f50"
                     multiline
                     value={userIdea}

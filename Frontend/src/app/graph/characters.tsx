@@ -1,5 +1,5 @@
-import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useMemo, useState } from 'react';
 import {
   Modal,
   Pressable,
@@ -19,6 +19,7 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 interface CharacterExtra {
   title: string;
@@ -31,39 +32,39 @@ interface CharacterExtra {
 
 const CHAR_EXTRAS: Record<string, CharacterExtra> = {
   'lang-tieu': {
-    title: 'Đoạn Kiếm Khách · Hậu duệ Sơn Trang',
-    weapon: 'Chuôi Kiếm Hoàng Hôn (Mảnh 1)',
-    sect: 'Tự do / Lưu vong',
-    status: 'Bị Thiên Hạ Minh truy sát khắp thiên hạ',
-    personality: 'Trầm mặc, kiên định, không tin lời ước hẹn',
+    title: 'Phóng viên điều tra · Nhân chứng',
+    weapon: 'Máy ghi âm và bản ghi gốc',
+    sect: 'Phóng viên độc lập',
+    status: 'Đang điều tra vụ việc cũ',
+    personality: 'Trầm lặng, thận trọng, luôn kiểm chứng thông tin',
     connections: [
       { name: 'Mộc Lan', relation: 'Tin tưởng', color: '#e5a93c' },
-      { name: 'Triệu Vô Cực', relation: 'Huynh đệ cũ / Thù sâu', color: '#e05252' },
-      { name: 'Kiếm Hoàng Hôn', relation: 'Sở hữu mảnh 1', color: '#42b883' },
+      { name: 'Triệu Vô Cực', relation: 'Cộng sự cũ / Mâu thuẫn', color: '#e05252' },
+      { name: 'Hồ Sơ Hoàng Hôn', relation: 'Đang lưu giữ bản gốc', color: '#42b883' },
     ],
   },
   'moc-lan': {
-    title: 'Bạch Liên Y Sư · Dược Thiện Truyền Nhân',
-    weapon: 'Bạch Liên Châm & Dược Thảo',
-    sect: 'Bạch Liên Cốc',
-    status: 'Ẩn cư tại U Cốc sương mờ',
-    personality: 'Thanh thuần, từ tâm nhưng ẩn chứa bí mật sư môn',
+    title: 'Bác sĩ pháp y · Chuyên gia',
+    weapon: 'Hồ sơ giám định',
+    sect: 'Viện Bạch Liên',
+    status: 'Đang làm việc tại Viện Bạch Liên',
+    personality: 'Điềm tĩnh, khách quan và cẩn trọng',
     connections: [
-      { name: 'Lăng Tiêu', relation: 'Cứu chữa & che chở', color: '#e5a93c' },
-      { name: 'Bạch Liên Cốc', relation: 'Môn đồ chân truyền', color: '#42b883' },
-      { name: 'Thiên Hạ Minh', relation: 'Bị bí mật dò xét', color: '#d95a38' },
+      { name: 'Lăng Tiêu', relation: 'Cung cấp thông tin', color: '#e5a93c' },
+      { name: 'Viện Bạch Liên', relation: 'Làm việc tại', color: '#42b883' },
+      { name: 'Tập đoàn Thiên Hạ', relation: 'Chịu sức ép', color: '#d95a38' },
     ],
   },
   'trieu-vo-cuc': {
-    title: 'Thiên Hạ Minh Chủ · Hùng Bá Võ Lâm',
-    weapon: 'Huyền Thiết Trảm Ma Kiếm',
-    sect: 'Thiên Hạ Minh',
-    status: 'Quy tụ chính đạo, mưu đồ đoạt 7 mảnh kiếm',
-    personality: 'Thâm trầm, quyết đoán, dã tâm nuốt chửng võ lâm',
+    title: 'Giám đốc · Người có liên quan',
+    weapon: 'Điện thoại bảo mật',
+    sect: 'Tập đoàn Thiên Hạ',
+    status: 'Đang tìm cách kiểm soát thông tin',
+    personality: 'Quyết đoán, kín kẽ và có tính toán',
     connections: [
-      { name: 'Thiên Hạ Minh', relation: 'Thủ lĩnh tối cao', color: '#d95a38' },
-      { name: 'Đêm Hỏa Thiêu', relation: 'Chủ mưu diệt môn', color: '#e05252' },
-      { name: 'Kiếm Hoàng Hôn', relation: 'Truy lùng đoạt kiếm', color: '#42b883' },
+      { name: 'Tập đoàn Thiên Hạ', relation: 'Giám đốc', color: '#d95a38' },
+      { name: 'Vụ Cháy Tại Điền Trang', relation: 'Bị nghi có liên quan', color: '#e05252' },
+      { name: 'Hồ Sơ Hoàng Hôn', relation: 'Tìm cách kiểm soát', color: '#42b883' },
     ],
   },
 };
@@ -91,21 +92,25 @@ export default function CharactersScreen() {
     );
   });
 
-  useEffect(() => {
-    let isMounted = true;
-    async function load() {
-      try {
-        const proj = await projectStore.getProject(projectId);
-        if (isMounted) setCurrentProject(proj);
-      } catch (err) {
-        console.warn('Lỗi tải nhân vật:', err);
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isFocused = true;
+      async function load() {
+        try {
+          const proj = await projectStore.getProject(projectId);
+          if (isFocused) setCurrentProject(proj);
+        } catch (err) {
+          console.warn('Lỗi tải nhân vật:', err);
+        }
       }
-    }
-    void load();
-    return () => {
-      isMounted = false;
-    };
-  }, [projectId]);
+      void load();
+      return () => {
+        isFocused = false;
+      };
+    }, [projectId])
+  );
 
   const characters = useMemo(() => {
     return currentProject.nodes.filter((n) => n.type === 'character');
@@ -121,7 +126,8 @@ export default function CharactersScreen() {
         !q ||
         c.name.toLowerCase().includes(q) ||
         c.desc.toLowerCase().includes(q) ||
-        c.role.toLowerCase().includes(q);
+        c.role.toLowerCase().includes(q) ||
+        (c.subType?.toLowerCase().includes(q) ?? false);
 
       if (!matchesSearch) return false;
       if (selectedRole === 'main' && !MAIN_ROLES.has(c.role)) return false;
@@ -139,17 +145,14 @@ export default function CharactersScreen() {
         <View style={styles.headerLeftGroup}>
           <Pressable
             hitSlop={12}
-            style={({ pressed }) => [
-              styles.backBtn,
-              pressed && styles.backBtnPressed,
-            ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Nhân vật</Text>
             <Text style={styles.headerSubtitle}>
-              {currentProject.title} · {characters.length} ANH HÙNG HÀO KIỆT
+              {currentProject.title} · {characters.length} NHÂN VẬT
             </Text>
           </View>
         </View>
@@ -158,36 +161,12 @@ export default function CharactersScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {/* World Characters Banner */}
-        <View style={styles.statsBanner}>
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
-              {characters.length}
-            </Text>
-            <Text style={styles.statLabel}>NHÂN VẬT</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
-              {characters.filter((c) => MAIN_ROLES.has(c.role)).length}
-            </Text>
-            <Text style={styles.statLabel}>CHÍNH DIỆN</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e05252' }]}>
-              {characters.filter((c) => c.role === 'PHẢN DIỆN').length}
-            </Text>
-            <Text style={styles.statLabel}>PHẢN DIỆN</Text>
-          </View>
-        </View>
-
         {/* Search */}
         <View style={styles.searchBarContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Tìm kiếm kiếm khách, y sư, minh chủ..."
+            placeholder="Tìm kiếm nhân vật, nghề nghiệp, vai trò..."
             placeholderTextColor="#736a5c"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -202,10 +181,22 @@ export default function CharactersScreen() {
         {/* Filter chips */}
         <View style={styles.filterRow}>
           {[
-            { id: 'all', label: `Tất cả (${characters.length})` },
-            { id: 'main', label: 'Chính diện' },
-            { id: 'ally', label: 'Đồng hành' },
-            { id: 'villain', label: 'Phản diện' },
+            { id: 'all', label: 'Tất cả', count: characters.length },
+            {
+              id: 'main',
+              label: 'Chính diện',
+              count: characters.filter((c) => MAIN_ROLES.has(c.role)).length,
+            },
+            {
+              id: 'ally',
+              label: 'Đồng hành',
+              count: characters.filter((c) => c.role === 'ĐỒNG HÀNH').length,
+            },
+            {
+              id: 'villain',
+              label: 'Phản diện',
+              count: characters.filter((c) => c.role === 'PHẢN DIỆN').length,
+            },
           ].map((item) => {
             const isSelected = selectedRole === item.id;
             return (
@@ -221,7 +212,7 @@ export default function CharactersScreen() {
                     styles.filterChipText,
                     isSelected && styles.filterChipTextSelected,
                   ]}>
-                  {item.label}
+                  {item.label} ({item.count})
                 </Text>
               </Pressable>
             );
@@ -232,10 +223,10 @@ export default function CharactersScreen() {
         <View style={styles.cardsContainer}>
           {filteredCharacters.map((char) => {
             const extra = CHAR_EXTRAS[char.id] || {
-              title: char.subType || 'Cao thủ võ lâm',
-              weapon: 'Vũ khí giang hồ',
+              title: char.subType || 'Nhân vật',
+              weapon: 'Chưa cập nhật',
               sect: 'Tự do',
-              status: 'Hành tẩu giang hồ',
+              status: 'Chưa cập nhật',
               personality: 'Kiên định',
               connections: [],
             };
@@ -293,11 +284,11 @@ export default function CharactersScreen() {
                 {/* Character Profile Meta */}
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🗡 Binh khí:</Text>
+                    <Text style={styles.metaLabel}>🎒 Vật dụng:</Text>
                     <Text style={styles.metaValueHighlight}>{char.weapon || extra.weapon}</Text>
                   </View>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🏛 Môn phái:</Text>
+                    <Text style={styles.metaLabel}>🏛 Tổ chức:</Text>
                     <Text style={styles.metaValue}>{char.sect || extra.sect}</Text>
                   </View>
                   <View style={styles.metaItem}>
@@ -381,6 +372,13 @@ export default function CharactersScreen() {
           })}
         </View>
       </ScrollView>
+
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="characters"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -447,38 +445,6 @@ const styles = StyleSheet.create({
     maxWidth: 580,
     width: '100%',
     alignSelf: 'center',
-  },
-  statsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: '#14120e',
-    borderWidth: 1,
-    borderColor: '#252119',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  statBox: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    fontFamily: AppFonts.mono,
-  },
-  statLabel: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: '#7a7263',
-    fontFamily: AppFonts.mono,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#252119',
   },
   searchBarContainer: {
     flexDirection: 'row',

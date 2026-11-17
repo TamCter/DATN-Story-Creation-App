@@ -111,7 +111,7 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         faction: {
           color: '#d95a38',
           glow: 'rgba(217, 90, 56, 0.45)',
-          name: 'Phe phái',
+          name: 'Tổ chức',
           shape: 'hexagon',
           radius: 21
         },
@@ -339,6 +339,44 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         target.vx = 0;
         target.vy = 0;
         selectedId = String(sourceId);
+        camera.x = 0;
+        camera.y = 0;
+        camera.zoom = 1;
+        energy = 0;
+        isPhysicsActive = false;
+      }
+
+      function focusNode(nodeId) {
+        var root = nodeMap[String(nodeId)];
+        if (!root) return;
+
+        var connectedNodes = [];
+        var connectedIds = {};
+        edges.forEach(function(edge) {
+          var neighborId = edge.source === root.id ? edge.target : edge.target === root.id ? edge.source : null;
+          var neighbor = neighborId && nodeMap[neighborId];
+          if (neighbor && !connectedIds[neighbor.id]) {
+            connectedIds[neighbor.id] = true;
+            connectedNodes.push(neighbor);
+          }
+        });
+
+        var centerX = width / 2;
+        var centerY = height / 2;
+        var radius = Math.max(90, Math.min(width, height) * 0.3);
+        root.x = centerX;
+        root.y = centerY;
+        root.vx = 0;
+        root.vy = 0;
+        connectedNodes.forEach(function(node, index) {
+          var angle = (index / Math.max(connectedNodes.length, 1)) * Math.PI * 2;
+          node.x = centerX + Math.cos(angle) * radius;
+          node.y = centerY + Math.sin(angle) * radius;
+          node.vx = 0;
+          node.vy = 0;
+        });
+
+        selectedId = root.id;
         camera.x = 0;
         camera.y = 0;
         camera.zoom = 1;
@@ -768,6 +806,9 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
               break;
             case 'FOCUS_RELATION':
               focusRelation(data.sourceId, data.targetId);
+              break;
+            case 'FOCUS_NODE':
+              focusNode(data.nodeId);
               break;
             case 'UPDATE_DATA':
               if (data.nodes) initNodes(data.nodes);

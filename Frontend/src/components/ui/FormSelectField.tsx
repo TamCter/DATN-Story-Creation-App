@@ -166,11 +166,11 @@ export function FormSelectField({
                 <Text style={styles.emptyOptionText}>-- Không có --</Text>
               </Pressable>
 
-              {filteredOptions.map((opt) => {
+              {filteredOptions.map((opt, index) => {
                 const isSelected = value === opt.value;
                 return (
                   <Pressable
-                    key={opt.value}
+                    key={`${opt.value}-${index}`}
                     style={[styles.optionItem, isSelected && styles.optionItemActive]}
                     onPress={() => handleSelect(opt.value)}>
                     <View style={styles.optLeft}>

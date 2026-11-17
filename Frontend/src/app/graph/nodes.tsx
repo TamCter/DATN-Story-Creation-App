@@ -37,6 +37,7 @@ import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -44,6 +45,7 @@ export default function NodesDetailScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
   const initialType = (params.type as string) || 'all';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -106,16 +108,16 @@ export default function NodesDetailScreen() {
   const [formPower, setFormPower] = useState('');
   const [formHolder, setFormHolder] = useState('');
 
-  const [formRegion, setFormRegion] = useState('Đông Vực');
+  const [formRegion, setFormRegion] = useState('Miền Đông');
   const [formTerrain, setFormTerrain] = useState('');
-  const [formDangerLevel, setFormDangerLevel] = useState('Tuyệt đối an toàn');
+  const [formDangerLevel, setFormDangerLevel] = useState('An toàn');
   const [formClimate, setFormClimate] = useState('Ôn hòa');
   const [formRuler, setFormRuler] = useState('');
 
   const [formLeader, setFormLeader] = useState('');
   const [formHeadquarters, setFormHeadquarters] = useState('');
   const [formMotto, setFormMotto] = useState('');
-  const [formAlignment, setFormAlignment] = useState<string>('CHÍNH PHÁI');
+  const [formAlignment, setFormAlignment] = useState<string>('ĐỒNG MINH');
 
   const [formChapter, setFormChapter] = useState('');
   const [formTime, setFormTime] = useState('');
@@ -169,16 +171,16 @@ export default function NodesDetailScreen() {
     setFormRole(defaultType === 'character' ? 'CHÍNH DIỆN' : defaultType === 'event' ? 'BIẾN CỐ' : '');
     setFormSubType(
       defaultType === 'character'
-        ? 'Kiếm khách / Đao khách'
+        ? 'Điều tra viên'
         : defaultType === 'faction'
-        ? 'Chính phái'
+        ? 'Đồng minh'
         : ''
     );
     setFormStatus(
       defaultType === 'character'
         ? 'Còn sống'
         : defaultType === 'faction'
-        ? 'Hưng thịnh'
+        ? 'Đang hoạt động'
         : defaultType === 'event'
         ? 'Đã diễn ra'
         : 'Hoạt động'
@@ -196,15 +198,15 @@ export default function NodesDetailScreen() {
     setFormElement('');
     setFormPower('');
     setFormHolder('');
-    setFormRegion('Đông Vực');
+    setFormRegion('Miền Đông');
     setFormTerrain('');
-    setFormDangerLevel('Tuyệt đối an toàn');
+    setFormDangerLevel('An toàn');
     setFormClimate('Ôn hòa');
     setFormRuler('');
     setFormLeader('');
     setFormHeadquarters('');
     setFormMotto('');
-    setFormAlignment('CHÍNH PHÁI');
+    setFormAlignment('ĐỒNG MINH');
     setFormChapter(chapters[0]?.title || '');
     setFormTime(chapters[0]?.title || '');
     setFormLocation('');
@@ -219,8 +221,8 @@ export default function NodesDetailScreen() {
     setFormName(node.name || '');
     setFormType(node.type || 'character');
     setFormRole(node.role || '');
-    setFormSubType(node.subType || (node.type === 'faction' ? 'Chính phái' : ''));
-    setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Hưng thịnh' : 'Hoạt động'));
+    setFormSubType(node.subType || (node.type === 'faction' ? 'Đồng minh' : ''));
+    setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Đang hoạt động' : 'Hoạt động'));
     setFormStatusEvent(node.statusEvent || '');
     setFormDesc(node.desc || '');
     setFormDob(node.dob || '');
@@ -234,15 +236,15 @@ export default function NodesDetailScreen() {
     setFormElement(node.element || '');
     setFormPower(node.power || '');
     setFormHolder(node.holderOrLocation || '');
-    setFormRegion(node.region || 'Đông Vực');
+    setFormRegion(node.region || 'Miền Đông');
     setFormTerrain(node.terrain || '');
-    setFormDangerLevel(node.dangerLevel || 'Tuyệt đối an toàn');
+    setFormDangerLevel(node.dangerLevel || 'An toàn');
     setFormClimate(node.climate || 'Ôn hòa');
     setFormRuler(node.ruler || '');
     setFormLeader(node.leader || '');
     setFormHeadquarters(node.headquarters || '');
     setFormMotto(node.motto || '');
-    setFormAlignment(node.alignment || 'CHÍNH PHÁI');
+    setFormAlignment(node.alignment || 'ĐỒNG MINH');
     setFormChapter(node.chapter || node.time || '');
     setFormTime(node.time || node.chapter || '');
     setFormLocation(node.location || '');
@@ -296,15 +298,15 @@ export default function NodesDetailScreen() {
       payload.role = '';
       payload.subType = '';
       payload.status = 'Hoạt động';
-      payload.region = formRegion.trim() || 'Đông Vực';
-      payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
+      payload.region = formRegion.trim() || 'Miền Đông';
+      payload.dangerLevel = formDangerLevel.trim() || 'An toàn';
       payload.climate = formClimate.trim() || 'Ôn hòa';
       payload.ruler = formRuler.trim();
     } else if (formType === 'faction') {
       payload.role = '';
-      payload.subType = formSubType.trim() || 'Chính phái';
-      payload.status = formStatus.trim() || 'Hưng thịnh';
-      if (formStatus === 'Suy tàn' && formStatusEvent.trim()) {
+      payload.subType = formSubType.trim() || 'Đồng minh';
+      payload.status = formStatus.trim() || 'Đang hoạt động';
+      if ((formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && formStatusEvent.trim()) {
         payload.statusEvent = formStatusEvent.trim();
       } else {
         payload.statusEvent = '';
@@ -376,8 +378,8 @@ export default function NodesDetailScreen() {
           <Pressable
             hitSlop={12}
             style={({ pressed }) => [styles.backBtn, pressed && styles.backBtnPressed]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Chi tiết node</Text>
@@ -422,7 +424,7 @@ export default function NodesDetailScreen() {
               { id: 'character', label: 'Nhân vật', symbol: '●', color: '#e5a93c' },
               { id: 'item', label: 'Vật phẩm', symbol: '◆', color: '#42b883' },
               { id: 'location', label: 'Địa điểm', symbol: '▲', color: '#9f70cf' },
-              { id: 'faction', label: 'Phe phái', symbol: '⬡', color: '#d95a38' },
+              { id: 'faction', label: 'Tổ chức', symbol: '⬡', color: '#d95a38' },
               { id: 'event', label: 'Sự kiện', symbol: '■', color: '#5b8ec2' },
             ].map((f) => {
               const isSelected = selectedType === f.id;
@@ -467,9 +469,11 @@ export default function NodesDetailScreen() {
                       ]}>
                       <Text style={[styles.nodeSymbol, { color: config.color }]}>{config.symbol}</Text>
                     </View>
-                    <View>
-                      <Text style={styles.nodeName}>{node.name}</Text>
-                      <Text style={styles.nodeTypeSub}>
+                    <View style={styles.nodeTitleArea}>
+                      <Text style={styles.nodeName} numberOfLines={2}>
+                        {node.name}
+                      </Text>
+                      <Text style={styles.nodeTypeSub} numberOfLines={1}>
                         {config.badgeText} {node.subType ? `· ${node.subType}` : ''}
                       </Text>
                     </View>
@@ -482,7 +486,11 @@ export default function NodesDetailScreen() {
                           styles.nodeRoleBadge,
                           { borderColor: `${config.color}60`, backgroundColor: `${config.color}12` },
                         ]}>
-                        <Text style={[styles.nodeRoleText, { color: config.color }]}>{node.role}</Text>
+                        <Text
+                          style={[styles.nodeRoleText, { color: config.color }]}
+                          numberOfLines={1}>
+                          {node.role}
+                        </Text>
                       </View>
                     ) : null}
                     {node.status ? (
@@ -500,15 +508,15 @@ export default function NodesDetailScreen() {
                     <Text style={styles.attrTag}>📍 Nơi sinh: {node.birthplace}</Text>
                   ) : null}
                   {node.gender ? <Text style={styles.attrTag}>⚧ Giới tính: {node.gender}</Text> : null}
-                  {node.weapon ? <Text style={styles.attrTag}>⚔️ Binh khí: {node.weapon}</Text> : null}
-                  {node.sect ? <Text style={styles.attrTag}>🏛️ Môn phái: {node.sect}</Text> : null}
+                  {node.weapon ? <Text style={styles.attrTag}>🎒 Vật dụng: {node.weapon}</Text> : null}
+                  {node.sect ? <Text style={styles.attrTag}>🏛️ Tổ chức: {node.sect}</Text> : null}
                   {node.personality ? (
                     <Text style={styles.attrTag}>🎭 Tính cách: {node.personality}</Text>
                   ) : null}
                   {node.rarity ? <Text style={styles.attrTag}>💎 Độ hiếm: {node.rarity}</Text> : null}
                   {node.origin ? <Text style={styles.attrTag}>📜 Xuất xứ: {node.origin}</Text> : null}
                   {node.element ? <Text style={styles.attrTag}>⚡ Thuộc tính: {node.element}</Text> : null}
-                  {node.power ? <Text style={styles.attrTag}>💥 Uy lực: {node.power}</Text> : null}
+                  {node.power ? <Text style={styles.attrTag}>💥 Mức độ ảnh hưởng: {node.power}</Text> : null}
                   {node.holderOrLocation ? (
                     <Text style={styles.attrTag}>👤 Người giữ: {node.holderOrLocation}</Text>
                   ) : null}
@@ -520,7 +528,7 @@ export default function NodesDetailScreen() {
                   {node.ruler ? <Text style={styles.attrTag}>🏰 Cai quản: {node.ruler}</Text> : null}
                   {node.leader ? <Text style={styles.attrTag}>👑 Thủ lĩnh: {node.leader}</Text> : null}
                   {node.headquarters ? (
-                    <Text style={styles.attrTag}>🏯 Tổng đàn: {node.headquarters}</Text>
+                    <Text style={styles.attrTag}>🏢 Trụ sở: {node.headquarters}</Text>
                   ) : null}
                   {node.motto ? <Text style={styles.attrTag}>📜 Tôn chỉ: {node.motto}</Text> : null}
                   {node.alignment ? (
@@ -544,7 +552,10 @@ export default function NodesDetailScreen() {
                     onPress={() => {
                       router.push({
                         pathname: '/graph' as any,
-                        params: { projectId: currentProject.id },
+                        params: {
+                          projectId: currentProject.id,
+                          focusNodeId: node.id,
+                        },
                       });
                     }}>
                     <Text style={styles.locateBtnText}>Xem trên đồ thị →</Text>
@@ -632,7 +643,7 @@ export default function NodesDetailScreen() {
                           setFormId(generateUniqueNodeId(t, nodes));
                           setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                           if (t === 'character') {
-                            setFormSubType('Kiếm khách / Đao khách');
+                            setFormSubType('Nhân vật');
                           } else {
                             setFormSubType('');
                           }
@@ -644,7 +655,7 @@ export default function NodesDetailScreen() {
                               : t === 'location'
                               ? 'Hoạt động'
                               : t === 'faction'
-                              ? 'Hưng thịnh'
+                              ? 'Đang hoạt động'
                               : 'Đã diễn ra'
                           );
                         }
@@ -779,7 +790,7 @@ export default function NodesDetailScreen() {
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Binh khí / Vật phẩm</Text>
+                      <Text style={styles.modalInputLabel}>Vật dụng / Vật phẩm</Text>
                       <FormSelectField
                         value={formWeapon}
                         onChange={setFormWeapon}
@@ -797,17 +808,17 @@ export default function NodesDetailScreen() {
                   {/* Sect & Personality */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
+                      <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
                       <FormSelectField
                         value={formSect}
                         onChange={setFormSect}
                         options={factionNodes.map((fac) => ({
                           label: fac.name,
                           value: fac.name,
-                          subtitle: fac.alignment || fac.role || 'Môn phái',
+                          subtitle: fac.alignment || fac.role || 'Tổ chức',
                           icon: '🏛️',
                         }))}
-                        placeholder="-- Chọn môn phái --"
+                        placeholder="-- Chọn tổ chức --"
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -828,7 +839,7 @@ export default function NodesDetailScreen() {
               {formType === 'item' && (
                 <View style={styles.dynamicSectionBox}>
                   <Text style={[styles.dynamicSectionHeader, { color: '#42b883' }]}>
-                    THÔNG TIN BẢO VẬT / VẬT PHẨM
+                    THÔNG TIN VẬT PHẨM
                   </Text>
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -918,7 +929,7 @@ export default function NodesDetailScreen() {
                         options={factionNodes.map((fac) => ({
                           label: fac.name,
                           value: fac.name,
-                          subtitle: fac.alignment || 'Môn phái',
+                          subtitle: fac.alignment || 'Tổ chức',
                           icon: '🏛️',
                         }))}
                         placeholder="-- Chọn thế lực cai quản --"
@@ -932,22 +943,22 @@ export default function NodesDetailScreen() {
               {formType === 'faction' && (
                 <View style={styles.dynamicSectionBox}>
                   <Text style={[styles.dynamicSectionHeader, { color: '#d95a38' }]}>
-                    THÔNG TIN PHE PHÁI / MÔN PHÁI
+                    THÔNG TIN TỔ CHỨC
                   </Text>
                   <View style={styles.modalInputGroup}>
-                    <Text style={styles.modalInputLabel}>Phân loại môn phái (Chính / Tà)</Text>
+                    <Text style={styles.modalInputLabel}>Vai trò trong câu chuyện</Text>
                     <FormSelectField
                       value={formSubType}
                       onChange={setFormSubType}
                       options={FACTION_CLASSIFICATIONS}
-                      placeholder="-- Chọn chính hoặc tà --"
+                      placeholder="-- Chọn vai trò --"
                     />
                   </View>
 
-                  {/* Status Dropdown (Hưng thịnh / Suy tàn) */}
+                  {/* Status Dropdown */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Trạng thái phe phái</Text>
+                      <Text style={styles.modalInputLabel}>Trạng thái tổ chức</Text>
                       <FormSelectField
                         value={formStatus}
                         onChange={setFormStatus}
@@ -956,9 +967,9 @@ export default function NodesDetailScreen() {
                       />
                     </View>
 
-                    {formStatus === 'Suy tàn' && (
+                    {(formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && (
                       <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                        <Text style={styles.modalInputLabel}>Sự kiện dẫn đến suy tàn</Text>
+                        <Text style={styles.modalInputLabel}>Sự kiện dẫn đến thay đổi trạng thái</Text>
                         <FormSelectField
                           value={formStatusEvent}
                           onChange={setFormStatusEvent}
@@ -974,10 +985,10 @@ export default function NodesDetailScreen() {
                     )}
                   </View>
 
-                  {/* Minh chủ & Căn cứ */}
+                  {/* Người đại diện & trụ sở */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Minh chủ / Thủ lĩnh</Text>
+                      <Text style={styles.modalInputLabel}>Người đại diện / Thủ lĩnh</Text>
                       <FormSelectField
                         value={formLeader}
                         onChange={setFormLeader}
@@ -991,7 +1002,7 @@ export default function NodesDetailScreen() {
                       />
                     </View>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Tổng đàn / Căn cứ địa</Text>
+                      <Text style={styles.modalInputLabel}>Trụ sở / Cơ sở</Text>
                       <FormSelectField
                         value={formHeadquarters}
                         onChange={setFormHeadquarters}
@@ -1012,7 +1023,7 @@ export default function NodesDetailScreen() {
                       style={styles.modalInput}
                       value={formMotto}
                       onChangeText={setFormMotto}
-                      placeholder="Ví dụ: Quy tụ võ lâm / Trảm yêu trừ ma..."
+                      placeholder="Ví dụ: nghiên cứu, hỗ trợ cộng đồng, kinh doanh..."
                       placeholderTextColor="#665f52"
                     />
                   </View>
@@ -1090,6 +1101,12 @@ export default function NodesDetailScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={{ ...currentProject, nodes, links: currentProject.links || [] }}
+        activeSection="nodes"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -1245,6 +1262,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    minWidth: 0,
+  },
+  nodeTitleArea: {
+    flex: 1,
+    minWidth: 0,
   },
   symbolBox: {
     width: 34,
@@ -1262,6 +1284,7 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.serif,
     fontSize: 17,
     fontWeight: '700',
+    flexShrink: 1,
   },
   nodeTypeSub: {
     color: '#736a5c',
@@ -1272,6 +1295,8 @@ const styles = StyleSheet.create({
   badgeCol: {
     alignItems: 'flex-end',
     gap: 4,
+    flexShrink: 0,
+    marginLeft: 8,
   },
   nodeRoleBadge: {
     paddingHorizontal: 8,
@@ -1283,6 +1308,7 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontFamily: AppFonts.sans,
     fontWeight: '700',
+    flexShrink: 1,
     letterSpacing: 0.5,
   },
   statusBadge: {

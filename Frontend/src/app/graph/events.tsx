@@ -27,6 +27,7 @@ import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
 import AIStoryGeneratorModal from '@/components/ui/AIStoryGeneratorModal';
 import ChapterStoryReaderModal from '@/components/ui/ChapterStoryReaderModal';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 type PendingRemoval =
   | {
@@ -45,6 +46,7 @@ type PendingRemoval =
 export default function ChapterDetailScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [currentProject, setCurrentProject] = React.useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -234,8 +236,8 @@ export default function ChapterDetailScreen() {
               styles.backBtn,
               pressed && styles.backBtnPressed,
             ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <Text style={styles.headerTitle} numberOfLines={1} ellipsizeMode="tail">
             Chi tiết chương
@@ -711,6 +713,12 @@ export default function ChapterDetailScreen() {
           setAiTargetChapter(ch);
           setAiStoryModalOpen(true);
         }}
+      />
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="events"
+        onClose={() => setSidebarVisible(false)}
       />
     </SafeAreaView>
   );

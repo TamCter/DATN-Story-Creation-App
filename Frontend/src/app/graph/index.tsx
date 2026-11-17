@@ -1,4 +1,4 @@
-import { router, useFocusEffect, useLocalSearchParams } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { GraphWebView, GraphWebViewRef } from '@/components/graph/GraphWebView';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 
 import {
@@ -60,7 +61,9 @@ export default function GraphScreen() {
     typeof params.focusTargetId === 'string' ? params.focusTargetId : null;
   const routeFocusLinkId =
     typeof params.focusLinkId === 'string' ? params.focusLinkId : null;
-  const routeFocusKey = `${projectId}:${routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
+  const routeFocusNodeId =
+    typeof params.focusNodeId === 'string' ? params.focusNodeId : null;
+  const routeFocusKey = `${projectId}:${routeFocusNodeId || routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     // Chỉ nạp dữ liệu mẫu nếu ID thực sự khớp chính xác với dự án mẫu, không fallback sai lệch
@@ -84,7 +87,7 @@ export default function GraphScreen() {
   const [nodes, setNodes] = useState<StoryNode[]>(currentProject.nodes || []);
   const [links, setLinks] = useState<StoryLink[]>(currentProject.links || []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
-    routeFocusSourceId
+    routeFocusSourceId || routeFocusNodeId
   );
   const [dismissedFocusKey, setDismissedFocusKey] = useState<string | null>(null);
 
@@ -115,7 +118,7 @@ export default function GraphScreen() {
             setNodes(proj.nodes || []);
             setLinks(proj.edges || proj.links || []);
             setSelectedNodeId((selectedId) => {
-              const desiredId = routeFocusSourceId || selectedId;
+              const desiredId = routeFocusSourceId || routeFocusNodeId || selectedId;
               return desiredId && proj.nodes?.some((node) => node.id === desiredId)
                 ? desiredId
                 : null;
@@ -131,7 +134,7 @@ export default function GraphScreen() {
       return () => {
         isFocused = false;
       };
-    }, [projectId, routeFocusSourceId])
+    }, [projectId, routeFocusSourceId, routeFocusNodeId])
   );
 
   const chapters = useMemo(() => {
@@ -179,27 +182,55 @@ export default function GraphScreen() {
     routeFocusLinkId,
   ]);
 
+  const focusedNodeId = useMemo(() => {
+    if (
+      !routeFocusNodeId ||
+      dismissedFocusKey === routeFocusKey ||
+      (!isLoading && !nodes.some((node) => node.id === routeFocusNodeId))
+    ) {
+      return null;
+    }
+    return routeFocusNodeId;
+  }, [dismissedFocusKey, routeFocusKey, isLoading, nodes, routeFocusNodeId]);
+
   const visibleNodes = useMemo(() => {
-    if (!focusedRelation) return nodes;
-    return nodes.filter(
-      (node) =>
-        node.id === focusedRelation.sourceId ||
-        node.id === focusedRelation.targetId
-    );
-  }, [nodes, focusedRelation]);
+    if (focusedRelation) {
+      return nodes.filter(
+        (node) =>
+          node.id === focusedRelation.sourceId ||
+          node.id === focusedRelation.targetId
+      );
+    }
+    if (focusedNodeId) {
+      const relatedNodeIds = new Set([focusedNodeId]);
+      links.forEach((link) => {
+        if (link.source === focusedNodeId) relatedNodeIds.add(link.target);
+        if (link.target === focusedNodeId) relatedNodeIds.add(link.source);
+      });
+      return nodes.filter((node) => relatedNodeIds.has(node.id));
+    }
+    return nodes;
+  }, [nodes, links, focusedRelation, focusedNodeId]);
 
   const visibleLinks = useMemo(() => {
-    if (!focusedRelation) return links;
-    const focusedLink = focusedRelation.linkId
-      ? links.find((link) => link.id === focusedRelation.linkId)
-      : undefined;
-    if (focusedLink) return [focusedLink];
-    return links.filter(
-      (link) =>
-        link.source === focusedRelation.sourceId &&
-        link.target === focusedRelation.targetId
-    );
-  }, [links, focusedRelation]);
+    if (focusedRelation) {
+      const focusedLink = focusedRelation.linkId
+        ? links.find((link) => link.id === focusedRelation.linkId)
+        : undefined;
+      if (focusedLink) return [focusedLink];
+      return links.filter(
+        (link) =>
+          link.source === focusedRelation.sourceId &&
+          link.target === focusedRelation.targetId
+      );
+    }
+    if (focusedNodeId) {
+      return links.filter(
+        (link) => link.source === focusedNodeId || link.target === focusedNodeId
+      );
+    }
+    return links;
+  }, [links, focusedRelation, focusedNodeId]);
 
   const [chapterFilter, setChapterFilter] = useState<string | null>(null); // null = Tất cả
   const activeChapterFilter =
@@ -249,17 +280,17 @@ export default function GraphScreen() {
   const [formHolder, setFormHolder] = useState('');
 
   // Địa điểm (Location)
-  const [formRegion, setFormRegion] = useState('Đông Vực');
+  const [formRegion, setFormRegion] = useState('Miền Đông');
   const [formTerrain, setFormTerrain] = useState('');
-  const [formDangerLevel, setFormDangerLevel] = useState('Tuyệt đối an toàn');
+  const [formDangerLevel, setFormDangerLevel] = useState('An toàn');
   const [formClimate, setFormClimate] = useState('Ôn hòa');
   const [formRuler, setFormRuler] = useState('');
 
-  // Phe phái (Faction)
+  // Tổ chức (Faction)
   const [formLeader, setFormLeader] = useState('');
   const [formHeadquarters, setFormHeadquarters] = useState('');
   const [formMotto, setFormMotto] = useState('');
-  const [formAlignment, setFormAlignment] = useState<string>('CHÍNH PHÁI');
+  const [formAlignment, setFormAlignment] = useState<string>('ĐỒNG MINH');
 
   // Sự kiện (Event)
   const [formChapter, setFormChapter] = useState('');
@@ -328,6 +359,11 @@ useEffect(() => {
   );
 }, [focusedRelation, isLoading]);
 
+useEffect(() => {
+  if (!focusedNodeId || isLoading) return;
+  graphRef.current?.focusNode(focusedNodeId);
+}, [focusedNodeId, isLoading, filteredNodes, filteredLinks]);
+
 const handleZoomIn = () => {
   graphRef.current?.zoomIn();
 };
@@ -360,16 +396,16 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormRole(defaultType === 'character' ? 'CHÍNH DIỆN' : defaultType === 'event' ? 'BIẾN CỐ' : '');
   setFormSubType(
     defaultType === 'character'
-      ? 'Kiếm khách / Đao khách'
+      ? 'Nhân vật'
       : defaultType === 'faction'
-        ? 'Chính phái'
+        ? 'Đồng minh'
         : ''
   );
   setFormStatus(
     defaultType === 'character'
       ? 'Còn sống'
       : defaultType === 'faction'
-        ? 'Hưng thịnh'
+        ? 'Đang hoạt động'
         : defaultType === 'event'
           ? 'Đã diễn ra'
           : 'Hoạt động'
@@ -387,15 +423,15 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormElement('');
   setFormPower('');
   setFormHolder('');
-  setFormRegion('Đông Vực');
+  setFormRegion('Miền Đông');
   setFormTerrain('');
-  setFormDangerLevel('Tuyệt đối an toàn');
+  setFormDangerLevel('An toàn');
   setFormClimate('Ôn hòa');
   setFormRuler('');
   setFormLeader('');
   setFormHeadquarters('');
   setFormMotto('');
-  setFormAlignment('CHÍNH PHÁI');
+  setFormAlignment('ĐỒNG MINH');
   setFormChapter(chapters[0]?.title || '');
   setFormTime(chapters[0]?.title || '');
   setFormLocation('');
@@ -494,8 +530,8 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormName(node.name || '');
   setFormType(node.type || 'character');
   setFormRole(node.role || '');
-  setFormSubType(node.subType || (node.type === 'faction' ? 'Chính phái' : ''));
-  setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Hưng thịnh' : 'Hoạt động'));
+  setFormSubType(node.subType || (node.type === 'faction' ? 'Đồng minh' : ''));
+  setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Đang hoạt động' : 'Hoạt động'));
   setFormStatusEvent(node.statusEvent || '');
   setFormDesc(node.desc || '');
   setFormDob(node.dob || '');
@@ -509,15 +545,15 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormElement(node.element || '');
   setFormPower(node.power || '');
   setFormHolder(node.holderOrLocation || '');
-  setFormRegion(node.region || 'Đông Vực');
+  setFormRegion(node.region || 'Miền Đông');
   setFormTerrain(node.terrain || '');
-  setFormDangerLevel(node.dangerLevel || 'Tuyệt đối an toàn');
+  setFormDangerLevel(node.dangerLevel || 'An toàn');
   setFormClimate(node.climate || 'Ôn hòa');
   setFormRuler(node.ruler || '');
   setFormLeader(node.leader || '');
   setFormHeadquarters(node.headquarters || '');
   setFormMotto(node.motto || '');
-  setFormAlignment(node.alignment || 'CHÍNH PHÁI');
+  setFormAlignment(node.alignment || 'ĐỒNG MINH');
   setFormChapter(node.chapter || node.time || '');
   setFormTime(node.time || node.chapter || '');
   setFormLocation(node.location || '');
@@ -577,16 +613,16 @@ const handleSaveNode = async () => {
     payload.role = '';
     payload.subType = '';
     payload.status = 'Hoạt động';
-    payload.region = formRegion.trim() || 'Đông Vực';
-    payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
+    payload.region = formRegion.trim() || 'Miền Đông';
+    payload.dangerLevel = formDangerLevel.trim() || 'An toàn';
     payload.climate = formClimate.trim() || 'Ôn hòa';
     payload.ruler = formRuler.trim();
     payload.terrain = formTerrain.trim();
   } else if (formType === 'faction') {
     payload.role = '';
-    payload.subType = formSubType.trim() || 'Chính phái';
-    payload.status = formStatus.trim() || 'Hưng thịnh';
-    if (formStatus === 'Suy tàn' && formStatusEvent.trim()) {
+    payload.subType = formSubType.trim() || 'Đồng minh';
+    payload.status = formStatus.trim() || 'Đang hoạt động';
+    if ((formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && formStatusEvent.trim()) {
       payload.statusEvent = formStatusEvent.trim();
     } else {
       payload.statusEvent = '';
@@ -683,27 +719,12 @@ return (
       </View>
 
       <View style={styles.topBarRight}>
-        <Pressable
-          style={styles.aiBtn}
-          onPress={() => setAiChatOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI Chat">
-          <Text style={styles.aiBtnText}>💬</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.aiBtn, styles.aiStoryBtn]}
-          onPress={() => setAiStoryModalOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI sáng tác câu chuyện">
-          <Text style={styles.aiBtnText}>✨</Text>
-        </Pressable>
         <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
           <Text style={styles.addNodeBtnText}>+</Text>
         </Pressable>
       </View>
     </View>
 
-    {/* Filter Chips Bar */}
     {/* Filter Bar: Chapters + Relationships Toggle */}
     <View style={styles.filterBar}>
       <ScrollView
@@ -766,13 +787,12 @@ return (
     </View>
 
       {
-                focusedRelation && (
+        (focusedRelation || focusedNodeId) && (
                   <View style={styles.focusNotice}>
                     <Text style={styles.focusNoticeText} numberOfLines={1}>
-                      Đang tập trung: {nodes.find((node) => node.id === focusedRelation.sourceId)?.name}
-                      {' → '}
-                      {nodes.find((node) => node.id === focusedRelation.targetId)?.name}
-                      {visibleLinks[0]?.label ? ` · ${visibleLinks[0].label}` : ''}
+              {focusedRelation
+                ? `Đang tập trung: ${nodes.find((node) => node.id === focusedRelation.sourceId)?.name} → ${nodes.find((node) => node.id === focusedRelation.targetId)?.name}${visibleLinks[0]?.label ? ` · ${visibleLinks[0].label}` : ''}`
+                : `Đang xem node và các liên kết: ${nodes.find((node) => node.id === focusedNodeId)?.name}`}
                     </Text>
                     <Pressable onPress={handleShowFullGraph} hitSlop={8}>
                       <Text style={styles.focusNoticeAction}>Toàn đồ thị</Text>
@@ -823,7 +843,7 @@ return (
                       </View>
                       <Text style={styles.emptyCanvasTitle}>Dự án chưa có thực thể nào</Text>
                       <Text style={styles.emptyCanvasDesc}>
-                        Đây là dự án mới của bạn. Hãy bắt đầu xây dựng thế giới câu chuyện bằng cách thêm nhân vật, bảo vật hoặc địa điểm đầu tiên!
+                        Đây là dự án mới của bạn. Hãy bắt đầu phát triển câu chuyện bằng cách thêm nhân vật, vật phẩm hoặc địa điểm đầu tiên!
                       </Text>
                       <Pressable
                         style={styles.emptyCanvasBtn}
@@ -928,157 +948,12 @@ return (
                 )}
               </View>
 
-              {/* Left Drawer / Sidebar Menu */ }
-              <Modal visible={drawerOpen} transparent animationType="none">
-                <View style={styles.drawerBackdrop}>
-                  <Pressable
-                    style={styles.drawerBackdropClickable}
-                    onPress={() => setDrawerOpen(false)}
-                  />
-
-                  <View style={styles.drawerContainer}>
-                    <ScrollView
-                      contentContainerStyle={styles.drawerScroll}
-                      showsVerticalScrollIndicator={false}>
-                      <View style={styles.drawerHeader}>
-                        <Text style={styles.drawerHeaderSub}>DỰ ÁN</Text>
-                        <Text style={styles.drawerProjectTitle}>{currentProject.title}</Text>
-                        <Text style={styles.drawerProjectGenre}>{currentProject.genre}</Text>
-                      </View>
-
-                      <View style={styles.drawerDivider} />
-
-                      <View style={styles.menuItemsList}>
-                        {[
-                          {
-                            num: '01',
-                            title: 'Bản đồ node',
-                            sub: 'Màn hình đồ thị',
-                            active: true,
-                          },
-                          {
-                            num: '02',
-                            title: 'Chi tiết node',
-                            sub: 'Danh sách các node',
-                            badge: `${nodes.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/nodes' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '03',
-                            title: 'Chi tiết chương',
-                            sub: 'Dòng thời gian & sự kiện',
-                            badge: `${chapters.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/events' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '04',
-                            title: 'Địa điểm',
-                            badge: `${nodes.filter((n) => n.type === 'location').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/locations' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '05',
-                            title: 'Nhân vật',
-                            badge: `${nodes.filter((n) => n.type === 'character').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/characters' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '06',
-                            title: 'Phe phái',
-                            badge: `${nodes.filter((n) => n.type === 'faction').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/factions' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '07',
-                            title: 'Vật phẩm',
-                            badge: `${nodes.filter((n) => n.type === 'item').length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/items' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                          {
-                            num: '08',
-                            title: 'Mối liên kết',
-                            sub: 'Tất cả cạnh',
-                            badge: `${links.length}`,
-                            onPress: () => {
-                              setDrawerOpen(false);
-                              router.push({
-                                pathname: '/graph/links' as any,
-                                params: { projectId: currentProject.id },
-                              });
-                            },
-                          },
-                        ].map((item) => (
-                          <Pressable
-                            key={item.num}
-                            style={[styles.drawerMenuItem, item.active && styles.drawerMenuItemActive]}
-                            onPress={() => {
-                              if (item.onPress) item.onPress();
-                              else setDrawerOpen(false);
-                            }}>
-                            <Text style={[styles.menuNum, item.active && styles.menuNumActive]}>
-                              {item.num}
-                            </Text>
-                            <View style={styles.menuTitleBox}>
-                              <Text style={[styles.menuTitle, item.active && styles.menuTitleActive]}>
-                                {item.title}
-                              </Text>
-                              {item.sub && <Text style={styles.menuSub}>{item.sub}</Text>}
-                            </View>
-                            {item.badge && <Text style={styles.menuBadgeText}>{item.badge}</Text>}
-                          </Pressable>
-                        ))}
-                      </View>
-
-                      <View style={styles.drawerDivider} />
-
-                      <Pressable
-                        style={styles.drawerBackBtn}
-                        onPress={() => {
-                          setDrawerOpen(false);
-                          router.push('/projects' as any);
-                        }}>
-                        <Text style={styles.drawerBackText}>〈 Về danh sách dự án</Text>
-                      </Pressable>
-                    </ScrollView>
-                  </View>
-                </View>
-              </Modal>
+              <GraphSidebar
+                visible={drawerOpen}
+                project={{ ...currentProject, nodes, links }}
+                activeSection="graph"
+                onClose={() => setDrawerOpen(false)}
+              />
 
               {/* Dynamic Add / Edit Node Modal */ }
               <Modal visible={nodeModalOpen} transparent animationType="slide">
@@ -1129,7 +1004,7 @@ return (
                                   setFormId(generateUniqueNodeId(t, nodes));
                                   setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                                   if (t === 'character') {
-                                    setFormSubType('Kiếm khách / Đao khách');
+                                    setFormSubType('Nhân vật');
                                   } else {
                                     setFormSubType('');
                                   }
@@ -1141,7 +1016,7 @@ return (
                                         : t === 'location'
                                           ? 'Hoạt động'
                                           : t === 'faction'
-                                            ? 'Hưng thịnh'
+                                            ? 'Đang hoạt động'
                                             : 'Đã diễn ra'
                                   );
                                 }
@@ -1170,11 +1045,11 @@ return (
                             formType === 'character'
                               ? 'Ví dụ: Lăng Tiêu'
                               : formType === 'item'
-                                ? 'Ví dụ: Kiếm Hoàng Hôn'
+                                ? 'Ví dụ: Hồ Sơ Hoàng Hôn'
                                 : formType === 'location'
-                                  ? 'Ví dụ: Hàn Nguyệt Thành'
+                                  ? 'Ví dụ: Thành phố Bắc Nguyệt'
                                   : formType === 'faction'
-                                    ? 'Ví dụ: Thiên Hạ Minh'
+                                    ? 'Ví dụ: Tập đoàn Thiên Hạ'
                                     : 'Ví dụ: Đêm Hỏa Thiêu'
                           }
                           placeholderTextColor="#665f52"
@@ -1286,7 +1161,7 @@ return (
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Binh khí / Vật phẩm</Text>
+                              <Text style={styles.modalInputLabel}>Vật dụng / Vật phẩm</Text>
                               <FormSelectField
                                 value={formWeapon}
                                 onChange={setFormWeapon}
@@ -1304,17 +1179,17 @@ return (
                           {/* Sect & Personality */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
+                              <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
                               <FormSelectField
                                 value={formSect}
                                 onChange={setFormSect}
                                 options={factionNodes.map((fac) => ({
                                   label: fac.name,
                                   value: fac.name,
-                                  subtitle: fac.alignment || fac.role || 'Môn phái',
+                                  subtitle: fac.alignment || fac.role || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
-                                placeholder="-- Chọn môn phái --"
+                                placeholder="-- Chọn tổ chức --"
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1335,7 +1210,7 @@ return (
                       {formType === 'item' && (
                         <View style={styles.dynamicSectionBox}>
                           <Text style={[styles.dynamicSectionHeader, { color: '#42b883' }]}>
-                            THÔNG TIN BẢO VẬT / VẬT PHẨM
+                            THÔNG TIN VẬT PHẨM
                           </Text>
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1425,7 +1300,7 @@ return (
                                 options={factionNodes.map((fac) => ({
                                   label: fac.name,
                                   value: fac.name,
-                                  subtitle: fac.alignment || 'Môn phái',
+                                  subtitle: fac.alignment || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
                                 placeholder="-- Chọn thế lực cai quản --"
@@ -1439,22 +1314,22 @@ return (
                       {formType === 'faction' && (
                         <View style={styles.dynamicSectionBox}>
                           <Text style={[styles.dynamicSectionHeader, { color: '#d95a38' }]}>
-                            THÔNG TIN PHE PHÁI / MÔN PHÁI
+                            THÔNG TIN TỔ CHỨC
                           </Text>
                           <View style={styles.modalInputGroup}>
-                            <Text style={styles.modalInputLabel}>Phân loại môn phái (Chính / Tà)</Text>
+                            <Text style={styles.modalInputLabel}>Vai trò trong câu chuyện</Text>
                             <FormSelectField
                               value={formSubType}
                               onChange={setFormSubType}
                               options={FACTION_CLASSIFICATIONS}
-                              placeholder="-- Chọn chính hoặc tà --"
+                              placeholder="-- Chọn vai trò --"
                             />
                           </View>
 
-                          {/* Status Dropdown (Hưng thịnh / Suy tàn) */}
+                          {/* Status Dropdown */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Trạng thái phe phái</Text>
+                              <Text style={styles.modalInputLabel}>Trạng thái tổ chức</Text>
                               <FormSelectField
                                 value={formStatus}
                                 onChange={setFormStatus}
@@ -1463,9 +1338,9 @@ return (
                               />
                             </View>
 
-                            {formStatus === 'Suy tàn' && (
+                            {(formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && (
                               <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                                <Text style={styles.modalInputLabel}>Sự kiện dẫn đến suy tàn</Text>
+                                <Text style={styles.modalInputLabel}>Sự kiện dẫn đến thay đổi trạng thái</Text>
                                 <FormSelectField
                                   value={formStatusEvent}
                                   onChange={setFormStatusEvent}
@@ -1481,10 +1356,10 @@ return (
                             )}
                           </View>
 
-                          {/* Minh chủ & Căn cứ */}
+                          {/* Người đại diện & trụ sở */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Minh chủ / Thủ lĩnh</Text>
+                              <Text style={styles.modalInputLabel}>Người đại diện / Thủ lĩnh</Text>
                               <FormSelectField
                                 value={formLeader}
                                 onChange={setFormLeader}
@@ -1498,7 +1373,7 @@ return (
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Tổng đàn / Căn cứ địa</Text>
+                              <Text style={styles.modalInputLabel}>Trụ sở / Cơ sở</Text>
                               <FormSelectField
                                 value={formHeadquarters}
                                 onChange={setFormHeadquarters}
@@ -1519,7 +1394,7 @@ return (
                               style={styles.modalInput}
                               value={formMotto}
                               onChangeText={setFormMotto}
-                              placeholder="Ví dụ: Quy tụ võ lâm / Trảm yêu trừ ma..."
+                              placeholder="Ví dụ: nghiên cứu, hỗ trợ cộng đồng, kinh doanh..."
                               placeholderTextColor="#665f52"
                             />
                           </View>
@@ -1723,13 +1598,13 @@ return (
                                 ) : null}
                                 {selectedNode.weapon ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Binh khí:</Text>
+                                    <Text style={styles.detailItemKey}>Vật dụng:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.weapon}</Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.sect ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Môn phái:</Text>
+                                    <Text style={styles.detailItemKey}>Tổ chức:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.sect}</Text>
                                   </View>
                                 ) : null}
@@ -1818,7 +1693,7 @@ return (
                                 ) : null}
                                 {selectedNode.headquarters ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Tổng đàn:</Text>
+                                    <Text style={styles.detailItemKey}>Trụ sở:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.headquarters}</Text>
                                   </View>
                                 ) : null}
@@ -1933,23 +1808,43 @@ return (
                 existingNodes={nodes}
               />
 
-              {/* AI Story Generator Modal */ }
-              <AIStoryGeneratorModal
-                visible={aiStoryModalOpen}
-                onClose={() => setAiStoryModalOpen(false)}
-                project={currentProject}
-                onSuccess={async () => {
-                  await refreshGraphData(null);
-                }}
-              />
+      {/* AI Story Generator Modal */}
+      <AIStoryGeneratorModal
+        visible={aiStoryModalOpen}
+        onClose={() => setAiStoryModalOpen(false)}
+        project={currentProject}
+        onSuccess={async () => {
+          await refreshGraphData(null);
+        }}
+      />
+
+      {/* Floating AI Action Buttons - Góc dưới bên phải */}
+      <View style={[styles.aiFabContainer, selectedNode && styles.aiFabContainerShifted]}>
+        <Pressable
+          style={styles.aiFabBtnSecondary}
+          onPress={() => setAiChatOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI Chat">
+          <Text style={styles.aiFabIcon}>💬</Text>
+          <Text style={styles.aiFabTextSecondary}>AI Chat</Text>
+        </Pressable>
+        <Pressable
+          style={styles.aiFabBtn}
+          onPress={() => setAiStoryModalOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI tạo truyện">
+          <Text style={styles.aiFabIcon}>✨</Text>
+          <Text style={styles.aiFabText}>AI Tạo truyện</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
-      );
+  );
 }
 
-      const styles = StyleSheet.create({
-        safeArea: {
-        flex: 1,
-      backgroundColor: ThemeColors.background,
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: ThemeColors.background,
   },
       topBar: {
         flexDirection: 'row',
@@ -2339,117 +2234,6 @@ return (
       fontSize: 12,
       fontWeight: '600',
   },
-      drawerBackdrop: {
-        flex: 1,
-      flexDirection: 'row',
-      backgroundColor: 'rgba(0, 0, 0, 0.65)',
-  },
-      drawerBackdropClickable: {
-        position: 'absolute',
-      top: 0,
-      bottom: 0,
-      left: 0,
-      right: 0,
-  },
-      drawerContainer: {
-        width: '78%',
-      maxWidth: 340,
-      height: '100%',
-      backgroundColor: '#13110e',
-      borderRightWidth: 1,
-      borderRightColor: '#6a5323',
-  },
-      drawerScroll: {
-        paddingHorizontal: 20,
-      paddingTop: 36,
-      paddingBottom: 40,
-  },
-      drawerHeader: {
-        marginBottom: 16,
-  },
-      drawerHeaderSub: {
-        fontSize: 10.5,
-      letterSpacing: 3,
-      color: '#a88137',
-      fontWeight: '700',
-      fontFamily: AppFonts.mono,
-      marginBottom: 8,
-  },
-      drawerProjectTitle: {
-        fontSize: 24,
-      color: ThemeColors.textPrimary,
-      fontFamily: AppFonts.serif,
-      fontWeight: '700',
-      lineHeight: 30,
-  },
-      drawerProjectGenre: {
-        fontSize: 12.5,
-      color: '#7a7263',
-      marginTop: 4,
-      fontFamily: AppFonts.sans,
-  },
-      drawerDivider: {
-        height: 1,
-      backgroundColor: '#26221a',
-      marginVertical: 14,
-  },
-      menuItemsList: {
-        gap: 4,
-  },
-      drawerMenuItem: {
-        flexDirection: 'row',
-      alignItems: 'center',
-      paddingVertical: 10,
-      paddingHorizontal: 10,
-      borderRadius: 6,
-  },
-      drawerMenuItemActive: {
-        backgroundColor: 'rgba(229,169,60,0.1)',
-  },
-      menuNum: {
-        fontSize: 11,
-      fontFamily: AppFonts.mono,
-      color: '#6b6455',
-      width: 28,
-  },
-      menuNumActive: {
-        color: '#db9d33',
-      fontWeight: '700',
-  },
-      menuTitleBox: {
-        flex: 1,
-  },
-      menuTitle: {
-        fontSize: 14.5,
-      fontWeight: '600',
-      color: '#c2b9aa',
-      fontFamily: AppFonts.sans,
-  },
-      menuTitleActive: {
-        color: '#db9d33',
-      fontWeight: '700',
-  },
-      menuSub: {
-        fontSize: 11,
-      color: '#665f52',
-      marginTop: 2,
-      fontFamily: AppFonts.sans,
-  },
-      menuBadgeText: {
-        fontSize: 12,
-      color: '#8f887b',
-      fontFamily: AppFonts.mono,
-  },
-      drawerBackBtn: {
-        paddingVertical: 14,
-      paddingHorizontal: 8,
-  },
-      drawerBackText: {
-        fontSize: 13.5,
-      color: '#a88137',
-      fontWeight: '600',
-      fontFamily: AppFonts.sans,
-  },
       modalOverlay: {
         flex: 1,
       backgroundColor: 'rgba(0, 0, 0, 0.75)',
@@ -2730,9 +2514,65 @@ return (
       justifyContent: 'center',
       alignItems: 'center',
   },
-      refreshIdText: {
-        color: '#e5a93c',
-      fontSize: 11,
-      fontWeight: '600',
+  refreshIdText: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  aiFabContainer: {
+    position: 'absolute',
+    bottom: 24,
+    right: 16,
+    flexDirection: 'column',
+    gap: 10,
+    alignItems: 'flex-end',
+    zIndex: 999,
+  },
+  aiFabContainerShifted: {
+    bottom: 236,
+  },
+  aiFabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 28,
+    backgroundColor: '#2a2010',
+    borderWidth: 1.5,
+    borderColor: '#e5a93c',
+    gap: 8,
+    shadowColor: '#e5a93c',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  aiFabBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: '#1a1611',
+    borderWidth: 1,
+    borderColor: '#383226',
+    gap: 6,
+    elevation: 5,
+  },
+  aiFabIcon: {
+    fontSize: 18,
+  },
+  aiFabText: {
+    color: '#e5a93c',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+    letterSpacing: 0.3,
+  },
+  aiFabTextSecondary: {
+    color: '#ded5c7',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
   },
 });

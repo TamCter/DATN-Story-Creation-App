@@ -3,8 +3,9 @@ const router = express.Router();
 const chapterController = require('../controllers/chapterController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
+router.use(verifyToken);
 router.get('/:id', chapterController.getChapterById);
-router.put('/:id', verifyToken, chapterController.updateChapter);
+router.put('/:id', chapterController.updateChapter);
 router.delete('/:id', chapterController.deleteChapter);
 
 module.exports = router;

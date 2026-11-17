@@ -23,6 +23,7 @@ import {
 } from '@/constants/story-data';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import { projectStore } from '@/services/project-store';
+import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 interface LinkExtendedMeta {
   category: string;
@@ -33,72 +34,72 @@ interface LinkExtendedMeta {
 const LINK_METAS: Record<string, LinkExtendedMeta> = {
   l1: {
     category: 'TƯƠNG TRỢ & TÌNH CẢM',
-    contextNote: 'Lăng Tiêu tin tưởng Mộc Lan vì được nàng cứu chữa vết thương trí mạng.',
+    contextNote: 'Lăng Tiêu tin tưởng Mộc Lan sau khi cô cung cấp thông tin về vụ việc.',
     tone: 'loyalty',
   },
   l2: {
-    category: 'ÂN OÁN HUYNH ĐỆ',
-    contextNote: 'Từng là huynh đệ kết nghĩa sinh tử trước khi thảm kịch xảy ra.',
+    category: 'QUAN HỆ CỘNG SỰ',
+    contextNote: 'Từng là cộng sự thân thiết trước khi vụ việc xảy ra.',
     tone: 'loyalty',
   },
   l3: {
-    category: 'BẢO VẬT CHÍ TÔN',
-    contextNote: 'Lăng Tiêu giữ chuôi kiếm – mảnh vỡ duy nhất còn lưu lại sau đêm tàn sát.',
+    category: 'TÀI LIỆU LIÊN QUAN',
+    contextNote: 'Lăng Tiêu đang lưu giữ bản ghi duy nhất còn lại sau vụ cháy.',
     tone: 'possession',
   },
   l4: {
-    category: 'QUYỀN LỰC VÕ LÂM',
-    contextNote: 'Triệu Vô Cực là minh chủ tối cao thống lĩnh toàn bộ liên minh.',
+    category: 'VAI TRÒ TỔ CHỨC',
+    contextNote: 'Triệu Vô Cực điều hành Tập đoàn Thiên Hạ.',
     tone: 'sect',
   },
   l5: {
-    category: 'MÔN PHÁI TRUYỀN THỪA',
-    contextNote: 'Mộc Lan là đệ tử y thuật chân truyền của cốc chủ Bạch Liên Cốc.',
+    category: 'QUAN HỆ CÔNG VIỆC',
+    contextNote: 'Mộc Lan làm việc tại Viện Bạch Liên.',
     tone: 'sect',
   },
   l6: {
     category: 'BIẾN CỐ & SỐNG CÒN',
-    contextNote: 'Cả sơn trang bị diệt môn, chỉ có Lăng Tiêu may mắn trốn thoát trong biển lửa.',
+    contextNote: 'Vụ cháy xảy ra tại điền trang nhà họ Lăng; Lăng Tiêu là nhân chứng sống sót.',
     tone: 'event',
   },
   l7: {
     category: 'ÂM MƯU PHẢN BỘI',
-    contextNote: 'Triệu Vô Cực đứng sau thảm án nhằm diệt trừ đối thủ và đoạt bảo kiếm.',
+    contextNote: 'Triệu Vô Cực bị nghi có liên quan đến vụ cháy và việc hồ sơ thất lạc.',
     tone: 'hostile',
   },
   l8: {
     category: 'ĐỊA DANH BIẾN CỐ',
-    contextNote: 'Thảm kịch hỏa thiêu diễn ra tại sơn trang nằm ngay ngoại ô thành.',
+    contextNote: 'Vụ cháy xảy ra tại điền trang ở ngoại ô thành phố.',
     tone: 'location',
   },
   l9: {
-    category: 'THẤT LẠC HIỂM ĐỊA',
-    contextNote: 'Mảnh mũi kiếm rơi xuống đáy vực sâu ngút ngàn, sát khí phủ kín.',
+    category: 'ĐỊA ĐIỂM THẤT LẠC',
+    contextNote: 'Một phần hồ sơ được cho là đã bị vứt bỏ tại khu vực ven sông.',
     tone: 'location',
   },
   l10: {
-    category: 'ĐẠI HỘI VÕ LÂM',
-    contextNote: 'Mảnh thân kiếm thứ hai bất ngờ xuất hiện giữa lúc liên minh tụ hội.',
+    category: 'CUỘC GẶP NHÂN CHỨNG',
+    contextNote: 'Một phần hồ sơ bất ngờ xuất hiện tại cuộc gặp ở Nguyệt Hạ.',
     tone: 'possession',
   },
   l11: {
     category: 'THẾ LỰC TỔ CHỨC',
-    contextNote: 'Thiên Hạ Minh đứng ra triệu tập toàn bộ các phái nhằm mưu đồ thâu tóm.',
+    contextNote: 'Tập đoàn Thiên Hạ đứng ra tổ chức cuộc gặp giữa các nhân chứng.',
     tone: 'sect',
   },
   l12: {
     category: 'DÒ XÉT & ĐỐI KHÁNG',
-    contextNote: 'Thiên Hạ Minh bí mật cài gián điệp theo dõi nhất cử nhất động của Bạch Liên Cốc.',
+    contextNote: 'Tập đoàn Thiên Hạ bí mật theo dõi hoạt động của Viện Bạch Liên.',
     tone: 'hostile',
   },
   l13: {
     category: 'CỐT TRUYỆN CHÍNH',
-    contextNote: 'Toàn bộ cuộc đào thoát xoay quanh nỗ lực sinh tồn của Lăng Tiêu.',
+    contextNote: 'Cuộc rời khỏi thành phố xoay quanh nỗ lực bảo vệ bản thân của Lăng Tiêu.',
     tone: 'event',
   },
   l14: {
     category: 'ĐÍCH ĐẾN BƯỚC ĐẦU',
-    contextNote: 'Lăng Tiêu kiệt sức vượt qua biên giới tuyết phủ và dừng chân tại Hàn Nguyệt Thành.',
+    contextNote: 'Lăng Tiêu rời khỏi thành phố và tìm đến Thành phố Bắc Nguyệt.',
     tone: 'location',
   },
 };
@@ -107,6 +108,8 @@ export default function LinksScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
   const initialQuery = (params.query as string) || '';
+  const initialEntityId = typeof params.entityId === 'string' ? params.entityId : 'all';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -149,7 +152,11 @@ export default function LinksScreen() {
   const nodes = currentProject.nodes;
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>('all');
+  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>(initialEntityId);
+
+  useEffect(() => {
+    setSelectedEntityFilter(initialEntityId);
+  }, [initialEntityId]);
 
   // Add Link Modal
   const [addModalOpen, setAddModalOpen] = useState(false);
@@ -353,8 +360,8 @@ export default function LinksScreen() {
               styles.backBtn,
               pressed && styles.backBtnPressed,
             ]}
-            onPress={() => router.back()}>
-            <Text style={styles.backBtnIcon}>‹</Text>
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
           </Pressable>
           <View>
             <Text style={styles.headerTitle}>Mối liên kết</Text>
@@ -405,7 +412,7 @@ export default function LinksScreen() {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Tìm kiếm nhân vật, bảo vật, kiểu quan hệ..."
+            placeholder="Tìm kiếm nhân vật, vật phẩm, kiểu quan hệ..."
             placeholderTextColor="#736a5c"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -422,8 +429,8 @@ export default function LinksScreen() {
           {[
             { id: 'all', label: `Tất cả (${links.length})` },
             { id: 'characters', label: 'Nhân vật ↔ Nhân vật' },
-            { id: 'factions', label: 'Môn phái & Thế lực' },
-            { id: 'items', label: 'Bảo vật & Thần khí' },
+            { id: 'factions', label: 'Tổ chức & Nhóm' },
+            { id: 'items', label: 'Vật phẩm' },
             { id: 'locations', label: 'Sự kiện & Địa điểm' },
           ].map((item) => {
             const isSelected = selectedCategory === item.id;
@@ -434,7 +441,10 @@ export default function LinksScreen() {
                   styles.filterChip,
                   isSelected && styles.filterChipSelected,
                 ]}
-                onPress={() => setSelectedCategory(item.id)}>
+                onPress={() => {
+                  setSelectedCategory(item.id);
+                  if (item.id === 'all') setSelectedEntityFilter('all');
+                }}>
                 <Text
                   style={[
                     styles.filterChipText,
@@ -776,6 +786,12 @@ export default function LinksScreen() {
           </View>
         </KeyboardAvoidingView>
       </Modal>
+      <GraphSidebar
+        visible={sidebarVisible}
+        project={currentProject}
+        activeSection="links"
+        onClose={() => setSidebarVisible(false)}
+      />
     </SafeAreaView>
   );
 }

@@ -31,7 +31,6 @@ app.get('/', (req, res) => {
       auth: {
         register: 'POST /api/auth/register',
         login: 'POST /api/auth/login',
-        guest: 'POST /api/auth/guest',
         me: 'GET /api/auth/me',
       },
       seed: {

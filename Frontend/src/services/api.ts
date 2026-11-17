@@ -176,12 +176,6 @@ class ApiService {
     });
   }
 
-  async guestLogin(): Promise<AuthResponse> {
-    return this.request<AuthResponse>('/auth/guest', {
-      method: 'POST',
-    });
-  }
-
   async getMe(): Promise<UserResponse> {
     return this.request<UserResponse>('/auth/me', {
       method: 'GET',

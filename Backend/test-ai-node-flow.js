@@ -118,10 +118,18 @@ async function run() {
     }
     console.log('      Backend và Neo4j đang hoạt động.');
 
-    console.log('[2/5] Đăng nhập guest và tạo project tạm...');
-    const guest = await apiRequest('/auth/guest', { method: 'POST' });
-    const token = guest.data?.token;
-    if (!token) throw new Error('Backend không trả guest token.');
+    console.log('[2/5] Đăng ký tài khoản kiểm thử và tạo project tạm...');
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = await apiRequest('/auth/register', {
+      method: 'POST',
+      body: JSON.stringify({
+        penName: `AI Node Test ${uniqueId}`,
+        email: `ai-node-test-${uniqueId}@example.test`,
+        password: 'TestPassword123!',
+      }),
+    });
+    const token = account.data?.token;
+    if (!token) throw new Error('Backend không trả JWT sau khi đăng ký.');
     authHeaders = { Authorization: `Bearer ${token}` };
 
     const project = await apiRequest('/projects', {

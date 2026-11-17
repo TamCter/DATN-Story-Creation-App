@@ -11,13 +11,13 @@ Backend/
 ├── config/
 │   └── neo4j.js              # Khởi tạo driver Neo4j, helper truy vấn Cypher & chuẩn hóa kiểu dữ liệu
 ├── controllers/
-│   ├── authController.js     # Đăng ký, đăng nhập, lấy thông tin cá nhân và tài khoản mẫu
+│   ├── authController.js     # Đăng ký, đăng nhập và lấy thông tin cá nhân
 │   ├── projectController.js  # CRUD dự án cốt truyện
-│   ├── nodeController.js     # CRUD các nút (Nhân vật, Vật phẩm, Phe phái, Sự kiện, Địa điểm)
+│   ├── nodeController.js     # CRUD các nút (Nhân vật, Vật phẩm, Tổ chức, Sự kiện, Địa điểm)
 │   ├── linkController.js     # CRUD mối quan hệ giữa các nút (RELATES_TO)
 │   ├── graphController.js    # Lấy toàn bộ đồ thị, tìm đường đi ngắn nhất (Shortest Path), lân cận (Neighborhood)
 │   ├── chapterController.js  # CRUD các chương truyện và sự kiện trong chương
-│   └── seedController.js     # Nạp / Xóa dữ liệu mẫu ban đầu (Hoàng Hôn Kiếm Vương)
+│   └── seedController.js     # Nạp / Xóa dữ liệu mẫu ban đầu (Hồ Sơ Hoàng Hôn)
 ├── middlewares/
 │   ├── authMiddleware.js     # Xác thực JWT Token bảo vệ các endpoint
 │   └── errorHandler.js       # Xử lý lỗi tập trung và thông báo thân thiện
@@ -111,15 +111,16 @@ Bài test tạo project tạm, gọi AI, lưu node vào Neo4j, xác nhận node 
 |---|---|---|
 | `POST` | `/api/auth/register` | **Đăng ký tài khoản mới** (bút danh, email, mật khẩu) |
 | `POST` | `/api/auth/login` | **Đăng nhập** lấy JWT Bearer token và thông tin tác giả |
-| `POST` | `/api/auth/guest` | **Đăng nhập nhanh tài khoản mẫu** (tiện cho trải nghiệm ngay) |
 | `GET` | `/api/auth/me` | Lấy thông tin tài khoản hiện tại (yêu cầu Header `Authorization: Bearer <token>`) |
+
+Các API dự án, node, chương, liên kết, đồ thị và AI yêu cầu JWT từ tài khoản đã đăng ký hoặc đăng nhập.
 
 ---
 
 ### 2. Dữ liệu mẫu (Seed Data)
 | Method | Endpoint | Mô tả |
 |---|---|---|
-| `POST` | `/api/seed` | **Nạp dữ liệu mẫu ban đầu** ("Hoàng Hôn Kiếm Vương" gồm 11 nút, 14 liên kết, 3 chương) |
+| `POST` | `/api/seed` | **Nạp dữ liệu mẫu ban đầu** ("Hồ Sơ Hoàng Hôn" gồm 11 nút, 14 liên kết, 3 chương) |
 | `DELETE` | `/api/seed/clear` | Xóa sạch toàn bộ dữ liệu trong Neo4j |
 
 ---
@@ -138,17 +139,17 @@ Bài test tạo project tạm, gọi AI, lưu node vào Neo4j, xác nhận node 
 ```json
 {
   "id": "project-1",
-  "title": "Hoàng Hôn Kiếm Vương",
-  "genre": "Kiếm hiệp · Huyền huyễn",
+  "title": "Hồ Sơ Hoàng Hôn",
+  "genre": "Trinh thám · Tâm lý",
   "number": "№ 01",
-  "desc": "Câu chuyện kiếm hiệp đồ thị về mảnh kiếm Hoàng Hôn..."
+  "desc": "Câu chuyện về một hồ sơ thất lạc và những mối liên hệ bị che giấu..."
 }
 ```
 
 ---
 
 ### 3. Quản lý Nút (Story Nodes)
-Các loại nút hỗ trợ: `character` (Nhân vật), `item` (Vật phẩm), `faction` (Phe phái), `event` (Sự kiện), `location` (Địa điểm).
+Các loại nút hỗ trợ: `character` (Nhân vật), `item` (Vật phẩm), `faction` (Tổ chức), `event` (Sự kiện), `location` (Địa điểm).
 
 | Method | Endpoint | Mô tả |
 |---|---|---|
@@ -165,11 +166,11 @@ Các loại nút hỗ trợ: `character` (Nhân vật), `item` (Vật phẩm), `
   "name": "Lăng Tiêu",
   "type": "character",
   "role": "NHÂN VẬT CHÍNH",
-  "subType": "KIẾM KHÁCH",
-  "desc": "Kiếm sĩ lưu vong mang theo chuôi kiếm Hoàng Hôn.",
+  "subType": "PHÓNG VIÊN ĐIỀU TRA",
+  "desc": "Phóng viên độc lập đang lần theo dấu vết một vụ việc cũ.",
   "x": 185,
   "y": 355,
-  "weapon": "Chuôi Kiếm Hoàng Hôn",
+  "weapon": "Máy ghi âm và bản ghi gốc",
   "sect": "Tự do",
   "personality": "Trầm mặc, kiên định"
 }

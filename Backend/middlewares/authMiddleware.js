@@ -1,8 +1,18 @@
 const jwt = require('jsonwebtoken');
 
 const JWT_SECRET = process.env.JWT_SECRET;
+const DISABLED_ACCOUNT_IDS = new Set(['user-guest-demo']);
+const DISABLED_ACCOUNT_EMAILS = new Set(['guest@storyapp.vn']);
+
 if (!JWT_SECRET) {
   throw new Error('JWT_SECRET environment variable is missing or empty.');
+}
+
+function isDisabledAccount(identity) {
+  return (
+    DISABLED_ACCOUNT_IDS.has(identity.id) ||
+    DISABLED_ACCOUNT_EMAILS.has(identity.email?.toLowerCase())
+  );
 }
 
 /**
@@ -22,6 +32,13 @@ function verifyToken(req, res, next) {
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded.id || isDisabledAccount(decoded)) {
+      return res.status(401).json({
+        success: false,
+        message: 'Tài khoản không còn được phép truy cập. Vui lòng đăng nhập bằng tài khoản hợp lệ.',
+      });
+    }
+
     req.user = decoded;
     next();
   } catch (error) {
@@ -39,31 +56,8 @@ function verifyToken(req, res, next) {
   }
 }
 
-/**
- * Middleware tùy chọn: Nếu có Token thì gắn req.user, không có vẫn cho qua
- */
-function optionalAuth(req, res, next) {
-  const authHeader = req.headers.authorization;
-
-  if (!authHeader || !authHeader.startsWith('Bearer ')) {
-    req.user = null;
-    return next();
-  }
-
-  const token = authHeader.split(' ')[1];
-
-  try {
-    const decoded = jwt.verify(token, JWT_SECRET);
-    req.user = decoded;
-  } catch {
-    req.user = null;
-  }
-
-  next();
-}
-
 module.exports = {
   verifyToken,
-  optionalAuth,
+  isDisabledAccount,
   JWT_SECRET,
 };
