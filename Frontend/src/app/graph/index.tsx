@@ -60,7 +60,9 @@ export default function GraphScreen() {
     typeof params.focusTargetId === 'string' ? params.focusTargetId : null;
   const routeFocusLinkId =
     typeof params.focusLinkId === 'string' ? params.focusLinkId : null;
-  const routeFocusKey = `${projectId}:${routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
+  const routeFocusNodeId =
+    typeof params.focusNodeId === 'string' ? params.focusNodeId : null;
+  const routeFocusKey = `${projectId}:${routeFocusNodeId || routeFocusLinkId || `${routeFocusSourceId || ''}>${routeFocusTargetId || ''}`}`;
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     // Chỉ nạp dữ liệu mẫu nếu ID thực sự khớp chính xác với dự án mẫu, không fallback sai lệch
@@ -84,7 +86,7 @@ export default function GraphScreen() {
   const [nodes, setNodes] = useState<StoryNode[]>(currentProject.nodes || []);
   const [links, setLinks] = useState<StoryLink[]>(currentProject.links || []);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(
-    routeFocusSourceId
+    routeFocusSourceId || routeFocusNodeId
   );
   const [dismissedFocusKey, setDismissedFocusKey] = useState<string | null>(null);
 
@@ -115,7 +117,7 @@ export default function GraphScreen() {
             setNodes(proj.nodes || []);
             setLinks(proj.edges || proj.links || []);
             setSelectedNodeId((selectedId) => {
-              const desiredId = routeFocusSourceId || selectedId;
+              const desiredId = routeFocusSourceId || routeFocusNodeId || selectedId;
               return desiredId && proj.nodes?.some((node) => node.id === desiredId)
                 ? desiredId
                 : null;
@@ -131,7 +133,7 @@ export default function GraphScreen() {
       return () => {
         isFocused = false;
       };
-    }, [projectId, routeFocusSourceId])
+    }, [projectId, routeFocusSourceId, routeFocusNodeId])
   );
 
   const chapters = useMemo(() => {
@@ -179,27 +181,55 @@ export default function GraphScreen() {
     routeFocusLinkId,
   ]);
 
+  const focusedNodeId = useMemo(() => {
+    if (
+      !routeFocusNodeId ||
+      dismissedFocusKey === routeFocusKey ||
+      (!isLoading && !nodes.some((node) => node.id === routeFocusNodeId))
+    ) {
+      return null;
+    }
+    return routeFocusNodeId;
+  }, [dismissedFocusKey, routeFocusKey, isLoading, nodes, routeFocusNodeId]);
+
   const visibleNodes = useMemo(() => {
-    if (!focusedRelation) return nodes;
-    return nodes.filter(
-      (node) =>
-        node.id === focusedRelation.sourceId ||
-        node.id === focusedRelation.targetId
-    );
-  }, [nodes, focusedRelation]);
+    if (focusedRelation) {
+      return nodes.filter(
+        (node) =>
+          node.id === focusedRelation.sourceId ||
+          node.id === focusedRelation.targetId
+      );
+    }
+    if (focusedNodeId) {
+      const relatedNodeIds = new Set([focusedNodeId]);
+      links.forEach((link) => {
+        if (link.source === focusedNodeId) relatedNodeIds.add(link.target);
+        if (link.target === focusedNodeId) relatedNodeIds.add(link.source);
+      });
+      return nodes.filter((node) => relatedNodeIds.has(node.id));
+    }
+    return nodes;
+  }, [nodes, links, focusedRelation, focusedNodeId]);
 
   const visibleLinks = useMemo(() => {
-    if (!focusedRelation) return links;
-    const focusedLink = focusedRelation.linkId
-      ? links.find((link) => link.id === focusedRelation.linkId)
-      : undefined;
-    if (focusedLink) return [focusedLink];
-    return links.filter(
-      (link) =>
-        link.source === focusedRelation.sourceId &&
-        link.target === focusedRelation.targetId
-    );
-  }, [links, focusedRelation]);
+    if (focusedRelation) {
+      const focusedLink = focusedRelation.linkId
+        ? links.find((link) => link.id === focusedRelation.linkId)
+        : undefined;
+      if (focusedLink) return [focusedLink];
+      return links.filter(
+        (link) =>
+          link.source === focusedRelation.sourceId &&
+          link.target === focusedRelation.targetId
+      );
+    }
+    if (focusedNodeId) {
+      return links.filter(
+        (link) => link.source === focusedNodeId || link.target === focusedNodeId
+      );
+    }
+    return links;
+  }, [links, focusedRelation, focusedNodeId]);
 
   const [chapterFilter, setChapterFilter] = useState<string | null>(null); // null = Tất cả
   const activeChapterFilter =
@@ -327,6 +357,11 @@ useEffect(() => {
     focusedRelation.targetId
   );
 }, [focusedRelation, isLoading]);
+
+useEffect(() => {
+  if (!focusedNodeId || isLoading) return;
+  graphRef.current?.focusNode(focusedNodeId);
+}, [focusedNodeId, isLoading]);
 
 const handleZoomIn = () => {
   graphRef.current?.zoomIn();
@@ -766,13 +801,12 @@ return (
     </View>
 
       {
-                focusedRelation && (
+        (focusedRelation || focusedNodeId) && (
                   <View style={styles.focusNotice}>
                     <Text style={styles.focusNoticeText} numberOfLines={1}>
-                      Đang tập trung: {nodes.find((node) => node.id === focusedRelation.sourceId)?.name}
-                      {' → '}
-                      {nodes.find((node) => node.id === focusedRelation.targetId)?.name}
-                      {visibleLinks[0]?.label ? ` · ${visibleLinks[0].label}` : ''}
+              {focusedRelation
+                ? `Đang tập trung: ${nodes.find((node) => node.id === focusedRelation.sourceId)?.name} → ${nodes.find((node) => node.id === focusedRelation.targetId)?.name}${visibleLinks[0]?.label ? ` · ${visibleLinks[0].label}` : ''}`
+                : `Đang xem node và các liên kết: ${nodes.find((node) => node.id === focusedNodeId)?.name}`}
                     </Text>
                     <Pressable onPress={handleShowFullGraph} hitSlop={8}>
                       <Text style={styles.focusNoticeAction}>Toàn đồ thị</Text>

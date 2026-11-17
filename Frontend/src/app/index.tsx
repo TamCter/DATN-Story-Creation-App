@@ -381,6 +381,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
+                    key={`password-${showPassword}-${tab}`}
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}
@@ -388,6 +389,10 @@ export default function AuthScreen() {
                     placeholder="Mật khẩu (ít nhất 6 ký tự)"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showPassword}
+                    textContentType={tab === 'register' ? 'newPassword' : 'password'}
+                    autoComplete={tab === 'register' ? 'new-password' : 'current-password'}
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     editable={!isSubmitting}
                   />
                   <Pressable
@@ -401,6 +406,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'confirmPassword' && styles.inputWrapperFocused]}>
                   <TextInput
+                    key={`confirm-password-${showConfirmPassword}-${tab}`}
                     style={styles.textInputWithIcon}
                     value={confirmPassword}
                     onChangeText={(val) =>
@@ -410,6 +416,10 @@ export default function AuthScreen() {
                     placeholder="Nhập lại mật khẩu"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showConfirmPassword}
+                    textContentType="newPassword"
+                    autoComplete="new-password"
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     editable={!isSubmitting}
                   />
                   <Pressable
@@ -441,6 +451,7 @@ export default function AuthScreen() {
 
                 <View style={[styles.inputWrapperWithIcon, focusedField === 'password' && styles.inputWrapperFocused]}>
                   <TextInput
+                    key={`password-${showPassword}-${tab}`}
                     style={styles.textInputWithIcon}
                     value={password}
                     onChangeText={(val) => handleFieldChange(setPassword, val)}
@@ -448,6 +459,10 @@ export default function AuthScreen() {
                     placeholder="Mật khẩu"
                     placeholderTextColor="#685f50"
                     secureTextEntry={!showPassword}
+                    textContentType="password"
+                    autoComplete="current-password"
+                    autoCapitalize="none"
+                    autoCorrect={false}
                     editable={!isSubmitting}
                   />
                   <Pressable

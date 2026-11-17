@@ -270,6 +270,18 @@ export default function FactionsScreen() {
               headquarters: 'Bản đồ võ lâm',
               relations: [],
             };
+            const factionLinks = currentProject.links.filter(
+              (link) => link.source === faction.id || link.target === faction.id
+            );
+            const factionRelations = factionLinks.map((link) => {
+              const targetId = link.source === faction.id ? link.target : link.source;
+              return {
+                id: link.id,
+                label: link.label || link.category || 'Liên hệ',
+                target: currentProject.nodes.find((node) => node.id === targetId)?.name || 'Thực thể',
+                tone: link.tone,
+              };
+            });
 
             const isOrthodox = extra.alignment === 'CHÍNH PHÁI';
             const isNeutral = extra.alignment === 'TRUNG LẬP';
@@ -299,28 +311,13 @@ export default function FactionsScreen() {
                       </Text>
                     </View>
                     <View style={styles.titleArea}>
-                      <Text style={styles.factionName}>{faction.name}</Text>
-                      <Text style={styles.factionSubtype}>
+                      <Text style={styles.factionName} numberOfLines={2}>
+                        {faction.name}
+                      </Text>
+                      <Text style={styles.factionSubtype} numberOfLines={1}>
                         {faction.subType || 'THẾ LỰC GIANG HỒ'}
                       </Text>
                     </View>
-                  </View>
-
-                  <View
-                    style={[
-                      styles.alignmentBadge,
-                      {
-                        borderColor: accentColor,
-                        backgroundColor: isOrthodox
-                          ? 'rgba(217, 90, 56, 0.12)'
-                          : isNeutral
-                          ? 'rgba(66, 184, 131, 0.12)'
-                          : 'rgba(159, 112, 207, 0.12)',
-                      },
-                    ]}>
-                    <Text style={[styles.alignmentBadgeText, { color: accentColor }]}>
-                      {extra.alignment}
-                    </Text>
                   </View>
                 </View>
 
@@ -359,20 +356,20 @@ export default function FactionsScreen() {
                 </View>
 
                 {/* Tactical Relations in Martial Arts */}
-                {extra.relations && extra.relations.length > 0 && (
+                {factionRelations.length > 0 && (
                   <View style={styles.relationsBox}>
                     <Text style={styles.relationsTitle}>QUAN HỆ VÕ LÂM</Text>
                     <View style={styles.relationTagsWrap}>
-                      {extra.relations.map((rel, rIdx) => {
+                      {factionRelations.map((rel) => {
                         const tagColor =
                           rel.tone === 'hostile'
                             ? '#e05252'
-                            : rel.tone === 'allied'
+                            : rel.tone === 'loyalty' || rel.tone === 'sect'
                             ? '#42b883'
                             : '#e5a93c';
                         return (
                           <View
-                            key={rIdx}
+                            key={rel.id}
                             style={[
                               styles.relationTag,
                               { borderColor: 'rgba(229,169,60,0.2)' },
@@ -400,11 +397,11 @@ export default function FactionsScreen() {
                     onPress={() => {
                       router.push({
                         pathname: '/graph/links' as any,
-                        params: { projectId: currentProject.id, query: faction.name },
+                        params: { projectId: currentProject.id, entityId: faction.id },
                       });
                     }}>
                     <Text style={styles.actionOutlineBtnText}>
-                      Xem liên kết ({extra.relations?.length ?? 0})
+                      Xem liên kết ({factionLinks.length})
                     </Text>
                   </Pressable>
 
@@ -418,6 +415,7 @@ export default function FactionsScreen() {
                         pathname: '/graph' as any,
                         params: {
                           projectId: currentProject.id,
+                          focusNodeId: faction.id,
                         },
                       });
                     }}>
@@ -759,6 +757,7 @@ const styles = StyleSheet.create({
   },
   titleArea: {
     flex: 1,
+    minWidth: 0,
   },
   factionName: {
     fontFamily: AppFonts.serif,
@@ -772,18 +771,6 @@ const styles = StyleSheet.create({
     color: '#8c7746',
     fontFamily: AppFonts.mono,
     marginTop: 2,
-  },
-  alignmentBadge: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 4,
-    borderWidth: 1,
-  },
-  alignmentBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    letterSpacing: 1.2,
-    fontFamily: AppFonts.mono,
   },
   loreBlock: {
     borderLeftWidth: 2,

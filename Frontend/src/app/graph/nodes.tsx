@@ -467,9 +467,11 @@ export default function NodesDetailScreen() {
                       ]}>
                       <Text style={[styles.nodeSymbol, { color: config.color }]}>{config.symbol}</Text>
                     </View>
-                    <View>
-                      <Text style={styles.nodeName}>{node.name}</Text>
-                      <Text style={styles.nodeTypeSub}>
+                    <View style={styles.nodeTitleArea}>
+                      <Text style={styles.nodeName} numberOfLines={2}>
+                        {node.name}
+                      </Text>
+                      <Text style={styles.nodeTypeSub} numberOfLines={1}>
                         {config.badgeText} {node.subType ? `· ${node.subType}` : ''}
                       </Text>
                     </View>
@@ -482,7 +484,11 @@ export default function NodesDetailScreen() {
                           styles.nodeRoleBadge,
                           { borderColor: `${config.color}60`, backgroundColor: `${config.color}12` },
                         ]}>
-                        <Text style={[styles.nodeRoleText, { color: config.color }]}>{node.role}</Text>
+                        <Text
+                          style={[styles.nodeRoleText, { color: config.color }]}
+                          numberOfLines={1}>
+                          {node.role}
+                        </Text>
                       </View>
                     ) : null}
                     {node.status ? (
@@ -544,7 +550,10 @@ export default function NodesDetailScreen() {
                     onPress={() => {
                       router.push({
                         pathname: '/graph' as any,
-                        params: { projectId: currentProject.id },
+                        params: {
+                          projectId: currentProject.id,
+                          focusNodeId: node.id,
+                        },
                       });
                     }}>
                     <Text style={styles.locateBtnText}>Xem trên đồ thị →</Text>
@@ -1245,6 +1254,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 10,
     flex: 1,
+    minWidth: 0,
+  },
+  nodeTitleArea: {
+    flex: 1,
+    minWidth: 0,
   },
   symbolBox: {
     width: 34,
@@ -1262,6 +1276,7 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.serif,
     fontSize: 17,
     fontWeight: '700',
+    flexShrink: 1,
   },
   nodeTypeSub: {
     color: '#736a5c',
@@ -1272,6 +1287,8 @@ const styles = StyleSheet.create({
   badgeCol: {
     alignItems: 'flex-end',
     gap: 4,
+    flexShrink: 0,
+    marginLeft: 8,
   },
   nodeRoleBadge: {
     paddingHorizontal: 8,
@@ -1283,6 +1300,7 @@ const styles = StyleSheet.create({
     fontSize: 10.5,
     fontFamily: AppFonts.sans,
     fontWeight: '700',
+    flexShrink: 1,
     letterSpacing: 0.5,
   },
   statusBadge: {

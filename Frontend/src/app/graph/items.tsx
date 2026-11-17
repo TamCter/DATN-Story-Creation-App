@@ -329,6 +329,17 @@ export default function ItemsScreen() {
               traits: ['Mang theo ký ức lịch sử'],
               associatedNodes: [],
             };
+            const itemLinks = currentProject.links.filter(
+              (link) => link.source === item.id || link.target === item.id
+            );
+            const itemAssociations = itemLinks.map((link) => {
+              const targetId = link.source === item.id ? link.target : link.source;
+              return {
+                id: link.id,
+                name: currentProject.nodes.find((node) => node.id === targetId)?.name || 'Thực thể',
+                role: link.label || link.category || 'Liên hệ',
+              };
+            });
 
             const isExpanded = expandedItemId === item.id;
 
@@ -341,15 +352,13 @@ export default function ItemsScreen() {
                       <Text style={styles.emblemDiamond}>◆</Text>
                     </View>
                     <View style={styles.titleArea}>
-                      <Text style={styles.itemName}>{item.name}</Text>
-                      <Text style={styles.itemRarity}>
+                      <Text style={styles.itemName} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      <Text style={styles.itemRarity} numberOfLines={1}>
                         {extra.rarity || item.role}
                       </Text>
                     </View>
-                  </View>
-
-                  <View style={styles.fragmentCountBadge}>
-                    <Text style={styles.fragmentBadgeText}>{item.role}</Text>
                   </View>
                 </View>
 
@@ -459,14 +468,14 @@ export default function ItemsScreen() {
                 )}
 
                 {/* Associated Story Links */}
-                {extra.associatedNodes && extra.associatedNodes.length > 0 && (
+                {itemAssociations.length > 0 && (
                   <View style={styles.associatedBox}>
                     <Text style={styles.associatedTitle}>
-                      MỐI LIÊN KẾT GIANG HỒ ({extra.associatedNodes.length})
+                      MỐI LIÊN KẾT GIANG HỒ ({itemAssociations.length})
                     </Text>
                     <View style={styles.associatedChipsWrap}>
-                      {extra.associatedNodes.map((assoc, aIdx) => (
-                        <View key={aIdx} style={styles.assocChip}>
+                      {itemAssociations.map((assoc) => (
+                        <View key={assoc.id} style={styles.assocChip}>
                           <Text style={styles.assocName}>
                             {assoc.name}
                           </Text>
@@ -491,12 +500,12 @@ export default function ItemsScreen() {
                         pathname: '/graph/links' as any,
                         params: {
                           projectId: currentProject.id,
-                          query: item.name,
+                          entityId: item.id,
                         },
                       });
                     }}>
                     <Text style={styles.actionOutlineBtnText}>
-                      Xem {extra.associatedNodes.length} mối liên kết →
+                      Xem {itemLinks.length} mối liên kết →
                     </Text>
                   </Pressable>
 
@@ -510,6 +519,7 @@ export default function ItemsScreen() {
                         pathname: '/graph' as any,
                         params: {
                           projectId: currentProject.id,
+                          focusNodeId: item.id,
                         },
                       });
                     }}>
@@ -826,6 +836,7 @@ const styles = StyleSheet.create({
   },
   titleArea: {
     flex: 1,
+    minWidth: 0,
   },
   itemName: {
     fontFamily: AppFonts.serif,
@@ -839,21 +850,6 @@ const styles = StyleSheet.create({
     color: '#42b883',
     fontFamily: AppFonts.mono,
     marginTop: 2,
-  },
-  fragmentCountBadge: {
-    paddingHorizontal: 9,
-    paddingVertical: 4,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: 'rgba(66, 184, 131, 0.5)',
-    backgroundColor: 'rgba(66, 184, 131, 0.12)',
-  },
-  fragmentBadgeText: {
-    fontSize: 10.5,
-    fontWeight: '700',
-    color: '#42b883',
-    letterSpacing: 1.2,
-    fontFamily: AppFonts.mono,
   },
   loreBlock: {
     flexDirection: 'row',

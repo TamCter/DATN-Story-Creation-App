@@ -107,6 +107,7 @@ export default function LinksScreen() {
   const params = useLocalSearchParams();
   const projectId = (params.projectId as string) || 'project-1';
   const initialQuery = (params.query as string) || '';
+  const initialEntityId = typeof params.entityId === 'string' ? params.entityId : 'all';
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
     const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
@@ -149,7 +150,11 @@ export default function LinksScreen() {
   const nodes = currentProject.nodes;
   const [searchQuery, setSearchQuery] = useState(initialQuery);
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
-  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>('all');
+  const [selectedEntityFilter, setSelectedEntityFilter] = useState<string>(initialEntityId);
+
+  useEffect(() => {
+    setSelectedEntityFilter(initialEntityId);
+  }, [initialEntityId]);
 
   // Add Link Modal
   const [addModalOpen, setAddModalOpen] = useState(false);
