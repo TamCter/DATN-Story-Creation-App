@@ -541,7 +541,13 @@ export default function ItemsScreen() {
       </ScrollView>
 
       {/* Add Item Modal */}
-      <Modal visible={addModalOpen} transparent animationType="slide">
+      <Modal
+        visible={addModalOpen}
+        transparent
+        animationType="slide"
+        onRequestClose={() => {
+          if (!isCreatingItem) setAddModalOpen(false);
+        }}>
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : undefined}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 20 : 0}
@@ -551,7 +557,8 @@ export default function ItemsScreen() {
               <Text style={styles.modalTitle}>Thêm vật phẩm</Text>
               <Pressable
                 hitSlop={12}
-                onPress={() => setAddModalOpen(false)}>
+                onPress={() => setAddModalOpen(false)}
+                disabled={isCreatingItem}>
                 <Text style={styles.modalCloseText}>✕</Text>
               </Pressable>
             </View>
@@ -564,6 +571,7 @@ export default function ItemsScreen() {
                 placeholderTextColor="#665f52"
                 value={newItemName}
                 onChangeText={setNewItemName}
+                editable={!isCreatingItem}
               />
             </View>
 
@@ -575,6 +583,7 @@ export default function ItemsScreen() {
                 placeholderTextColor="#665f52"
                 value={newItemRole}
                 onChangeText={setNewItemRole}
+                editable={!isCreatingItem}
               />
             </View>
 
@@ -587,6 +596,7 @@ export default function ItemsScreen() {
                 multiline
                 value={newItemDesc}
                 onChangeText={setNewItemDesc}
+                editable={!isCreatingItem}
               />
             </View>
 

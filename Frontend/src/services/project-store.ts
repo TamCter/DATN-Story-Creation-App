@@ -12,6 +12,11 @@ import { api, ApiError } from '@/services/api';
 const CUSTOM_PROJECTS_KEY_PREFIX = '@story_app_custom_projects_';
 const PROJECT_CACHE_PREFIX = '@story_app_project_cache_';
 
+interface AccountContext {
+  accountId: string;
+  version: number;
+}
+
 function getEventNodesForChapter(project: StoryProject, chapter: StoryChapter): StoryNode[] {
   return (project.nodes || []).filter((node) => eventBelongsToChapter(node, chapter));
 }
@@ -54,6 +59,22 @@ export class ProjectStore {
     this.graphRequestVersions.clear();
     for (const project of INITIAL_PROJECTS) {
       this.memoryProjects.set(project.id, { ...project });
+    }
+  }
+
+  private captureAccountContext(): AccountContext {
+    if (!this.accountId) {
+      throw new Error('Cần đăng nhập trước khi lưu dự án.');
+    }
+    return { accountId: this.accountId, version: this.accountVersion };
+  }
+
+  private assertAccountContext(context: AccountContext, message: string): void {
+    if (
+      this.accountVersion !== context.version ||
+      this.accountId !== context.accountId
+    ) {
+      throw new Error(message);
     }
   }
 
@@ -293,28 +314,30 @@ export class ProjectStore {
   /**
    * Lưu hoặc cập nhật một dự án
    */
-  async saveProject(project: StoryProject): Promise<void> {
-    const accountId = this.accountId;
-    if (!accountId) {
-      throw new Error('Cần đăng nhập trước khi lưu dự án.');
-    }
+  async saveProject(
+    project: StoryProject,
+    context: AccountContext = this.captureAccountContext()
+  ): Promise<void> {
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
 
     this.projectVersions.set(
       project.id,
       (this.projectVersions.get(project.id) || 0) + 1
     );
     this.memoryProjects.set(project.id, { ...project });
-    await this.cacheProjectLocally(project, accountId);
+    await this.cacheProjectLocally(project, context.accountId);
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
 
     // Cập nhật danh sách local projects
-    const locals = await this.getLocalProjects(accountId);
+    const locals = await this.getLocalProjects(context.accountId);
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
     const idx = locals.findIndex((p) => p.id === project.id);
     if (idx >= 0) {
       locals[idx] = { ...locals[idx], ...project };
     } else {
       locals.unshift(project);
     }
-    const localProjectsKey = this.getLocalProjectsKey(accountId);
+    const localProjectsKey = this.getLocalProjectsKey(context.accountId);
     if (localProjectsKey) {
       await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
     }
@@ -324,7 +347,12 @@ export class ProjectStore {
    * Tạo một Node mới trong Project
    */
   async createNode(projectId: string, nodeData: Partial<StoryNode>): Promise<StoryNode> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo node.'
+    );
     const type = nodeData.type || 'character';
     const cleanPrefix = type.slice(0, 4);
     const generatedId = `${cleanPrefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -382,12 +410,24 @@ export class ProjectStore {
 
     // Thử gọi backend để lưu vào Neo4j (không truyền createdAt / updatedAt thủ công)
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo node.'
+      );
       const { createdAt, updatedAt, syncStatus, ...payloadForBackend } = newNode;
       const res = await api.createNode(projectId, payloadForBackend);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo node.'
+      );
       if (res.success && res.data) {
         Object.assign(newNode, res.data, { syncStatus: 'synced' });
       }
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo node.'
+      );
       if (err instanceof ApiError) {
         throw err;
       }
@@ -395,10 +435,14 @@ export class ProjectStore {
     }
 
     // Cập nhật bộ nhớ và local cache
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo node.'
+    );
     project.nodes = [...project.nodes, newNode];
     project.nodeCount = project.nodes.length;
     project.edges = project.links;
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
 
     return newNode;
   }
@@ -657,11 +701,21 @@ export class ProjectStore {
     accountId: string | null
   ): Promise<StoryProject | null> {
     const key = this.getProjectCacheKey(projectId, accountId);
-    if (!key) return null;
+    if (!key || !accountId) return null;
 
     try {
       const raw = await AsyncStorage.getItem(key);
-      return raw ? JSON.parse(raw) : null;
+      if (raw) return JSON.parse(raw);
+    } catch {
+      return null;
+    }
+
+    try {
+      // Legacy cache keys are unscoped; use them only when ownership is explicit.
+      const legacyRaw = await AsyncStorage.getItem(`${PROJECT_CACHE_PREFIX}${projectId}`);
+      if (!legacyRaw) return null;
+      const legacyProject = JSON.parse(legacyRaw) as StoryProject;
+      return legacyProject?.userId === accountId ? legacyProject : null;
     } catch {
       return null;
     }

@@ -1,4 +1,4 @@
-import { DarkTheme, ThemeProvider, Stack, usePathname, useRouter } from 'expo-router';
+import { DarkTheme, ThemeProvider, Stack } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
 import { useEffect } from 'react';
@@ -17,25 +17,6 @@ const customDarkTheme = {
 
 function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
-  const pathname = usePathname();
-  const router = useRouter();
-  const isAuthScreen = pathname === '/';
-
-  useEffect(() => {
-    if (isLoading) return;
-    if (!isAuthenticated && !isAuthScreen) {
-      router.replace('/');
-    } else if (isAuthenticated && isAuthScreen) {
-      router.replace('/projects');
-    }
-  }, [isAuthenticated, isAuthScreen, isLoading, router]);
-
-  const canRenderStack =
-    !isLoading && (isAuthenticated ? !isAuthScreen : isAuthScreen);
-
-  if (!canRenderStack) {
-    return <View style={styles.navigationGuard} />;
-  }
 
   return (
     <View style={styles.container}>
@@ -49,17 +30,21 @@ function AppNavigator() {
           gestureEnabled: true,
           fullScreenGestureEnabled: true,
         }}>
-        <Stack.Screen name="index" />
-        <Stack.Screen name="projects/index" />
-        <Stack.Screen name="graph/index" />
-        <Stack.Screen name="graph/nodes" />
-        <Stack.Screen name="graph/events" />
-        <Stack.Screen name="graph/chapters" />
-        <Stack.Screen name="graph/locations" />
-        <Stack.Screen name="graph/characters" />
-        <Stack.Screen name="graph/factions" />
-        <Stack.Screen name="graph/items" />
-        <Stack.Screen name="graph/links" />
+        <Stack.Protected guard={isLoading || !isAuthenticated}>
+          <Stack.Screen name="index" />
+        </Stack.Protected>
+        <Stack.Protected guard={!isLoading && isAuthenticated}>
+          <Stack.Screen name="projects/index" />
+          <Stack.Screen name="graph/index" />
+          <Stack.Screen name="graph/nodes" />
+          <Stack.Screen name="graph/events" />
+          <Stack.Screen name="graph/chapters" />
+          <Stack.Screen name="graph/locations" />
+          <Stack.Screen name="graph/characters" />
+          <Stack.Screen name="graph/factions" />
+          <Stack.Screen name="graph/items" />
+          <Stack.Screen name="graph/links" />
+        </Stack.Protected>
       </Stack>
     </View>
   );
@@ -67,10 +52,6 @@ function AppNavigator() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  navigationGuard: {
-    flex: 1,
-    backgroundColor: '#0e0d0b',
-  },
 });
 
 export default function RootLayout() {
