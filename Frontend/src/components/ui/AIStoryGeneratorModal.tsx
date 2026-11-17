@@ -449,7 +449,7 @@ export default function AIStoryGeneratorModal({
                 character.id,
                 {
                   status: change.status,
-                  statusEvent: eventNode.name,
+                  statusEvent: eventNode.id,
                 },
                 { requireBackend: true }
               );
