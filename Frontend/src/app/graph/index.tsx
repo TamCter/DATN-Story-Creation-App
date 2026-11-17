@@ -719,27 +719,12 @@ return (
       </View>
 
       <View style={styles.topBarRight}>
-        <Pressable
-          style={styles.aiBtn}
-          onPress={() => setAiChatOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI Chat">
-          <Text style={styles.aiBtnText}>💬</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.aiBtn, styles.aiStoryBtn]}
-          onPress={() => setAiStoryModalOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI sáng tác câu chuyện">
-          <Text style={styles.aiBtnText}>✨</Text>
-        </Pressable>
         <Pressable style={styles.addNodeBtn} onPress={() => handleOpenAddModal('character')}>
           <Text style={styles.addNodeBtnText}>+</Text>
         </Pressable>
       </View>
     </View>
 
-    {/* Filter Chips Bar */}
     {/* Filter Bar: Chapters + Relationships Toggle */}
     <View style={styles.filterBar}>
       <ScrollView
@@ -1823,23 +1808,43 @@ return (
                 existingNodes={nodes}
               />
 
-              {/* AI Story Generator Modal */ }
-              <AIStoryGeneratorModal
-                visible={aiStoryModalOpen}
-                onClose={() => setAiStoryModalOpen(false)}
-                project={currentProject}
-                onSuccess={async () => {
-                  await refreshGraphData(null);
-                }}
-              />
+      {/* AI Story Generator Modal */}
+      <AIStoryGeneratorModal
+        visible={aiStoryModalOpen}
+        onClose={() => setAiStoryModalOpen(false)}
+        project={currentProject}
+        onSuccess={async () => {
+          await refreshGraphData(null);
+        }}
+      />
+
+      {/* Floating AI Action Buttons - Góc dưới bên phải */}
+      <View style={styles.aiFabContainer}>
+        <Pressable
+          style={styles.aiFabBtnSecondary}
+          onPress={() => setAiChatOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI Chat">
+          <Text style={styles.aiFabIcon}>💬</Text>
+          <Text style={styles.aiFabTextSecondary}>AI Chat</Text>
+        </Pressable>
+        <Pressable
+          style={styles.aiFabBtn}
+          onPress={() => setAiStoryModalOpen(true)}
+          accessibilityRole="button"
+          accessibilityLabel="Mở AI tạo truyện">
+          <Text style={styles.aiFabIcon}>✨</Text>
+          <Text style={styles.aiFabText}>AI Tạo truyện</Text>
+        </Pressable>
+      </View>
     </SafeAreaView>
-      );
+  );
 }
 
-      const styles = StyleSheet.create({
-        safeArea: {
-        flex: 1,
-      backgroundColor: ThemeColors.background,
+const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: ThemeColors.background,
   },
       topBar: {
         flexDirection: 'row',
@@ -2509,9 +2514,62 @@ return (
       justifyContent: 'center',
       alignItems: 'center',
   },
-      refreshIdText: {
-        color: '#e5a93c',
-      fontSize: 11,
-      fontWeight: '600',
+  refreshIdText: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  aiFabContainer: {
+    position: 'absolute',
+    bottom: 24,
+    right: 16,
+    flexDirection: 'column',
+    gap: 10,
+    alignItems: 'flex-end',
+    zIndex: 999,
+  },
+  aiFabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 28,
+    backgroundColor: '#2a2010',
+    borderWidth: 1.5,
+    borderColor: '#e5a93c',
+    gap: 8,
+    shadowColor: '#e5a93c',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  aiFabBtnSecondary: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 24,
+    backgroundColor: '#1a1611',
+    borderWidth: 1,
+    borderColor: '#383226',
+    gap: 6,
+    elevation: 5,
+  },
+  aiFabIcon: {
+    fontSize: 18,
+  },
+  aiFabText: {
+    color: '#e5a93c',
+    fontSize: 13,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+    letterSpacing: 0.3,
+  },
+  aiFabTextSecondary: {
+    color: '#ded5c7',
+    fontSize: 12,
+    fontWeight: '600',
+    fontFamily: AppFonts.sans,
   },
 });

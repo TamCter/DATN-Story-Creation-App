@@ -33,6 +33,20 @@ function getReplacementChapter(
   );
 }
 
+function cloneSeedProject(project: StoryProject): StoryProject {
+  return {
+    ...project,
+    ...(project.chapters
+      ? {
+          chapters: project.chapters.map((chapter) => ({
+            ...chapter,
+            ...(chapter.events ? { events: chapter.events.map((event) => ({ ...event })) } : {}),
+          })),
+        }
+      : {}),
+  };
+}
+
 export class ProjectStore {
   private memoryProjects: Map<string, StoryProject> = new Map();
   private accountId: string | null = null;
@@ -44,7 +58,7 @@ export class ProjectStore {
   constructor() {
     // Nạp sẵn INITIAL_PROJECTS vào memory
     for (const p of INITIAL_PROJECTS) {
-      this.memoryProjects.set(p.id, { ...p });
+      this.memoryProjects.set(p.id, cloneSeedProject(p));
     }
   }
 
@@ -58,7 +72,7 @@ export class ProjectStore {
     this.projectVersions.clear();
     this.graphRequestVersions.clear();
     for (const project of INITIAL_PROJECTS) {
-      this.memoryProjects.set(project.id, { ...project });
+      this.memoryProjects.set(project.id, cloneSeedProject(project));
     }
   }
 
@@ -92,8 +106,9 @@ export class ProjectStore {
 
   private async withSerializedChapterMutations<T>(
     projectId: string,
-    mutation: () => Promise<T>
+    mutation: (accountContext: AccountContext) => Promise<T>
   ): Promise<T> {
+    const accountContext = this.captureAccountContext();
     const previousMutation = this.chapterMutationTails.get(projectId) || Promise.resolve();
     let release!: () => void;
     const currentMutation = new Promise<void>((resolve) => {
@@ -104,7 +119,11 @@ export class ProjectStore {
 
     await previousMutation;
     try {
-      return await mutation();
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc chờ thao tác chương.'
+      );
+      return await mutation(accountContext);
     } finally {
       release();
       if (this.chapterMutationTails.get(projectId) === queuedMutation) {
@@ -965,8 +984,12 @@ export class ProjectStore {
     return newChapter;
   }
 
-  async ensureChapterSynced(projectId: string, chapterId: string): Promise<StoryChapter> {
-    const accountContext = this.captureAccountContext();
+  async ensureChapterSynced(
+    projectId: string,
+    chapterId: string,
+    context?: AccountContext
+  ): Promise<StoryChapter> {
+    const accountContext = context || this.captureAccountContext();
     const project = await this.getProject(projectId);
     this.assertAccountContext(
       accountContext,
@@ -1124,15 +1147,16 @@ export class ProjectStore {
     chapterId: string,
     eventNode: StoryNode
   ): Promise<void> {
-    return this.withSerializedChapterMutations(projectId, () =>
-      this.assignEventToChapterLocked(projectId, chapterId, eventNode)
+    return this.withSerializedChapterMutations(projectId, (accountContext) =>
+      this.assignEventToChapterLocked(projectId, chapterId, eventNode, accountContext)
     );
   }
 
   private async assignEventToChapterLocked(
     projectId: string,
     chapterId: string,
-    eventNode: StoryNode
+    eventNode: StoryNode,
+    accountContext: AccountContext
   ): Promise<void> {
     if (eventNode.type !== 'event') {
       throw new Error('Chỉ node có phân loại là Sự kiện mới được gán vào chương');
@@ -1141,7 +1165,7 @@ export class ProjectStore {
     if (eventNode.syncStatus === 'pending') {
       eventNode = await this.ensureNodeSynced(projectId, eventNode.id);
     }
-    await this.ensureChapterSynced(projectId, chapterId);
+    await this.ensureChapterSynced(projectId, chapterId, accountContext);
     const project = await this.getProject(projectId);
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
     const currentEventNode = project.nodes.find((node) => node.id === eventNode.id);
@@ -1201,7 +1225,7 @@ export class ProjectStore {
       );
       for (const update of chapterEventUpdates) {
         attemptedChapterUpdates.push(update.chapterId);
-        await this.persistChapterEvents(projectId, update.chapterId, update.events);
+        await this.persistChapterEvents(projectId, update.chapterId, update.events, accountContext);
       }
     } catch (err) {
       const rollbackErrors: string[] = [];
@@ -1223,7 +1247,7 @@ export class ProjectStore {
         const snapshot = chapterEventUpdates.find((item) => item.chapterId === chapterId);
         if (!snapshot) continue;
         try {
-          await this.persistChapterEvents(projectId, chapterId, snapshot.previousEvents);
+          await this.persistChapterEvents(projectId, chapterId, snapshot.previousEvents, accountContext);
         } catch (rollbackErr) {
           rollbackErrors.push(
             rollbackErr instanceof Error ? rollbackErr.message : String(rollbackErr)
@@ -1241,10 +1265,11 @@ export class ProjectStore {
   private async persistChapterEvents(
     projectId: string,
     chapterId: string,
-    events: StoryChapter['events']
+    events: StoryChapter['events'],
+    context?: AccountContext
   ): Promise<void> {
-    const accountContext = this.captureAccountContext();
-    await this.ensureChapterSynced(projectId, chapterId);
+    const accountContext = context || this.captureAccountContext();
+    await this.ensureChapterSynced(projectId, chapterId, accountContext);
     this.assertAccountContext(
       accountContext,
       'Tài khoản đã thay đổi trong lúc cập nhật sự kiện chương.'
@@ -1279,8 +1304,8 @@ export class ProjectStore {
     eventId: string,
     deleteEvent: boolean
   ): Promise<void> {
-    return this.withSerializedChapterMutations(projectId, () =>
-      this.removeEventFromChapterLocked(projectId, chapterId, eventId, deleteEvent)
+    return this.withSerializedChapterMutations(projectId, (accountContext) =>
+      this.removeEventFromChapterLocked(projectId, chapterId, eventId, deleteEvent, accountContext)
     );
   }
 
@@ -1288,9 +1313,10 @@ export class ProjectStore {
     projectId: string,
     chapterId: string,
     eventId: string,
-    deleteEvent: boolean
+    deleteEvent: boolean,
+    accountContext: AccountContext
   ): Promise<void> {
-    await this.ensureChapterSynced(projectId, chapterId);
+    await this.ensureChapterSynced(projectId, chapterId, accountContext);
     const project = await this.getProject(projectId);
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
     if (!chapter) {
@@ -1335,7 +1361,7 @@ export class ProjectStore {
       if (deleteEvent) {
         for (const update of chapterUpdates) {
           attemptedChapterUpdates.push(update.chapterId);
-          await this.persistChapterEvents(projectId, update.chapterId, update.events);
+          await this.persistChapterEvents(projectId, update.chapterId, update.events, accountContext);
         }
         if (eventNode) await this.deleteNode(projectId, eventId);
       } else {
@@ -1347,7 +1373,7 @@ export class ProjectStore {
         }
         for (const update of chapterUpdates) {
           attemptedChapterUpdates.push(update.chapterId);
-          await this.persistChapterEvents(projectId, update.chapterId, update.events);
+          await this.persistChapterEvents(projectId, update.chapterId, update.events, accountContext);
         }
       }
     } catch (err) {
@@ -1372,7 +1398,8 @@ export class ProjectStore {
           await this.persistChapterEvents(
             projectId,
             attemptedChapterId,
-            snapshot.previousEvents
+            snapshot.previousEvents,
+            accountContext
           );
         } catch (rollbackErr) {
           rollbackErrors.push(
@@ -1393,24 +1420,28 @@ export class ProjectStore {
     chapterId: string,
     deleteEvents: boolean
   ): Promise<void> {
-    return this.withSerializedChapterMutations(projectId, () =>
-      this.deleteChapterLocked(projectId, chapterId, deleteEvents)
+    return this.withSerializedChapterMutations(projectId, (accountContext) =>
+      this.deleteChapterLocked(projectId, chapterId, deleteEvents, accountContext)
     );
   }
 
   private async deleteChapterLocked(
     projectId: string,
     chapterId: string,
-    deleteEvents: boolean
+    deleteEvents: boolean,
+    accountContext: AccountContext
   ): Promise<void> {
-    await this.ensureChapterSynced(projectId, chapterId);
+    await this.ensureChapterSynced(projectId, chapterId, accountContext);
     const project = await this.getProject(projectId);
+    this.assertAccountContext(accountContext, 'Tài khoản đã thay đổi trong lúc xóa chương.');
     const chapter = (project.chapters || []).find((item) => item.id === chapterId);
     if (!chapter) {
       throw new Error('Không tìm thấy chương cần xóa');
     }
 
     const eventNodes = getEventNodesForChapter(project, chapter);
+    const updatedNodesSnapshot: Array<{ id: string; chapter: string }> = [];
+
     if (deleteEvents) {
       for (const eventNode of eventNodes) {
         await this.deleteNode(projectId, eventNode.id);
@@ -1419,25 +1450,42 @@ export class ProjectStore {
       for (const eventNode of eventNodes) {
         if (eventBelongsToChapter(eventNode, chapter)) {
           const replacementChapter = getReplacementChapter(project, chapterId, eventNode);
+          const originalChapter = eventNode.chapter || '';
           await this.updateNode(projectId, eventNode.id, {
             chapter: replacementChapter?.id || '',
           });
+          updatedNodesSnapshot.push({ id: eventNode.id, chapter: originalChapter });
         }
       }
     }
 
     try {
+      this.assertAccountContext(accountContext, 'Tài khoản đã thay đổi trong lúc xóa chương.');
       await api.deleteChapter(chapterId);
     } catch (err) {
-      if (err instanceof ApiError) throw err;
+      if (err instanceof ApiError) {
+        const rollbackErrors: string[] = [];
+        for (const snap of updatedNodesSnapshot) {
+          try {
+            await this.updateNode(projectId, snap.id, { chapter: snap.chapter });
+          } catch (rbErr) {
+            rollbackErrors.push(rbErr instanceof Error ? rbErr.message : String(rbErr));
+          }
+        }
+        if (rollbackErrors.length > 0) {
+          throw new Error(`${err.message}; rollback failed: ${rollbackErrors.join('; ')}`);
+        }
+        throw err;
+      }
       console.warn('[ProjectStore] Không thể xóa chương trên Backend, xóa local:', err);
     }
 
     const updatedProject = await this.getProject(projectId);
+    this.assertAccountContext(accountContext, 'Tài khoản đã thay đổi trong lúc xóa chương.');
     updatedProject.chapters = (updatedProject.chapters || []).filter(
       (item) => item.id !== chapterId
     );
-    await this.saveProject(updatedProject);
+    await this.saveProject(updatedProject, accountContext);
   }
 }
 
