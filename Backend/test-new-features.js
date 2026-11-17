@@ -51,13 +51,19 @@ async function runNewFeatureTests() {
   let hasError = false;
 
   try {
-    // 1. Login guest
-    console.log('[1] Đăng nhập tài khoản...');
-    const guest = await apiCall('POST', '/api/auth/guest');
-    const guestData = assertSuccess(guest, 200, 'Đăng nhập Guest');
-    const token = guestData?.token;
+    // 1. Register a temporary test account
+    console.log('[1] Đăng ký tài khoản kiểm thử...');
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = await apiCall('POST', '/api/auth/register', {
+      penName: `Feature Test ${uniqueId}`,
+      email: `feature-test-${uniqueId}@example.test`,
+      password: 'TestPassword123!',
+    });
+    const accountData = assertSuccess(account, 201, 'Đăng ký tài khoản kiểm thử');
+    const token = accountData?.token;
+    if (!token) throw new Error('Backend không trả JWT sau khi đăng ký.');
     authHeaders = { Authorization: `Bearer ${token}` };
-    console.log('    ✅ Đăng nhập thành công!');
+    console.log('    ✅ Đăng ký và xác thực thành công!');
 
     // 2. Tạo dự án mới
     console.log('\n[2] Tạo Dự án kiểm thử tính năng mới...');

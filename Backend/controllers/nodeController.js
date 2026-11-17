@@ -616,9 +616,9 @@ async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
 
 /**
  * Tự động đồng bộ các mối quan hệ (edges) trong Neo4j đồ thị:
- * - Nhân vật gán Binh khí (Item), Nơi sinh (Location), Môn phái (Faction), Sự kiện tử nạn/hồi sinh (Event)
+ * - Nhân vật gán vật dụng (Item), Nơi sinh (Location), tổ chức (Faction), sự kiện tử nạn/hồi sinh (Event)
  * - Vật phẩm gán Nguồn gốc (Location), Người giữ (Character)
- * - Phe phái gán Minh chủ (Character), Căn cứ (Location), Biến cố suy tàn (Event)
+ * - Tổ chức gán người đại diện (Character), trụ sở (Location), sự kiện thay đổi trạng thái (Event)
  * - Sự kiện gán Nơi diễn ra (Location)
  * - Địa điểm gán Thế lực cai quản (Faction)
  */
@@ -630,7 +630,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 1. NHÂN VẬT (Character)
     if (nodeType === 'character') {
-      // Binh khí -> Item
+      // Vật dụng -> Item
       if (nodeData.weapon && String(nodeData.weapon).trim()) {
         const weapon = String(nodeData.weapon).trim();
         await runQuery(`
@@ -644,11 +644,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           WHERE item.name = $weapon OR item.id = $weapon
           MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
           ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                        r.label = 'Binh khí',
+                        r.label = 'Vật dụng',
                         r.type = 'solid',
                         r.tone = 'possession',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Binh khí',
+          ON MATCH SET r.label = 'Vật dụng',
                        r.updatedAt = timestamp()
         `, { nodeId, projectId, weapon });
       } else {
@@ -686,7 +686,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         `, { nodeId });
       }
 
-      // Môn phái -> Faction
+      // Tổ chức -> Faction
       if (nodeData.sect && String(nodeData.sect).trim()) {
         const sect = String(nodeData.sect).trim();
         await runQuery(`
@@ -700,11 +700,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           WHERE fac.name = $sect OR fac.id = $sect
           MERGE (c)-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
           ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-sect',
-                        r.label = 'Môn phái',
+                        r.label = 'Tổ chức',
                         r.type = 'solid',
                         r.tone = 'sect',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Môn phái',
+          ON MATCH SET r.label = 'Tổ chức',
                        r.updatedAt = timestamp()
         `, { nodeId, projectId, sect });
       } else {
@@ -803,9 +803,9 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
     }
 
-    // 3. PHE PHÁI (Faction)
+    // 3. TỔ CHỨC (Faction)
     if (nodeType === 'faction') {
-      // Minh chủ / Thủ lĩnh -> Character
+      // Người đại diện / Thủ lĩnh -> Character
       if (nodeData.leader && String(nodeData.leader).trim()) {
         const leader = String(nodeData.leader).trim();
         await runQuery(`
@@ -819,11 +819,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           WHERE c.name = $leader OR c.id = $leader
           MERGE (c)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac)
           ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-leader',
-                        r.label = 'Minh chủ / Thủ lĩnh',
+                        r.label = 'Người đại diện / Thủ lĩnh',
                         r.type = 'solid',
                         r.tone = 'loyalty',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Minh chủ / Thủ lĩnh',
+          ON MATCH SET r.label = 'Người đại diện / Thủ lĩnh',
                        r.updatedAt = timestamp()
         `, { nodeId, projectId, leader });
       } else {
@@ -861,8 +861,12 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         `, { nodeId });
       }
 
-      // Biến cố suy tàn -> Event
-      if (nodeData.statusEvent && String(nodeData.statusEvent).trim() && nodeData.status === 'Suy tàn') {
+      // Sự kiện thay đổi trạng thái -> Event
+      if (
+        nodeData.statusEvent &&
+        String(nodeData.statusEvent).trim() &&
+        ['Tạm ngừng', 'Suy tàn'].includes(nodeData.status)
+      ) {
         const statusEvent = String(nodeData.statusEvent).trim();
         await runQuery(`
           MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev:StoryNode)
@@ -875,11 +879,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           WHERE ev.name = $statusEvent OR ev.id = $statusEvent
           MERGE (fac)-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev)
           ON CREATE SET r.id = 'link-' + fac.id + '-' + ev.id + '-event',
-                        r.label = 'Suy tàn bởi',
+                        r.label = 'Trạng thái thay đổi do',
                         r.type = 'solid',
                         r.tone = 'event',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Suy tàn bởi',
+          ON MATCH SET r.label = 'Trạng thái thay đổi do',
                        r.updatedAt = timestamp()
         `, { nodeId, projectId, statusEvent });
       } else {
@@ -935,7 +939,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
         const locId = await findOrCreateProjectEntity(projectId, location, 'location', {
           role: 'ĐỊA DANH',
-          region: 'Đông Vực',
+          region: 'Miền Đông',
           dangerLevel: 'Bình thường',
           climate: 'Ôn hòa',
           desc: `Địa danh diễn ra sự kiện ${location}`,
@@ -1029,7 +1033,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
         MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
         ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                      r.label = 'Binh khí',
+                      r.label = 'Vật dụng',
                       r.type = 'solid',
                       r.tone = 'possession',
                       r.createdAt = timestamp()

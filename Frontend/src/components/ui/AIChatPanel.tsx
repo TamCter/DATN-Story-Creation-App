@@ -41,7 +41,7 @@ const WELCOME_MSG: AIChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, bảo vật, địa điểm, phe phái hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ tự bổ sung các chi tiết còn thiếu. Bạn cũng có thể yêu cầu tạo cùng lúc tối đa 3 node.\n\nVí dụ: "Tạo cho tôi một nữ kiếm khách bí ẩn từ Bắc Vực" hoặc "Tạo một nhân vật, một thanh kiếm và nơi sinh của cô ấy"',
+    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn cũng có thể yêu cầu tạo cùng lúc tối đa 3 thực thể.\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo một nhân vật, một tập hồ sơ và nơi họ gặp nhau"',
   timestamp: Date.now(),
 };
 
@@ -274,10 +274,10 @@ export default function AIChatPanel({
           contentContainerStyle={styles.suggestionsRow}
           keyboardShouldPersistTaps="handled">
           {[
-            'Tạo nhân vật chính diện',
-            'Thêm bảo vật thần kỳ',
+            'Tạo nhân vật chính',
+            'Thêm vật phẩm quan trọng',
             'Thêm địa điểm bí ẩn',
-            'Tạo phe phái tà đạo',
+            'Tạo tổ chức đối lập',
             'Thêm một sự kiện lớn',
           ].map((s) => (
             <Pressable key={s} style={styles.suggestionChip} onPress={() => setInputText(s)}>
@@ -380,7 +380,7 @@ function MessageBubble({
               <Text style={styles.nodePreviewType}>
                 {nodeData.type === 'character' ? 'NHÂN VẬT' :
                   nodeData.type === 'item' ? 'VẬT PHẨM' :
-                    nodeData.type === 'faction' ? 'PHE PHÁI' :
+                    nodeData.type === 'faction' ? 'TỔ CHỨC' :
                       nodeData.type === 'event' ? 'SỰ KIỆN' : 'ĐỊA ĐIỂM'}
               </Text>
             </View>

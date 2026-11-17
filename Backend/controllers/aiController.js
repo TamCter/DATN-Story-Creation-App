@@ -14,20 +14,20 @@ const REQUIRED_NODE_FIELDS = {
   event: ['name', 'type', 'desc', 'chapter', 'time', 'location', 'status', 'impact'],
 };
 
-const SYSTEM_PROMPT = `Bạn là trợ lý AI sáng tạo chuyên hỗ trợ viết truyện
+const SYSTEM_PROMPT = `Bạn là trợ lý AI hỗ trợ phát triển câu chuyện và xây dựng hồ sơ nhân vật, bối cảnh, tổ chức, vật phẩm và sự kiện.
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
 Có 5 loại node:
-1. character (Nhân vật): name, type="character", role (CHÍNH DIỆN/PHẢN DIỆN/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob, birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
-2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Thần khí/Truyền thuyết), origin, element, holderOrLocation
-3. location (Địa điểm): name, type="location", desc, region (Đông Vực/Tây Vực/Nam Vực/Bắc Vực/Trung Nguyên), climate, dangerLevel (Tuyệt đối an toàn/An toàn/Nguy hiểm/Cực kỳ nguy hiểm), ruler
-4. faction (Phe phái): name, type="faction", desc, subType (Chính phái/Tà phái), alignment (CHÍNH PHÁI/TÀ PHÁI), status (Hưng thịnh/Suy tàn), leader, headquarters, motto, statusEvent
+1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob, birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
+2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
+3. location (Địa điểm): name, type="location", desc, region, climate, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
+4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
 5. event (Sự kiện): name, type="event", desc, chapter, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra)
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, hỏi thêm thông tin nếu cần
 - Nếu người dùng yêu cầu tạo nhiều node, hãy tạo tối đa 3 node khác nhau trong cùng một lần trả lời.
-- Tự sáng tạo hợp lý mọi thông tin còn thiếu, đặc biệt birthplace, weapon, sect, origin, holderOrLocation, ruler, leader và headquarters. Không để trống, null, "không rõ", "chưa rõ" hoặc "không xác định"; khi chi tiết chưa được nêu, hãy tạo một chi tiết phù hợp với truyện.
+- Tự sáng tạo hợp lý mọi thông tin còn thiếu, đặc biệt birthplace, weapon, sect, origin, holderOrLocation, ruler, leader và headquarters. Không để trống, null, "không rõ", "chưa rõ" hoặc "không xác định"; khi chi tiết chưa được nêu, hãy tạo một chi tiết phù hợp với bối cảnh và thể loại của truyện.
 - Mỗi node phải có đầy đủ các trường bắt buộc theo loại:
   character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
   item: name, type, desc, rarity, origin, element, holderOrLocation
@@ -119,7 +119,7 @@ function extractCreateNodeResponse(responseText) {
  */
 function getNodeCreationRequest(messages) {
   const creationIntentPattern = /(?<![\p{L}\p{N}])(?:tạo|thêm|generate|create|add)(?![\p{L}\p{N}])/iu;
-  const nodeTopicPattern = /(?<![\p{L}\p{N}])(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện|character|item|location|faction|event)(?![\p{L}\p{N}])/iu;
+  const nodeTopicPattern = /(?<![\p{L}\p{N}])(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện|character|item|location|faction|event)(?![\p{L}\p{N}])/iu;
   const latestUserIndex = messages.map((message) => message.role === 'user').lastIndexOf(true);
   const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex].content || '' : '';
 
@@ -150,7 +150,7 @@ function getNodeCreationRequest(messages) {
   const wantsNodes = latestUserIntent || hasPendingCreationIntent;
   if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
 
-  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)(?![\p{L}\p{N}])/iu;
+  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)(?![\p{L}\p{N}])/iu;
   const requestMessage = latestUserIntent ? latestUserMessage : (pendingUserMessage?.content || '');
   const countMatch = requestMessage.match(countPattern);
   const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba)/iu)?.[1] || '1';
@@ -487,11 +487,11 @@ async function chatWithAI(req, res, next) {
 async function generateChapterAndEvents(req, res, next) {
   try {
     const {
-      projectTitle = 'Vị diện kỳ ảo',
+      projectTitle = 'Dự án mới',
       userIdea = '',
       chapters = [],
       nodes = [],
-      writingStyle = 'Kiếm hiệp / Tiên hiệp / Huyền huyễn',
+      writingStyle = 'Văn phong tự nhiên, phù hợp với thể loại và bối cảnh câu chuyện',
     } = req.body || {};
 
     const provider = (process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini')).trim().toLowerCase();
@@ -514,7 +514,7 @@ async function generateChapterAndEvents(req, res, next) {
       .map((c) => `- Chương ${c.chapterNumber}: ${c.title} (${c.desc || 'Chưa có tóm tắt'})`)
       .join('\n');
 
-    // Tổng hợp các node nhân vật, địa điểm, môn phái, vật phẩm hiện có
+    // Tổng hợp các node nhân vật, địa điểm, tổ chức và vật phẩm hiện có
     const characterNodes = nodes.filter(
       (node) => node && node.type === 'character' && typeof node.name === 'string'
     );
@@ -525,7 +525,7 @@ async function generateChapterAndEvents(req, res, next) {
           node.name,
           node.status && `trạng thái: ${node.status}`,
           node.role && `vai trò: ${node.role}`,
-          node.sect && `môn phái: ${node.sect}`,
+          node.sect && `tổ chức/nhóm: ${node.sect}`,
           node.desc && `mô tả: ${node.desc.slice(0, 180)}`,
         ]
           .filter(Boolean)
@@ -550,8 +550,8 @@ ${chaptersSummary ? `Các chương gần nhất:\n${chaptersSummary}\n` : ''}
 Các thực thể hiện có trong truyện:
 - Nhân vật: ${characters.join(', ') || 'Chưa có'}
 - Địa điểm: ${locations.join(', ') || 'Chưa có'}
-- Môn phái / Phe phái: ${factions.join(', ') || 'Chưa có'}
-- Bảo vật / Thần binh: ${items.join(', ') || 'Chưa có'}
+- Tổ chức / Nhóm: ${factions.join(', ') || 'Chưa có'}
+- Vật phẩm: ${items.join(', ') || 'Chưa có'}
 
 Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
@@ -698,11 +698,11 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
 async function generateChapterStory(req, res, next) {
   try {
     const {
-      projectTitle = 'Vị diện kỳ ảo',
+      projectTitle = 'Dự án mới',
       chapter = {},
       events = [],
       relatedNodes = [],
-      writingStyle = 'Tiểu thuyết Kiếm Hiệp / Tiên Hiệp hào sảng, kịch tính, giàu chất thơ',
+      writingStyle = 'Văn phong tự nhiên, phù hợp với thể loại và bối cảnh câu chuyện',
       customPrompt = '',
     } = req.body || {};
 
@@ -738,14 +738,14 @@ async function generateChapterStory(req, res, next) {
       })
       .join('\n\n');
 
-    // Liệt kê chi tiết các thực thể liên quan (nhân vật, võ công, vũ khí, tông môn, địa điểm)
+    // Liệt kê chi tiết các thực thể liên quan trong chương
     const nodesDetail = relatedNodes
       .map((n) => {
         let detail = `- [${(n.type || 'thực thể').toUpperCase()}] ${n.name}: ${n.desc || ''}`;
         if (n.status) detail += ` | Trạng thái: ${n.status}`;
         if (n.role) detail += ` | Vai trò: ${n.role}`;
-        if (n.sect) detail += ` | Môn phái: ${n.sect}`;
-        if (n.weapon) detail += ` | Binh khí: ${n.weapon}`;
+        if (n.sect) detail += ` | Tổ chức/nhóm: ${n.sect}`;
+        if (n.weapon) detail += ` | Vật dụng: ${n.weapon}`;
         if (n.personality) detail += ` | Tính cách: ${n.personality}`;
         if (n.region) detail += ` | Khu vực: ${n.region}`;
         return detail;
@@ -763,15 +763,15 @@ Tóm tắt định hướng: "${chapter.desc || ''}"
 CÁC SỰ KIỆN TRONG CHƯƠNG BẮT BUỘC PHẢI DIỄN RA THEO MẠCH TRUYỆN:
 ${eventsDetail || 'Diễn biến tự nhiên theo tóm tắt chương.'}
 
-CÁC THỰC THỂ (NHÂN VẬT, ĐỊA ĐIỂM, PHÁI, VẬT PHẨM) XUẤT HIỆN TRONG CHƯƠNG:
+CÁC THỰC THỂ (NHÂN VẬT, ĐỊA ĐIỂM, TỔ CHỨC, VẬT PHẨM) XUẤT HIỆN TRONG CHƯƠNG:
 ${nodesDetail || 'Nhân vật theo sự kiện.'}
 
 ${customPrompt ? `Yêu cầu thêm từ tác giả: "${customPrompt}"` : ''}
 
 YÊU CẦU NGHỆ THUẬT KHI VIẾT CÂU CHUYỆN:
 1. Viết một chương truyện HOÀN CHỈNH, liền mạch, cuốn hút (độ dài khoảng 1200 - 2500 từ).
-2. Khắc họa sống động tâm lý nhân vật, lời thoại sắc sảo, tự nhiên, mang khẩu khí giang hồ / tu tiên.
-3. Miêu tả cảnh quan, không khí, các chiêu thức võ công hoặc pháp bảo một cách hoa mỹ, kịch tính.
+2. Khắc họa sống động tâm lý nhân vật, lời thoại tự nhiên và phù hợp với bối cảnh.
+3. Miêu tả cảnh quan, không khí và các hành động quan trọng rõ ràng, giàu hình ảnh nhưng nhất quán với thế giới truyện.
 4. Lồng ghép khéo léo và tự nhiên TOÀN BỘ các sự kiện đã nêu ở trên theo đúng trình tự thời gian.
 5. Đoạn kết chương đọng lại dư âm hoặc nút thắt bất ngờ để độc giả hồi hộp đón đọc chương sau.
 6. Trình bày văn bản rõ ràng, chia đoạn hợp lý. KHÔNG chèn lời mở đầu hay kết thúc của AI (ví dụ: "Dưới đây là...", "Hy vọng bạn thích..."), CHỈ trả về đúng nội dung câu chuyện của chương.

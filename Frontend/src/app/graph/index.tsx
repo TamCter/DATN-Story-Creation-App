@@ -279,17 +279,17 @@ export default function GraphScreen() {
   const [formHolder, setFormHolder] = useState('');
 
   // Địa điểm (Location)
-  const [formRegion, setFormRegion] = useState('Đông Vực');
+  const [formRegion, setFormRegion] = useState('Miền Đông');
   const [formTerrain, setFormTerrain] = useState('');
-  const [formDangerLevel, setFormDangerLevel] = useState('Tuyệt đối an toàn');
+  const [formDangerLevel, setFormDangerLevel] = useState('An toàn');
   const [formClimate, setFormClimate] = useState('Ôn hòa');
   const [formRuler, setFormRuler] = useState('');
 
-  // Phe phái (Faction)
+  // Tổ chức (Faction)
   const [formLeader, setFormLeader] = useState('');
   const [formHeadquarters, setFormHeadquarters] = useState('');
   const [formMotto, setFormMotto] = useState('');
-  const [formAlignment, setFormAlignment] = useState<string>('CHÍNH PHÁI');
+  const [formAlignment, setFormAlignment] = useState<string>('ĐỒNG MINH');
 
   // Sự kiện (Event)
   const [formChapter, setFormChapter] = useState('');
@@ -395,16 +395,16 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormRole(defaultType === 'character' ? 'CHÍNH DIỆN' : defaultType === 'event' ? 'BIẾN CỐ' : '');
   setFormSubType(
     defaultType === 'character'
-      ? 'Kiếm khách / Đao khách'
+      ? 'Nhân vật'
       : defaultType === 'faction'
-        ? 'Chính phái'
+        ? 'Đồng minh'
         : ''
   );
   setFormStatus(
     defaultType === 'character'
       ? 'Còn sống'
       : defaultType === 'faction'
-        ? 'Hưng thịnh'
+        ? 'Đang hoạt động'
         : defaultType === 'event'
           ? 'Đã diễn ra'
           : 'Hoạt động'
@@ -422,15 +422,15 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormElement('');
   setFormPower('');
   setFormHolder('');
-  setFormRegion('Đông Vực');
+  setFormRegion('Miền Đông');
   setFormTerrain('');
-  setFormDangerLevel('Tuyệt đối an toàn');
+  setFormDangerLevel('An toàn');
   setFormClimate('Ôn hòa');
   setFormRuler('');
   setFormLeader('');
   setFormHeadquarters('');
   setFormMotto('');
-  setFormAlignment('CHÍNH PHÁI');
+  setFormAlignment('ĐỒNG MINH');
   setFormChapter(chapters[0]?.title || '');
   setFormTime(chapters[0]?.title || '');
   setFormLocation('');
@@ -529,8 +529,8 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormName(node.name || '');
   setFormType(node.type || 'character');
   setFormRole(node.role || '');
-  setFormSubType(node.subType || (node.type === 'faction' ? 'Chính phái' : ''));
-  setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Hưng thịnh' : 'Hoạt động'));
+  setFormSubType(node.subType || (node.type === 'faction' ? 'Đồng minh' : ''));
+  setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Đang hoạt động' : 'Hoạt động'));
   setFormStatusEvent(node.statusEvent || '');
   setFormDesc(node.desc || '');
   setFormDob(node.dob || '');
@@ -544,15 +544,15 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormElement(node.element || '');
   setFormPower(node.power || '');
   setFormHolder(node.holderOrLocation || '');
-  setFormRegion(node.region || 'Đông Vực');
+  setFormRegion(node.region || 'Miền Đông');
   setFormTerrain(node.terrain || '');
-  setFormDangerLevel(node.dangerLevel || 'Tuyệt đối an toàn');
+  setFormDangerLevel(node.dangerLevel || 'An toàn');
   setFormClimate(node.climate || 'Ôn hòa');
   setFormRuler(node.ruler || '');
   setFormLeader(node.leader || '');
   setFormHeadquarters(node.headquarters || '');
   setFormMotto(node.motto || '');
-  setFormAlignment(node.alignment || 'CHÍNH PHÁI');
+  setFormAlignment(node.alignment || 'ĐỒNG MINH');
   setFormChapter(node.chapter || node.time || '');
   setFormTime(node.time || node.chapter || '');
   setFormLocation(node.location || '');
@@ -612,16 +612,16 @@ const handleSaveNode = async () => {
     payload.role = '';
     payload.subType = '';
     payload.status = 'Hoạt động';
-    payload.region = formRegion.trim() || 'Đông Vực';
-    payload.dangerLevel = formDangerLevel.trim() || 'Tuyệt đối an toàn';
+    payload.region = formRegion.trim() || 'Miền Đông';
+    payload.dangerLevel = formDangerLevel.trim() || 'An toàn';
     payload.climate = formClimate.trim() || 'Ôn hòa';
     payload.ruler = formRuler.trim();
     payload.terrain = formTerrain.trim();
   } else if (formType === 'faction') {
     payload.role = '';
-    payload.subType = formSubType.trim() || 'Chính phái';
-    payload.status = formStatus.trim() || 'Hưng thịnh';
-    if (formStatus === 'Suy tàn' && formStatusEvent.trim()) {
+    payload.subType = formSubType.trim() || 'Đồng minh';
+    payload.status = formStatus.trim() || 'Đang hoạt động';
+    if ((formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && formStatusEvent.trim()) {
       payload.statusEvent = formStatusEvent.trim();
     } else {
       payload.statusEvent = '';
@@ -857,7 +857,7 @@ return (
                       </View>
                       <Text style={styles.emptyCanvasTitle}>Dự án chưa có thực thể nào</Text>
                       <Text style={styles.emptyCanvasDesc}>
-                        Đây là dự án mới của bạn. Hãy bắt đầu xây dựng thế giới câu chuyện bằng cách thêm nhân vật, bảo vật hoặc địa điểm đầu tiên!
+                        Đây là dự án mới của bạn. Hãy bắt đầu phát triển câu chuyện bằng cách thêm nhân vật, vật phẩm hoặc địa điểm đầu tiên!
                       </Text>
                       <Pressable
                         style={styles.emptyCanvasBtn}
@@ -1042,7 +1042,7 @@ return (
                           },
                           {
                             num: '06',
-                            title: 'Phe phái',
+                            title: 'Tổ chức',
                             badge: `${nodes.filter((n) => n.type === 'faction').length}`,
                             onPress: () => {
                               setDrawerOpen(false);
@@ -1163,7 +1163,7 @@ return (
                                   setFormId(generateUniqueNodeId(t, nodes));
                                   setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                                   if (t === 'character') {
-                                    setFormSubType('Kiếm khách / Đao khách');
+                                    setFormSubType('Nhân vật');
                                   } else {
                                     setFormSubType('');
                                   }
@@ -1175,7 +1175,7 @@ return (
                                         : t === 'location'
                                           ? 'Hoạt động'
                                           : t === 'faction'
-                                            ? 'Hưng thịnh'
+                                            ? 'Đang hoạt động'
                                             : 'Đã diễn ra'
                                   );
                                 }
@@ -1204,11 +1204,11 @@ return (
                             formType === 'character'
                               ? 'Ví dụ: Lăng Tiêu'
                               : formType === 'item'
-                                ? 'Ví dụ: Kiếm Hoàng Hôn'
+                                ? 'Ví dụ: Hồ Sơ Hoàng Hôn'
                                 : formType === 'location'
-                                  ? 'Ví dụ: Hàn Nguyệt Thành'
+                                  ? 'Ví dụ: Thành phố Bắc Nguyệt'
                                   : formType === 'faction'
-                                    ? 'Ví dụ: Thiên Hạ Minh'
+                                    ? 'Ví dụ: Tập đoàn Thiên Hạ'
                                     : 'Ví dụ: Đêm Hỏa Thiêu'
                           }
                           placeholderTextColor="#665f52"
@@ -1320,7 +1320,7 @@ return (
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Binh khí / Vật phẩm</Text>
+                              <Text style={styles.modalInputLabel}>Vật dụng / Vật phẩm</Text>
                               <FormSelectField
                                 value={formWeapon}
                                 onChange={setFormWeapon}
@@ -1338,17 +1338,17 @@ return (
                           {/* Sect & Personality */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Môn phái / Thế lực</Text>
+                              <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
                               <FormSelectField
                                 value={formSect}
                                 onChange={setFormSect}
                                 options={factionNodes.map((fac) => ({
                                   label: fac.name,
                                   value: fac.name,
-                                  subtitle: fac.alignment || fac.role || 'Môn phái',
+                                  subtitle: fac.alignment || fac.role || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
-                                placeholder="-- Chọn môn phái --"
+                                placeholder="-- Chọn tổ chức --"
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1369,7 +1369,7 @@ return (
                       {formType === 'item' && (
                         <View style={styles.dynamicSectionBox}>
                           <Text style={[styles.dynamicSectionHeader, { color: '#42b883' }]}>
-                            THÔNG TIN BẢO VẬT / VẬT PHẨM
+                            THÔNG TIN VẬT PHẨM
                           </Text>
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1459,7 +1459,7 @@ return (
                                 options={factionNodes.map((fac) => ({
                                   label: fac.name,
                                   value: fac.name,
-                                  subtitle: fac.alignment || 'Môn phái',
+                                  subtitle: fac.alignment || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
                                 placeholder="-- Chọn thế lực cai quản --"
@@ -1473,22 +1473,22 @@ return (
                       {formType === 'faction' && (
                         <View style={styles.dynamicSectionBox}>
                           <Text style={[styles.dynamicSectionHeader, { color: '#d95a38' }]}>
-                            THÔNG TIN PHE PHÁI / MÔN PHÁI
+                            THÔNG TIN TỔ CHỨC
                           </Text>
                           <View style={styles.modalInputGroup}>
-                            <Text style={styles.modalInputLabel}>Phân loại môn phái (Chính / Tà)</Text>
+                            <Text style={styles.modalInputLabel}>Vai trò trong câu chuyện</Text>
                             <FormSelectField
                               value={formSubType}
                               onChange={setFormSubType}
                               options={FACTION_CLASSIFICATIONS}
-                              placeholder="-- Chọn chính hoặc tà --"
+                              placeholder="-- Chọn vai trò --"
                             />
                           </View>
 
-                          {/* Status Dropdown (Hưng thịnh / Suy tàn) */}
+                          {/* Status Dropdown */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Trạng thái phe phái</Text>
+                              <Text style={styles.modalInputLabel}>Trạng thái tổ chức</Text>
                               <FormSelectField
                                 value={formStatus}
                                 onChange={setFormStatus}
@@ -1497,9 +1497,9 @@ return (
                               />
                             </View>
 
-                            {formStatus === 'Suy tàn' && (
+                            {(formStatus === 'Tạm ngừng' || formStatus === 'Suy tàn') && (
                               <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                                <Text style={styles.modalInputLabel}>Sự kiện dẫn đến suy tàn</Text>
+                                <Text style={styles.modalInputLabel}>Sự kiện dẫn đến thay đổi trạng thái</Text>
                                 <FormSelectField
                                   value={formStatusEvent}
                                   onChange={setFormStatusEvent}
@@ -1515,10 +1515,10 @@ return (
                             )}
                           </View>
 
-                          {/* Minh chủ & Căn cứ */}
+                          {/* Người đại diện & trụ sở */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Minh chủ / Thủ lĩnh</Text>
+                              <Text style={styles.modalInputLabel}>Người đại diện / Thủ lĩnh</Text>
                               <FormSelectField
                                 value={formLeader}
                                 onChange={setFormLeader}
@@ -1532,7 +1532,7 @@ return (
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Tổng đàn / Căn cứ địa</Text>
+                              <Text style={styles.modalInputLabel}>Trụ sở / Cơ sở</Text>
                               <FormSelectField
                                 value={formHeadquarters}
                                 onChange={setFormHeadquarters}
@@ -1553,7 +1553,7 @@ return (
                               style={styles.modalInput}
                               value={formMotto}
                               onChangeText={setFormMotto}
-                              placeholder="Ví dụ: Quy tụ võ lâm / Trảm yêu trừ ma..."
+                              placeholder="Ví dụ: nghiên cứu, hỗ trợ cộng đồng, kinh doanh..."
                               placeholderTextColor="#665f52"
                             />
                           </View>
@@ -1757,13 +1757,13 @@ return (
                                 ) : null}
                                 {selectedNode.weapon ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Binh khí:</Text>
+                                    <Text style={styles.detailItemKey}>Vật dụng:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.weapon}</Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.sect ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Môn phái:</Text>
+                                    <Text style={styles.detailItemKey}>Tổ chức:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.sect}</Text>
                                   </View>
                                 ) : null}
@@ -1852,7 +1852,7 @@ return (
                                 ) : null}
                                 {selectedNode.headquarters ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Tổng đàn:</Text>
+                                    <Text style={styles.detailItemKey}>Trụ sở:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.headquarters}</Text>
                                   </View>
                                 ) : null}

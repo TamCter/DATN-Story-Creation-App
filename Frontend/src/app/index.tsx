@@ -22,14 +22,10 @@ type ActiveField = 'penName' | 'email' | 'password' | 'confirmPassword' | null;
 
 export default function AuthScreen() {
   const {
-    user,
-    isAuthenticated,
     isSubmitting,
     error: authError,
     login,
     register,
-    guestLogin,
-    logout,
     clearError,
   } = useAuth();
 
@@ -175,20 +171,6 @@ export default function AuthScreen() {
     }
   };
 
-  const handleGuestLogin = async () => {
-    Keyboard.dismiss();
-    setLocalError(null);
-    clearError();
-    const result = await guestLogin();
-    if (result.success) {
-      router.replace('/projects' as any);
-    }
-  };
-
-  const handleContinueExisting = () => {
-    router.replace('/projects' as any);
-  };
-
   const currentVal = getFieldValue(focusedField);
   const isPwd = isPasswordField(focusedField);
 
@@ -280,32 +262,10 @@ export default function AuthScreen() {
               là một <Text style={styles.highlightWord}>mạng lưới.</Text>
             </Text>
             <Text style={styles.subTitle}>
-              Nối nhân vật, sự kiện, phe phái và địa điểm thành một bản đồ sống
+              Kết nối nhân vật, sự kiện, tổ chức và địa điểm trong một bản đồ câu chuyện
               cho thế giới của bạn.
             </Text>
           </View>
-
-          {/* Phiên đăng nhập đang sẵn có */}
-          {isAuthenticated && user && (
-            <View style={styles.sessionBanner}>
-              <View style={styles.sessionInfo}>
-                <Text style={styles.sessionBadge}>ĐANG ĐĂNG NHẬP</Text>
-                <Text style={styles.sessionName}>
-                  {user.penName} <Text style={styles.sessionEmail}>({user.email})</Text>
-                </Text>
-              </View>
-              <View style={styles.sessionActions}>
-                <Pressable
-                  style={styles.sessionContinueBtn}
-                  onPress={handleContinueExisting}>
-                  <Text style={styles.sessionContinueText}>Vào xưởng</Text>
-                </Pressable>
-                <Pressable style={styles.sessionLogoutBtn} onPress={logout}>
-                  <Text style={styles.sessionLogoutText}>Đổi tài khoản</Text>
-                </Pressable>
-              </View>
-            </View>
-          )}
 
           {/* Tabs */}
           <View style={styles.tabBar}>
@@ -518,26 +478,6 @@ export default function AuthScreen() {
               </Text>
             </Pressable>
 
-            {/* Guest Demo Action */}
-            <View style={styles.guestSection}>
-              <View style={styles.guestDividerRow}>
-                <View style={styles.guestLine} />
-                <Text style={styles.guestDividerText}>HOẶC</Text>
-                <View style={styles.guestLine} />
-              </View>
-
-              <Pressable
-                disabled={isSubmitting}
-                style={({ pressed }) => [
-                  styles.guestBtn,
-                  pressed && styles.guestBtnPressed,
-                ]}
-                onPress={handleGuestLogin}>
-                <Text style={styles.guestBtnText}>
-                  Xem thử với tài khoản mẫu (Lăng Tiêu Khách)
-                </Text>
-              </Pressable>
-            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -651,66 +591,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 22,
     color: ThemeColors.textSecondary,
-    fontFamily: AppFonts.sans,
-  },
-  sessionBanner: {
-    backgroundColor: '#1b1813',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#3a3224',
-    padding: 14,
-    marginBottom: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-  },
-  sessionInfo: {
-    flex: 1,
-  },
-  sessionBadge: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: ThemeColors.gold,
-    fontWeight: '700',
-    marginBottom: 3,
-    fontFamily: AppFonts.sans,
-  },
-  sessionName: {
-    color: ThemeColors.textPrimary,
-    fontSize: 14,
-    fontWeight: '600',
-    fontFamily: AppFonts.sans,
-  },
-  sessionEmail: {
-    color: ThemeColors.textSecondary,
-    fontWeight: '400',
-    fontSize: 12,
-  },
-  sessionActions: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  sessionContinueBtn: {
-    backgroundColor: ThemeColors.gold,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  sessionContinueText: {
-    color: '#15130f',
-    fontSize: 12,
-    fontWeight: '700',
-    fontFamily: AppFonts.sans,
-  },
-  sessionLogoutBtn: {
-    paddingHorizontal: 8,
-    paddingVertical: 6,
-  },
-  sessionLogoutText: {
-    color: '#9f9484',
-    fontSize: 12,
     fontFamily: AppFonts.sans,
   },
   tabBar: {
@@ -847,44 +727,6 @@ const styles = StyleSheet.create({
     color: ThemeColors.gold,
     fontWeight: '600',
   },
-  guestSection: {
-    marginTop: 10,
-    alignItems: 'center',
-  },
-  guestDividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    width: '100%',
-    marginVertical: 10,
-  },
-  guestLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: '#23201a',
-  },
-  guestDividerText: {
-    marginHorizontal: 14,
-    color: '#554d3f',
-    fontSize: 11,
-    letterSpacing: 1.5,
-    fontWeight: '600',
-    fontFamily: AppFonts.sans,
-  },
-  guestBtn: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-  },
-  guestBtnPressed: {
-    opacity: 0.7,
-  },
-  guestBtnText: {
-    color: '#c29646',
-    fontSize: 13.5,
-    fontFamily: AppFonts.sans,
-    textAlign: 'center',
-  },
-
   // 🌟 Hộp xem trước văn bản trên bàn phím (Keyboard Accessory View)
   keyboardAccessoryBar: {
     position: 'absolute',

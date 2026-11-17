@@ -1,7 +1,9 @@
 const express = require('express');
 const router = express.Router();
 const graphController = require('../controllers/graphController');
+const { verifyToken } = require('../middlewares/authMiddleware');
 
+router.use(verifyToken);
 // Tìm đường đi ngắn nhất giữa 2 thực thể
 router.get('/shortest-path', graphController.getShortestPath);
 

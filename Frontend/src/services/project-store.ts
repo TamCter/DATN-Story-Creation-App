@@ -67,7 +67,7 @@ export class ProjectStore {
   /**
    * Lấy toàn bộ danh sách dự án
    */
-  async getProjects(userId?: string): Promise<StoryProject[]> {
+  async getProjects(): Promise<StoryProject[]> {
     try {
       const res = await api.getProjects();
       if (res.success && Array.isArray(res.data)) {
@@ -90,10 +90,6 @@ export class ProjectStore {
     const localProjects = await this.getLocalProjects();
     if (localProjects.length > 0) {
       return localProjects;
-    }
-
-    if (userId === 'user-guest-demo') {
-      return INITIAL_PROJECTS;
     }
 
     return [];

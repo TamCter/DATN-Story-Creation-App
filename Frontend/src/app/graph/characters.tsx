@@ -31,39 +31,39 @@ interface CharacterExtra {
 
 const CHAR_EXTRAS: Record<string, CharacterExtra> = {
   'lang-tieu': {
-    title: 'Đoạn Kiếm Khách · Hậu duệ Sơn Trang',
-    weapon: 'Chuôi Kiếm Hoàng Hôn (Mảnh 1)',
-    sect: 'Tự do / Lưu vong',
-    status: 'Bị Thiên Hạ Minh truy sát khắp thiên hạ',
-    personality: 'Trầm mặc, kiên định, không tin lời ước hẹn',
+    title: 'Phóng viên điều tra · Nhân chứng',
+    weapon: 'Máy ghi âm và bản ghi gốc',
+    sect: 'Phóng viên độc lập',
+    status: 'Đang điều tra vụ việc cũ',
+    personality: 'Trầm lặng, thận trọng, luôn kiểm chứng thông tin',
     connections: [
       { name: 'Mộc Lan', relation: 'Tin tưởng', color: '#e5a93c' },
-      { name: 'Triệu Vô Cực', relation: 'Huynh đệ cũ / Thù sâu', color: '#e05252' },
-      { name: 'Kiếm Hoàng Hôn', relation: 'Sở hữu mảnh 1', color: '#42b883' },
+      { name: 'Triệu Vô Cực', relation: 'Cộng sự cũ / Mâu thuẫn', color: '#e05252' },
+      { name: 'Hồ Sơ Hoàng Hôn', relation: 'Đang lưu giữ bản gốc', color: '#42b883' },
     ],
   },
   'moc-lan': {
-    title: 'Bạch Liên Y Sư · Dược Thiện Truyền Nhân',
-    weapon: 'Bạch Liên Châm & Dược Thảo',
-    sect: 'Bạch Liên Cốc',
-    status: 'Ẩn cư tại U Cốc sương mờ',
-    personality: 'Thanh thuần, từ tâm nhưng ẩn chứa bí mật sư môn',
+    title: 'Bác sĩ pháp y · Chuyên gia',
+    weapon: 'Hồ sơ giám định',
+    sect: 'Viện Bạch Liên',
+    status: 'Đang làm việc tại Viện Bạch Liên',
+    personality: 'Điềm tĩnh, khách quan và cẩn trọng',
     connections: [
-      { name: 'Lăng Tiêu', relation: 'Cứu chữa & che chở', color: '#e5a93c' },
-      { name: 'Bạch Liên Cốc', relation: 'Môn đồ chân truyền', color: '#42b883' },
-      { name: 'Thiên Hạ Minh', relation: 'Bị bí mật dò xét', color: '#d95a38' },
+      { name: 'Lăng Tiêu', relation: 'Cung cấp thông tin', color: '#e5a93c' },
+      { name: 'Viện Bạch Liên', relation: 'Làm việc tại', color: '#42b883' },
+      { name: 'Tập đoàn Thiên Hạ', relation: 'Chịu sức ép', color: '#d95a38' },
     ],
   },
   'trieu-vo-cuc': {
-    title: 'Thiên Hạ Minh Chủ · Hùng Bá Võ Lâm',
-    weapon: 'Huyền Thiết Trảm Ma Kiếm',
-    sect: 'Thiên Hạ Minh',
-    status: 'Quy tụ chính đạo, mưu đồ đoạt 7 mảnh kiếm',
-    personality: 'Thâm trầm, quyết đoán, dã tâm nuốt chửng võ lâm',
+    title: 'Giám đốc · Người có liên quan',
+    weapon: 'Điện thoại bảo mật',
+    sect: 'Tập đoàn Thiên Hạ',
+    status: 'Đang tìm cách kiểm soát thông tin',
+    personality: 'Quyết đoán, kín kẽ và có tính toán',
     connections: [
-      { name: 'Thiên Hạ Minh', relation: 'Thủ lĩnh tối cao', color: '#d95a38' },
-      { name: 'Đêm Hỏa Thiêu', relation: 'Chủ mưu diệt môn', color: '#e05252' },
-      { name: 'Kiếm Hoàng Hôn', relation: 'Truy lùng đoạt kiếm', color: '#42b883' },
+      { name: 'Tập đoàn Thiên Hạ', relation: 'Giám đốc', color: '#d95a38' },
+      { name: 'Vụ Cháy Tại Điền Trang', relation: 'Bị nghi có liên quan', color: '#e05252' },
+      { name: 'Hồ Sơ Hoàng Hôn', relation: 'Tìm cách kiểm soát', color: '#42b883' },
     ],
   },
 };
@@ -187,7 +187,7 @@ export default function CharactersScreen() {
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Tìm kiếm kiếm khách, y sư, minh chủ..."
+            placeholder="Tìm kiếm nhân vật, nghề nghiệp, vai trò..."
             placeholderTextColor="#736a5c"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -232,10 +232,10 @@ export default function CharactersScreen() {
         <View style={styles.cardsContainer}>
           {filteredCharacters.map((char) => {
             const extra = CHAR_EXTRAS[char.id] || {
-              title: char.subType || 'Cao thủ võ lâm',
-              weapon: 'Vũ khí giang hồ',
+              title: char.subType || 'Nhân vật',
+              weapon: 'Chưa cập nhật',
               sect: 'Tự do',
-              status: 'Hành tẩu giang hồ',
+              status: 'Chưa cập nhật',
               personality: 'Kiên định',
               connections: [],
             };
@@ -293,11 +293,11 @@ export default function CharactersScreen() {
                 {/* Character Profile Meta */}
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🗡 Binh khí:</Text>
+                    <Text style={styles.metaLabel}>🎒 Vật dụng:</Text>
                     <Text style={styles.metaValueHighlight}>{char.weapon || extra.weapon}</Text>
                   </View>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🏛 Môn phái:</Text>
+                    <Text style={styles.metaLabel}>🏛 Tổ chức:</Text>
                     <Text style={styles.metaValue}>{char.sect || extra.sect}</Text>
                   </View>
                   <View style={styles.metaItem}>

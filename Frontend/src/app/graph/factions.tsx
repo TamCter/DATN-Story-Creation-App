@@ -26,31 +26,64 @@ interface FactionExtendedData {
   leader?: string;
   headquarters?: string;
   motto?: string;
-  alignment: 'CHÍNH PHÁI' | 'TRUNG LẬP' | 'TÀ PHÁI';
+  alignment: string;
   relations: Array<{ label: string; target: string; tone: 'neutral' | 'hostile' | 'allied' }>;
+}
+
+type FactionAlignment = 'ĐỒNG MINH' | 'TRUNG LẬP' | 'ĐỐI LẬP';
+
+function normalizeFactionAlignment(value?: string): FactionAlignment | null {
+  const normalized = value
+    ?.trim()
+    .toLocaleLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd');
+  if (!normalized) return null;
+  if (normalized.includes('trung lap') || normalized.includes('neutral')) return 'TRUNG LẬP';
+  if (normalized.includes('doi lap') || normalized.includes('ta phai') || normalized.includes('antagonist')) {
+    return 'ĐỐI LẬP';
+  }
+  if (
+    normalized.includes('dong minh') ||
+    normalized.includes('chinh phai') ||
+    normalized.includes('protagonist')
+  ) {
+    return 'ĐỒNG MINH';
+  }
+  return null;
+}
+
+function getFactionAlignment(faction: StoryNode): FactionAlignment | null {
+  return (
+    normalizeFactionAlignment(faction.alignment) ||
+    normalizeFactionAlignment(faction.role) ||
+    normalizeFactionAlignment(faction.subType) ||
+    normalizeFactionAlignment(FACTION_EXTRAS[faction.id]?.alignment)
+  );
 }
 
 const FACTION_EXTRAS: Record<string, FactionExtendedData> = {
   'thien-ha-minh': {
-    leader: 'Triệu Vô Cực (Minh Chủ)',
-    headquarters: 'Hàn Nguyệt Thành · Tổng đàn',
-    motto: 'Quy tụ võ lâm, trừ gian diệt bạo',
-    alignment: 'CHÍNH PHÁI',
+    leader: 'Triệu Vô Cực (Giám đốc)',
+    headquarters: 'Thành phố Bắc Nguyệt · Trụ sở chính',
+    motto: 'Kết nối chuyên gia, bảo vệ uy tín',
+    alignment: 'ĐỐI LẬP',
     relations: [
-      { label: 'Dò xét', target: 'Bạch Liên Cốc', tone: 'neutral' },
-      { label: 'Chủ trì', target: 'Hội Thề Nguyệt Hạ', tone: 'allied' },
-      { label: 'Truy bức', target: 'Lăng Tiêu', tone: 'hostile' },
+      { label: 'Gây sức ép', target: 'Viện Bạch Liên', tone: 'neutral' },
+      { label: 'Tổ chức', target: 'Cuộc Gặp Tại Nguyệt Hạ', tone: 'allied' },
+      { label: 'Theo dõi', target: 'Lăng Tiêu', tone: 'hostile' },
     ],
   },
   'bach-lien-coc': {
-    leader: 'Mộc Lan (Truyền nhân y đạo)',
-    headquarters: 'U Cốc Bạch Liên · Cấm địa sương mờ',
-    motto: 'Y tâm cứu thế, bất nhiễm hồng trần',
+    leader: 'Mộc Lan (Trưởng bộ phận pháp y)',
+    headquarters: 'Thành phố Bắc Nguyệt · Cơ sở chính',
+    motto: 'Tôn trọng sự thật, bảo vệ con người',
     alignment: 'TRUNG LẬP',
     relations: [
-      { label: 'Bị dò xét bởi', target: 'Thiên Hạ Minh', tone: 'neutral' },
-      { label: 'Che chở & cứu mạng', target: 'Lăng Tiêu', tone: 'allied' },
-      { label: 'Truyền thừa', target: 'Bạch Liên Y Điển', tone: 'allied' },
+      { label: 'Chịu sức ép từ', target: 'Tập đoàn Thiên Hạ', tone: 'neutral' },
+      { label: 'Cung cấp thông tin cho', target: 'Lăng Tiêu', tone: 'allied' },
+      { label: 'Lưu trữ hồ sơ', target: 'Hồ Sơ Hoàng Hôn', tone: 'allied' },
     ],
   },
 };
@@ -90,7 +123,7 @@ export default function FactionsScreen() {
           setFactions(proj.nodes.filter((n) => n.type === 'faction'));
         }
       } catch (err) {
-        console.warn('Lỗi tải phe phái:', err);
+        console.warn('Lỗi tải danh sách tổ chức:', err);
       }
     }
     void load();
@@ -105,24 +138,36 @@ export default function FactionsScreen() {
   // Add modal state
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newFactionName, setNewFactionName] = useState('');
-  const [newFactionAlignment, setNewFactionAlignment] = useState<'CHÍNH PHÁI' | 'TRUNG LẬP' | 'TÀ PHÁI'>('CHÍNH PHÁI');
+  const [newFactionAlignment, setNewFactionAlignment] = useState<FactionAlignment>('ĐỒNG MINH');
   const [newFactionLeader, setNewFactionLeader] = useState('');
   const [newFactionDesc, setNewFactionDesc] = useState('');
 
   const filteredFactions = useMemo(() => {
     return factions.filter((f) => {
-      const extra = FACTION_EXTRAS[f.id] || { alignment: (f.role as any) || 'CHÍNH PHÁI' };
-      const matchesAlignment =
-        selectedAlignment === 'all' || extra.alignment === selectedAlignment;
+      const extra = FACTION_EXTRAS[f.id];
+      const matchesAlignment = selectedAlignment === 'all' || getFactionAlignment(f) === selectedAlignment;
       const q = searchQuery.trim().toLowerCase();
       const matchesSearch =
         !q ||
         f.name.toLowerCase().includes(q) ||
         f.desc.toLowerCase().includes(q) ||
-        (extra.leader && extra.leader.toLowerCase().includes(q));
+        (extra?.leader && extra.leader.toLowerCase().includes(q));
       return matchesAlignment && matchesSearch;
     });
   }, [factions, selectedAlignment, searchQuery]);
+
+  const alignmentCounts = useMemo(() => {
+    const counts: Record<FactionAlignment, number> = {
+      'ĐỒNG MINH': 0,
+      'TRUNG LẬP': 0,
+      'ĐỐI LẬP': 0,
+    };
+    factions.forEach((faction) => {
+      const alignment = getFactionAlignment(faction);
+      if (alignment) counts[alignment] += 1;
+    });
+    return counts;
+  }, [factions]);
 
   const handleCreateFaction = () => {
     if (!newFactionName.trim()) return;
@@ -132,8 +177,8 @@ export default function FactionsScreen() {
       name: newFactionName.trim(),
       type: 'faction',
       role: newFactionAlignment,
-      subType: newFactionAlignment === 'CHÍNH PHÁI' ? 'DANH MÔN CHÁNH PHÁI' : newFactionAlignment === 'TÀ PHÁI' ? 'MA GIÁO THẾ LỰC' : 'ẨN THẾ MÔN PHÁI',
-      desc: newFactionDesc.trim() || 'Thế lực võ lâm mới xuất hiện trên giang hồ.',
+      subType: newFactionAlignment,
+      desc: newFactionDesc.trim() || 'Một tổ chức mới trong câu chuyện.',
       x: 200,
       y: 300,
     };
@@ -142,7 +187,7 @@ export default function FactionsScreen() {
       FACTION_EXTRAS[newId] = {
         leader: newFactionLeader.trim(),
         headquarters: 'Chưa xác định',
-        motto: 'Võ lâm phân tranh',
+        motto: 'Chưa có thông tin',
         alignment: newFactionAlignment,
         relations: [],
       };
@@ -170,9 +215,9 @@ export default function FactionsScreen() {
             <Text style={styles.backBtnIcon}>‹</Text>
           </Pressable>
           <View>
-            <Text style={styles.headerTitle}>Phe phái</Text>
+            <Text style={styles.headerTitle}>Tổ chức</Text>
             <Text style={styles.headerSubtitle}>
-              {currentProject.title} · {factions.length} THẾ LỰC
+              {currentProject.title} · {factions.length} TỔ CHỨC
             </Text>
           </View>
         </View>
@@ -191,34 +236,12 @@ export default function FactionsScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {/* Story World Stats Banner */}
-        <View style={styles.statsBanner}>
-          <View style={styles.statBox}>
-            <Text style={styles.statValue}>{factions.length}</Text>
-            <Text style={styles.statLabel}>THẾ LỰC</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>
-              {factions.filter((f) => (FACTION_EXTRAS[f.id]?.alignment || f.role) === 'CHÍNH PHÁI').length}
-            </Text>
-            <Text style={styles.statLabel}>CHÍNH PHÁI</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#42b883' }]}>
-              {factions.filter((f) => (FACTION_EXTRAS[f.id]?.alignment || f.role) === 'TRUNG LẬP').length}
-            </Text>
-            <Text style={styles.statLabel}>TRUNG LẬP</Text>
-          </View>
-        </View>
-
         {/* Search Bar */}
         <View style={styles.searchBarContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Tìm môn phái, lãnh đạo, bí mật..."
+            placeholder="Tìm tổ chức, người đại diện, thông tin..."
             placeholderTextColor="#736a5c"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -233,10 +256,10 @@ export default function FactionsScreen() {
         {/* Alignment Filter Chips */}
         <View style={styles.filterRow}>
           {[
-            { id: 'all', label: 'Tất cả' },
-            { id: 'CHÍNH PHÁI', label: 'Chính phái', color: '#e5a93c' },
-            { id: 'TRUNG LẬP', label: 'Trung lập', color: '#42b883' },
-            { id: 'TÀ PHÁI', label: 'Tà phái', color: '#d95a38' },
+            { id: 'all', label: 'Tất cả', count: factions.length },
+            { id: 'ĐỒNG MINH', label: 'Đồng minh', count: alignmentCounts['ĐỒNG MINH'], color: '#e5a93c' },
+            { id: 'TRUNG LẬP', label: 'Trung lập', count: alignmentCounts['TRUNG LẬP'], color: '#42b883' },
+            { id: 'ĐỐI LẬP', label: 'Đối lập', count: alignmentCounts['ĐỐI LẬP'], color: '#d95a38' },
           ].map((item) => {
             const isSelected = selectedAlignment === item.id;
             return (
@@ -254,7 +277,7 @@ export default function FactionsScreen() {
                     isSelected && styles.filterChipTextSelected,
                     isSelected && item.color ? { color: item.color } : null,
                   ]}>
-                  {item.label}
+                  {item.label} ({item.count})
                 </Text>
               </Pressable>
             );
@@ -265,9 +288,8 @@ export default function FactionsScreen() {
         <View style={styles.cardsContainer}>
           {filteredFactions.map((faction) => {
             const extra = FACTION_EXTRAS[faction.id] || {
-              alignment: faction.role as any,
               leader: 'Chưa cập nhật',
-              headquarters: 'Bản đồ võ lâm',
+              headquarters: 'Chưa cập nhật',
               relations: [],
             };
             const factionLinks = currentProject.links.filter(
@@ -283,9 +305,10 @@ export default function FactionsScreen() {
               };
             });
 
-            const isOrthodox = extra.alignment === 'CHÍNH PHÁI';
-            const isNeutral = extra.alignment === 'TRUNG LẬP';
-            const accentColor = isOrthodox
+            const alignment = getFactionAlignment(faction);
+            const isAllied = alignment === 'ĐỒNG MINH';
+            const isNeutral = alignment === 'TRUNG LẬP';
+            const accentColor = isAllied
               ? '#d95a38'
               : isNeutral
               ? '#42b883'
@@ -315,7 +338,7 @@ export default function FactionsScreen() {
                         {faction.name}
                       </Text>
                       <Text style={styles.factionSubtype} numberOfLines={1}>
-                        {faction.subType || 'THẾ LỰC GIANG HỒ'}
+                        {faction.subType || faction.role || 'TỔ CHỨC'}
                       </Text>
                     </View>
                   </View>
@@ -341,7 +364,7 @@ export default function FactionsScreen() {
                   {extra.headquarters && (
                     <View style={styles.metaItem}>
                       <Text style={styles.metaIcon}>▲</Text>
-                      <Text style={styles.metaLabel}>Tổng đàn:</Text>
+                      <Text style={styles.metaLabel}>Trụ sở:</Text>
                       <Text style={styles.metaValue}>{extra.headquarters}</Text>
                     </View>
                   )}
@@ -358,7 +381,7 @@ export default function FactionsScreen() {
                 {/* Tactical Relations in Martial Arts */}
                 {factionRelations.length > 0 && (
                   <View style={styles.relationsBox}>
-                    <Text style={styles.relationsTitle}>QUAN HỆ VÕ LÂM</Text>
+                    <Text style={styles.relationsTitle}>MẠNG LƯỚI QUAN HỆ</Text>
                     <View style={styles.relationTagsWrap}>
                       {factionRelations.map((rel) => {
                         const tagColor =
@@ -431,9 +454,9 @@ export default function FactionsScreen() {
           {filteredFactions.length === 0 && (
             <View style={styles.emptyContainer}>
               <Text style={styles.emptyIcon}>⬡</Text>
-              <Text style={styles.emptyTitle}>Không tìm thấy môn phái nào</Text>
+              <Text style={styles.emptyTitle}>Không tìm thấy tổ chức nào</Text>
               <Text style={styles.emptyDesc}>
-                Thử đổi từ khóa hoặc bộ lọc để xem các thế lực khác.
+                Thử đổi từ khóa hoặc bộ lọc.
               </Text>
             </View>
           )}
@@ -448,7 +471,7 @@ export default function FactionsScreen() {
           style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Khai tông lập phái</Text>
+              <Text style={styles.modalTitle}>Thêm tổ chức</Text>
               <Pressable
                 hitSlop={12}
                 onPress={() => setAddModalOpen(false)}>
@@ -457,10 +480,10 @@ export default function FactionsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>TÊN MÔN PHÁI / THẾ LỰC</Text>
+              <Text style={styles.inputLabel}>TÊN TỔ CHỨC</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ví dụ: Thiếu Lâm Tự, Ma Giáo, Kiếm Tông..."
+                placeholder="Ví dụ: công ty, nhóm nghiên cứu, tổ chức..."
                 placeholderTextColor="#665f52"
                 value={newFactionName}
                 onChangeText={setNewFactionName}
@@ -468,9 +491,9 @@ export default function FactionsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>LẬP TRƯỜNG VÕ LÂM</Text>
+              <Text style={styles.inputLabel}>VAI TRÒ TRONG CÂU CHUYỆN</Text>
               <View style={styles.alignmentSelectorRow}>
-                {(['CHÍNH PHÁI', 'TRUNG LẬP', 'TÀ PHÁI'] as const).map(
+                {(['ĐỒNG MINH', 'TRUNG LẬP', 'ĐỐI LẬP'] as const).map(
                   (align) => {
                     const isSelected = newFactionAlignment === align;
                     return (
@@ -486,7 +509,11 @@ export default function FactionsScreen() {
                             styles.alignmentOptionText,
                             isSelected && styles.alignmentOptionTextSelected,
                           ]}>
-                          {align}
+                          {align === 'ĐỒNG MINH'
+                            ? 'Đồng minh'
+                            : align === 'ĐỐI LẬP'
+                              ? 'Đối lập'
+                              : 'Trung lập'}
                         </Text>
                       </Pressable>
                     );
@@ -496,10 +523,10 @@ export default function FactionsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>CHƯỞNG MÔN / THỦ LĨNH</Text>
+              <Text style={styles.inputLabel}>NGƯỜI ĐẠI DIỆN / THỦ LĨNH</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ví dụ: Phương trượng, Giáo chủ..."
+                placeholder="Ví dụ: giám đốc, trưởng nhóm, đại diện..."
                 placeholderTextColor="#665f52"
                 value={newFactionLeader}
                 onChangeText={setNewFactionLeader}
@@ -507,10 +534,10 @@ export default function FactionsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>BỐI CẢNH & TÔNG CHỈ</Text>
+              <Text style={styles.inputLabel}>BỐI CẢNH & MỤC TIÊU</Text>
               <TextInput
                 style={[styles.textInput, { height: 75, textAlignVertical: 'top' }]}
-                placeholder="Mô tả danh tiếng, thế lực và vị trí trên giang hồ..."
+                placeholder="Mô tả mục tiêu, vai trò và ảnh hưởng của tổ chức..."
                 placeholderTextColor="#665f52"
                 multiline
                 value={newFactionDesc}
@@ -625,39 +652,6 @@ const styles = StyleSheet.create({
     maxWidth: 580,
     width: '100%',
     alignSelf: 'center',
-  },
-  statsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: '#14120e',
-    borderWidth: 1,
-    borderColor: '#252119',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  statBox: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#ded5c7',
-    fontFamily: AppFonts.mono,
-  },
-  statLabel: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: '#7a7263',
-    fontFamily: AppFonts.mono,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#252119',
   },
   searchBarContainer: {
     flexDirection: 'row',

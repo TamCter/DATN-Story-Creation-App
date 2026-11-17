@@ -58,13 +58,23 @@ async function runE2E() {
       throw new Error('Neo4j Aura không kết nối được!');
     }
 
-    // 2. Guest Login
-    console.log('\n[2] Đăng nhập Khách (Guest)...');
-    const guest = await apiCall('POST', '/api/auth/guest');
-    const guestData = expectStatus(guest, 200, 'Đăng nhập Guest');
-    const token = guestData?.token;
-    const user = guestData?.user;
-    console.log(`    Đăng nhập thành công: ${user?.penName} (${user?.id})`);
+    // 2. Confirm project data requires an authenticated account
+    const unauthenticatedProjects = await apiCall('GET', '/api/projects');
+    expectStatus(unauthenticatedProjects, 401, 'Chặn truy cập dự án khi chưa đăng nhập');
+
+    // 3. Register a temporary test account
+    console.log('\n[2] Đăng ký tài khoản kiểm thử...');
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = await apiCall('POST', '/api/auth/register', {
+      penName: `E2E Writer ${uniqueId}`,
+      email: `e2e-${uniqueId}@example.test`,
+      password: 'TestPassword123!',
+    });
+    const accountData = expectStatus(account, 201, 'Đăng ký tài khoản kiểm thử');
+    const token = accountData?.token;
+    const user = accountData?.user;
+    if (!token) throw new Error('Backend không trả JWT sau khi đăng ký.');
+    console.log(`    Đăng ký thành công: ${user?.penName} (${user?.id})`);
     authHeaders = { Authorization: `Bearer ${token}` };
 
     // 3. Lấy danh sách dự án ban đầu

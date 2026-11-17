@@ -7,11 +7,10 @@ const linkController = require('../controllers/linkController');
 const graphController = require('../controllers/graphController');
 const chapterController = require('../controllers/chapterController');
 
-const { optionalAuth, verifyToken } = require('../middlewares/authMiddleware');
+const { verifyToken } = require('../middlewares/authMiddleware');
 const { runQuery } = require('../config/neo4j');
 
-// Áp dụng middleware nhận diện User cho các endpoint đọc
-router.use(optionalAuth);
+router.use(verifyToken);
 
 /**
  * Middleware kiểm tra quyền truy cập dự án dùng chung cho các route đọc dữ liệu theo :projectId.
@@ -46,22 +45,22 @@ async function verifyProjectAccess(req, res, next) {
 // Quản lý Project CRUD
 router.get('/', projectController.getAllProjects);
 router.get('/:id', projectController.getProjectById);
-router.post('/', verifyToken, projectController.createProject);
-router.put('/:id', verifyToken, projectController.updateProject);
-router.delete('/:id', verifyToken, projectController.deleteProject);
+router.post('/', projectController.createProject);
+router.put('/:id', projectController.updateProject);
+router.delete('/:id', projectController.deleteProject);
 
 // Lấy toàn bộ đồ thị theo Project (dành cho màn hình Graph Canvas)
 router.get('/:projectId/graph', verifyProjectAccess, graphController.getProjectGraph);
 
 // Quản lý Nodes trong Project
 router.get('/:projectId/nodes', verifyProjectAccess, nodeController.getNodesByProject);
-router.post('/:projectId/nodes', verifyToken, nodeController.createNode);
+router.post('/:projectId/nodes', nodeController.createNode);
 
 // Quản lý Links trong Project
 router.get('/:projectId/links', verifyProjectAccess, linkController.getLinksByProject);
 
 // Quản lý Chapters trong Project
 router.get('/:projectId/chapters', verifyProjectAccess, chapterController.getChaptersByProject);
-router.post('/:projectId/chapters', verifyToken, chapterController.createChapter);
+router.post('/:projectId/chapters', chapterController.createChapter);
 
 module.exports = router;

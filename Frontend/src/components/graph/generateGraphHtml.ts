@@ -111,7 +111,7 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
         faction: {
           color: '#d95a38',
           glow: 'rgba(217, 90, 56, 0.45)',
-          name: 'Phe phái',
+          name: 'Tổ chức',
           shape: 'hexagon',
           radius: 21
         },

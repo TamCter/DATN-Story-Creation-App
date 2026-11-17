@@ -39,15 +39,11 @@ export default function ProjectsScreen() {
   const fetchUserProjects = useCallback(async () => {
     setIsLoading(true);
     try {
-      const list = await projectStore.getProjects(user?.id);
+      const list = await projectStore.getProjects();
       setProjects(list);
     } catch (error) {
       console.warn('Lỗi lấy danh sách dự án từ máy chủ:', error);
-      if (user?.id === 'user-guest-demo') {
-        setProjects(INITIAL_PROJECTS);
-      } else {
-        setProjects([]);
-      }
+      setProjects([]);
     } finally {
       setIsLoading(false);
     }
@@ -79,7 +75,7 @@ export default function ProjectsScreen() {
 
     setIsCreating(true);
     const projNumber = `№ 0${projects.length + 1}`;
-    const genreText = newGenre.trim() || 'Huyền huyễn · Phiêu lưu';
+    const genreText = newGenre.trim() || 'Tiểu thuyết · Phiêu lưu';
 
     try {
       const res = await api.createProject({
@@ -126,7 +122,7 @@ export default function ProjectsScreen() {
     }
   };
 
-  // Nạp dự án mẫu "Hoàng Hôn Kiếm Vương" vào tài khoản của User nếu muốn
+  // Nạp dự án mẫu vào tài khoản của người dùng.
   const handleLoadSampleProject = async () => {
     setIsCreating(true);
     try {
@@ -135,7 +131,7 @@ export default function ProjectsScreen() {
         title: sample.title,
         genre: sample.genre,
         number: '№ 01',
-        desc: 'Mẫu cốt truyện kiếm hiệp Hoàng Hôn Kiếm Vương',
+        desc: 'Mẫu cốt truyện trinh thám về một hồ sơ thất lạc và những mối liên hệ bị che giấu.',
       });
 
       if (res.success && res.data) {
@@ -283,7 +279,7 @@ export default function ProjectsScreen() {
               style={styles.emptySampleBtn}
               onPress={handleLoadSampleProject}>
               <Text style={styles.emptySampleBtnText}>
-                Hoặc nạp mẫu "Hoàng Hôn Kiếm Vương"
+                Hoặc nạp mẫu "Hồ Sơ Hoàng Hôn"
               </Text>
             </Pressable>
           </View>
@@ -366,7 +362,7 @@ export default function ProjectsScreen() {
                 <Text style={styles.modalLabel}>TÊN CỐT TRUYỆN</Text>
                 <TextInput
                   style={styles.modalInput}
-                  placeholder="Ví dụ: Nghìn Thu Kiếm Vũ"
+                  placeholder="Ví dụ: Những ngày cuối mùa"
                   placeholderTextColor="#5e574a"
                   value={newTitle}
                   onChangeText={setNewTitle}
@@ -378,7 +374,7 @@ export default function ProjectsScreen() {
                 <Text style={styles.modalLabel}>THỂ LOẠI</Text>
                 <TextInput
                   style={styles.modalInput}
-                  placeholder="Ví dụ: Tiên hiệp · Trùng sinh"
+                  placeholder="Ví dụ: Trinh thám · Tâm lý"
                   placeholderTextColor="#5e574a"
                   value={newGenre}
                   onChangeText={setNewGenre}
@@ -422,7 +418,7 @@ export default function ProjectsScreen() {
             </View>
             <Text style={styles.userModalName}>{displayName}</Text>
             <Text style={styles.userModalEmail}>
-              {user?.email || 'Tài khoản mẫu (Khách)'}
+              {user?.email || 'Chưa có email'}
             </Text>
 
             <View style={styles.userModalDivider} />

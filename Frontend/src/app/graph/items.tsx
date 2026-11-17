@@ -42,80 +42,88 @@ interface ItemExtendedData {
 
 const ITEM_EXTRAS: Record<string, ItemExtendedData> = {
   'kiem-hoang-hon': {
-    rarity: 'THẦN BINH THƯỢNG CỔ · CHÍ TÔN',
-    origin: 'Rèn từ Thiên Ngoại Thần Thiết vào thời thượng cổ',
-    element: 'Sát Khí · Oán Niệm Ký Ức',
+    rarity: 'TÀI LIỆU MẬT',
+    origin: 'Thu thập trong quá trình điều tra vụ việc cũ',
+    element: 'Bằng chứng · Ghi chép',
     fragments: [
       {
         id: 'frag-1',
-        name: 'Mảnh 1 · Chuôi Kiếm',
+        name: 'Phần 1 · Bản ghi gốc',
         status: 'possessed',
-        holderOrLocation: 'Lăng Tiêu đang nắm giữ',
+        holderOrLocation: 'Lăng Tiêu đang lưu giữ',
         holderType: 'character',
-        lore: 'Kỷ vật duy nhất còn lại sau Đêm Hỏa Thiêu Sơn Trang.',
+        lore: 'Bản ghi duy nhất còn lại sau vụ cháy tại điền trang.',
       },
       {
         id: 'frag-2',
-        name: 'Mảnh 2 · Thân Kiếm Trên',
+        name: 'Phần 2 · Bản sao lưu',
         status: 'revealed',
-        holderOrLocation: 'Xuất hiện tại Hội Thề Nguyệt Hạ',
+        holderOrLocation: 'Được phát hiện tại cuộc gặp ở Nguyệt Hạ',
         holderType: 'event',
-        lore: 'Mảnh kiếm kích động lòng tham của toàn thể võ lâm.',
+        lore: 'Bản sao hé lộ thông tin về những người liên quan.',
       },
       {
         id: 'frag-3',
-        name: 'Mảnh 3 · Mũi Kiếm',
+        name: 'Phần 3 · Tài liệu gốc',
         status: 'lost',
-        holderOrLocation: 'Rơi xuống Vực Vọng Hồn',
+        holderOrLocation: 'Thất lạc tại Bến Sông Bắc Nguyệt',
         holderType: 'location',
-        lore: 'Thất lạc dưới vực sâu vạn trượng, sát khí ngút trời.',
+        lore: 'Tài liệu được cho là đã bị vứt bỏ tại khu vực ven sông.',
       },
       {
         id: 'frag-4',
-        name: 'Mảnh 4 · Tàn Phiến',
+        name: 'Phần 4 · Ghi chú nhân chứng',
         status: 'unknown',
-        holderOrLocation: 'Lưu lạc biên ải phương Bắc',
+        holderOrLocation: 'Chưa xác định địa điểm lưu trữ',
         holderType: 'unknown',
-        lore: 'Chưa từng lộ diện trước mắt thế nhân.',
+        lore: 'Chưa từng được xác minh độc lập.',
       },
       {
         id: 'frag-5',
-        name: 'Mảnh 5 · Hàn Nhận',
+        name: 'Phần 5 · Bản đối chiếu',
         status: 'unknown',
         holderOrLocation: 'Bí mật cất giấu',
         holderType: 'unknown',
-        lore: 'Chỉ nghe đồn đại trong bí tịch tàn khuyết.',
+        lore: 'Chỉ được nhắc đến trong một bản ghi chưa đầy đủ.',
       },
       {
         id: 'frag-6',
-        name: 'Mảnh 6 · Huyết Đoạn',
+        name: 'Phần 6 · Biên bản phỏng vấn',
         status: 'unknown',
         holderOrLocation: 'Chưa rõ tung tích',
         holderType: 'unknown',
-        lore: 'Ký ức của kiếm khách đệ nhất thiên hạ từng ngã xuống.',
+        lore: 'Ghi lại lời khai của một nhân chứng quan trọng.',
       },
       {
         id: 'frag-7',
-        name: 'Mảnh 7 · Tâm Kiếm',
+        name: 'Phần 7 · Kết luận điều tra',
         status: 'unknown',
         holderOrLocation: 'Mảnh vỡ then chốt cuối cùng',
         holderType: 'unknown',
-        lore: 'Nắm giữ linh hồn chân chính của Kiếm Hoàng Hôn.',
+        lore: 'Có thể làm sáng tỏ toàn bộ vụ việc.',
       },
     ],
     traits: [
-      '🩸 Nhớ ký ức của chủ nhân đã chết bởi kiếm',
-      '⚡ Phát tín hiệu cộng hưởng khi các mảnh ở gần',
-      '⚔ Hợp nhất 7 mảnh sẽ mở ra bí tịch kiếm đạo tuyệt đỉnh',
+      '📄 Ghi lại các tình tiết quan trọng của vụ việc',
+      '🔎 Có thể đối chiếu với lời khai của nhân chứng',
+      '🧩 Tập hợp đầy đủ các phần sẽ giúp làm rõ diễn biến',
     ],
     associatedNodes: [
-      { name: 'Lăng Tiêu', type: 'character', role: 'Sở hữu chuôi kiếm' },
-      { name: 'Triệu Vô Cực', type: 'character', role: 'Dã tâm đoạt trọn bộ' },
-      { name: 'Hội Thề Nguyệt Hạ', type: 'event', role: 'Nơi mảnh 2 lộ diện' },
-      { name: 'Vực Vọng Hồn', type: 'location', role: 'Nơi mảnh 3 rơi rụng' },
+      { name: 'Lăng Tiêu', type: 'character', role: 'Đang lưu giữ hồ sơ' },
+      { name: 'Triệu Vô Cực', type: 'character', role: 'Tìm cách kiểm soát thông tin' },
+      { name: 'Cuộc Gặp Tại Nguyệt Hạ', type: 'event', role: 'Nơi bản sao được phát hiện' },
+      { name: 'Bến Sông Bắc Nguyệt', type: 'location', role: 'Nơi tài liệu thất lạc' },
     ],
   },
 };
+
+function hasFragments(item: StoryNode): boolean {
+  const extraFragments = ITEM_EXTRAS[item.id]?.fragments || [];
+  return (
+    extraFragments.length > 0 ||
+    /mảnh|thành phần/i.test(`${item.name} ${item.subType || ''}`)
+  );
+}
 
 export default function ItemsScreen() {
   const params = useLocalSearchParams();
@@ -162,13 +170,13 @@ export default function ItemsScreen() {
   }, [projectId]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<'all' | 'weapon' | 'fragment' | 'scroll'>('all');
+  const [selectedFilter, setSelectedFilter] = useState<'all' | 'fragment'>('all');
   const [expandedItemId, setExpandedItemId] = useState<string>('kiem-hoang-hon');
 
   // Add Item Modal
   const [addModalOpen, setAddModalOpen] = useState(false);
   const [newItemName, setNewItemName] = useState('');
-  const [newItemRole, setNewItemRole] = useState('THẦN BINH');
+  const [newItemRole, setNewItemRole] = useState('Vật phẩm');
   const [newItemDesc, setNewItemDesc] = useState('');
 
   const filteredItems = useMemo(() => {
@@ -182,16 +190,8 @@ export default function ItemsScreen() {
       if (!matchesSearch) return false;
 
       if (selectedFilter === 'all') return true;
-      if (selectedFilter === 'weapon') {
-        const extra = ITEM_EXTRAS[item.id];
-        return extra && extra.fragments && extra.fragments.length === 0;
-      }
       if (selectedFilter === 'fragment') {
-        const extra = ITEM_EXTRAS[item.id];
-        return extra && extra.fragments && extra.fragments.length > 0;
-      }
-      if (selectedFilter === 'scroll') {
-        return item.subType?.toLowerCase().includes('bí kíp') || item.subType?.toLowerCase().includes('phổ') || false;
+        return hasFragments(item);
       }
       return true;
     });
@@ -204,9 +204,9 @@ export default function ItemsScreen() {
       id: newId,
       name: newItemName.trim(),
       type: 'item',
-      role: newItemRole.trim() || 'BẢO VẬT',
-      subType: 'BẢO KHÍ GIANG HỒ',
-      desc: newItemDesc.trim() || 'Cổ vật võ lâm mang theo bí mật chưa có lời giải.',
+      role: newItemRole.trim() || 'Vật phẩm',
+      subType: 'Đạo cụ',
+      desc: newItemDesc.trim() || 'Vật phẩm có vai trò trong diễn biến câu chuyện.',
       x: 220,
       y: 420,
     };
@@ -214,7 +214,7 @@ export default function ItemsScreen() {
     setItems((prev) => [...prev, newItem]);
     setAddModalOpen(false);
     setNewItemName('');
-    setNewItemRole('THẦN BINH');
+    setNewItemRole('Vật phẩm');
     setNewItemDesc('');
   };
 
@@ -235,7 +235,7 @@ export default function ItemsScreen() {
           <View>
             <Text style={styles.headerTitle}>Vật phẩm</Text>
             <Text style={styles.headerSubtitle}>
-              {currentProject.title} · {items.length} BẢO VẬT
+              {currentProject.title} · {items.length} VẬT PHẨM
             </Text>
           </View>
         </View>
@@ -254,32 +254,12 @@ export default function ItemsScreen() {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}>
-        {/* World Artifacts Summary Banner */}
-        <View style={styles.statsBanner}>
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#42b883' }]}>
-              {items.length}
-            </Text>
-            <Text style={styles.statLabel}>BẢO VẬT CHÍ TÔN</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#e5a93c' }]}>7</Text>
-            <Text style={styles.statLabel}>MẢNH KIẾM VỠ</Text>
-          </View>
-          <View style={styles.statDivider} />
-          <View style={styles.statBox}>
-            <Text style={[styles.statValue, { color: '#5b8ec2' }]}>3 / 7</Text>
-            <Text style={styles.statLabel}>ĐÃ LỘ DIỆN</Text>
-          </View>
-        </View>
-
         {/* Search Bar */}
         <View style={styles.searchBarContainer}>
           <Text style={styles.searchIcon}>🔍</Text>
           <TextInput
             style={styles.searchInput}
-            placeholder="Tìm kiếm kiếm phổ, thần binh, mảnh vỡ..."
+            placeholder="Tìm vật phẩm, tài liệu, đạo cụ..."
             placeholderTextColor="#736a5c"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -294,8 +274,8 @@ export default function ItemsScreen() {
         {/* Category Filters */}
         <View style={styles.filterRow}>
           {[
-            { id: 'all', label: `Tất cả (${items.length})` },
-            { id: 'fragment', label: `Có mảnh vỡ (${items.filter((i) => (ITEM_EXTRAS[i.id]?.fragments?.length ?? 0) > 0).length})` },
+            { id: 'all', label: 'Tất cả', count: items.length },
+            { id: 'fragment', label: 'Có thành phần rời', count: items.filter(hasFragments).length },
           ].map((item) => {
             const isSelected = selectedFilter === item.id;
             return (
@@ -311,7 +291,7 @@ export default function ItemsScreen() {
                     styles.filterChipText,
                     isSelected && styles.filterChipTextSelected,
                   ]}>
-                  {item.label}
+                  {item.label} ({item.count})
                 </Text>
               </Pressable>
             );
@@ -322,9 +302,9 @@ export default function ItemsScreen() {
         <View style={styles.cardsContainer}>
           {filteredItems.map((item) => {
             const extra = ITEM_EXTRAS[item.id] || {
-              rarity: 'BẢO KHÍ GIANG HỒ',
-              origin: 'Vũ khí lưu lạc',
-              element: 'Bí ẩn',
+              rarity: 'VẬT PHẨM',
+              origin: 'Chưa xác định',
+              element: 'Chưa xác định',
               fragments: [],
               traits: ['Mang theo ký ức lịch sử'],
               associatedNodes: [],
@@ -373,7 +353,7 @@ export default function ItemsScreen() {
                   <View style={styles.fragmentMatrixBox}>
                     <View style={styles.matrixHeader}>
                       <Text style={styles.matrixTitle}>
-                        BẢN ĐỒ 7 MẢNH VỠ KIẾM HOÀNG HÔN
+                        CẤU TRÚC CÁC PHẦN CỦA HỒ SƠ
                       </Text>
                       <Text style={styles.matrixProgressText}>
                         3/7 ĐÃ XUẤT HIỆN
@@ -457,7 +437,7 @@ export default function ItemsScreen() {
                 {extra.traits && extra.traits.length > 0 && (
                   <View style={styles.traitsSection}>
                     <Text style={styles.traitsSectionTitle}>
-                      ĐẶC TÍNH THẦN THOẠI
+                      ĐẶC ĐIỂM NỔI BẬT
                     </Text>
                     {extra.traits.map((trait, tIdx) => (
                       <View key={tIdx} style={styles.traitRow}>
@@ -471,7 +451,7 @@ export default function ItemsScreen() {
                 {itemAssociations.length > 0 && (
                   <View style={styles.associatedBox}>
                     <Text style={styles.associatedTitle}>
-                      MỐI LIÊN KẾT GIANG HỒ ({itemAssociations.length})
+                      MỐI LIÊN KẾT ({itemAssociations.length})
                     </Text>
                     <View style={styles.associatedChipsWrap}>
                       {itemAssociations.map((assoc) => (
@@ -552,7 +532,7 @@ export default function ItemsScreen() {
           style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Thêm bảo vật / Thần binh</Text>
+              <Text style={styles.modalTitle}>Thêm vật phẩm</Text>
               <Pressable
                 hitSlop={12}
                 onPress={() => setAddModalOpen(false)}>
@@ -561,10 +541,10 @@ export default function ItemsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>TÊN VẬT PHẨM / THẦN KHÍ</Text>
+              <Text style={styles.inputLabel}>TÊN VẬT PHẨM</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ví dụ: Đồ Long Đao, Cửu Âm Chân Kinh..."
+                placeholder="Ví dụ: hồ sơ, thiết bị, vật kỷ niệm..."
                 placeholderTextColor="#665f52"
                 value={newItemName}
                 onChangeText={setNewItemName}
@@ -572,10 +552,10 @@ export default function ItemsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>PHÂN LOẠI / PHẨM GIAI</Text>
+              <Text style={styles.inputLabel}>PHÂN LOẠI</Text>
               <TextInput
                 style={styles.textInput}
-                placeholder="Ví dụ: THẦN BINH THƯỢNG CỔ, BẢO VẬT, 7 MẢNH..."
+                placeholder="Ví dụ: đạo cụ, tài liệu, vật kỷ niệm..."
                 placeholderTextColor="#665f52"
                 value={newItemRole}
                 onChangeText={setNewItemRole}
@@ -583,10 +563,10 @@ export default function ItemsScreen() {
             </View>
 
             <View style={styles.inputGroup}>
-              <Text style={styles.inputLabel}>TRUYỀN THUYẾT & NGUỒN GỐC</Text>
+              <Text style={styles.inputLabel}>MÔ TẢ & NGUỒN GỐC</Text>
               <TextInput
                 style={[styles.textInput, { height: 75, textAlignVertical: 'top' }]}
-                placeholder="Ghi chú về lai lịch, uy lực và nơi cất giấu bảo vật..."
+                placeholder="Ghi chú về nguồn gốc, đặc điểm và vai trò trong câu chuyện..."
                 placeholderTextColor="#665f52"
                 multiline
                 value={newItemDesc}
@@ -701,38 +681,6 @@ const styles = StyleSheet.create({
     maxWidth: 580,
     width: '100%',
     alignSelf: 'center',
-  },
-  statsBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-around',
-    backgroundColor: '#14120e',
-    borderWidth: 1,
-    borderColor: '#252119',
-    borderRadius: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    marginBottom: 16,
-  },
-  statBox: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    fontFamily: AppFonts.mono,
-  },
-  statLabel: {
-    fontSize: 10,
-    letterSpacing: 1.5,
-    color: '#7a7263',
-    fontFamily: AppFonts.mono,
-    marginTop: 2,
-  },
-  statDivider: {
-    width: 1,
-    height: 28,
-    backgroundColor: '#252119',
   },
   searchBarContainer: {
     flexDirection: 'row',
