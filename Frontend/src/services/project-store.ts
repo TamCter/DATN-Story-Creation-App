@@ -448,7 +448,12 @@ export class ProjectStore {
   }
 
   async ensureNodeSynced(projectId: string, nodeId: string): Promise<StoryNode> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+    );
     const nodeIndex = project.nodes.findIndex((node) => node.id === nodeId);
     if (nodeIndex === -1) {
       throw new Error(`Không tìm thấy node với ID: ${nodeId} trong dự án`);
@@ -458,7 +463,15 @@ export class ProjectStore {
     if (!node || node.syncStatus !== 'pending') return node;
 
     const verifyRemoteNode = async (): Promise<StoryNode | undefined> => {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+      );
       const response = await api.getNode(nodeId);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+      );
       if (!response.success || !response.data) return undefined;
       if (response.data.id !== nodeId) {
         const error = new Error(`Backend trả về node không khớp ID ${nodeId}`);
@@ -477,14 +490,26 @@ export class ProjectStore {
     try {
       remoteNode = await verifyRemoteNode();
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+      );
       if (err instanceof Error && err.name === 'NodeProjectMismatchError') throw err;
     }
 
     let createError: unknown;
     if (!remoteNode) {
       try {
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+        );
         const { syncStatus, createdAt, updatedAt, ...payload } = node;
         const response = await api.createNode(projectId, payload);
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+        );
         if (!response.success || !response.data) {
           throw new Error(response.message || 'Backend không xác nhận đã tạo node');
         }
@@ -493,6 +518,10 @@ export class ProjectStore {
           throw new Error(`Backend đã tạo node với ID khác ${nodeId}`);
         }
       } catch (err) {
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+        );
         createError = err;
         try {
           remoteNode = await verifyRemoteNode();
@@ -514,7 +543,15 @@ export class ProjectStore {
       );
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+    );
     const latestProject = await this.getProject(projectId, { preferCache: true });
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ node.'
+    );
     const latestNodeIndex = latestProject.nodes.findIndex((item) => item.id === nodeId);
     if (latestNodeIndex === -1) {
       throw new Error(`Node ${nodeId} đã bị xóa trong lúc đồng bộ`);
@@ -522,7 +559,7 @@ export class ProjectStore {
     const latestNode = latestProject.nodes[latestNodeIndex];
     const syncedNode = { ...remoteNode, ...latestNode, syncStatus: 'synced' as const };
     latestProject.nodes[latestNodeIndex] = syncedNode;
-    await this.saveProject(latestProject);
+    await this.saveProject(latestProject, accountContext);
     return syncedNode;
   }
 
@@ -535,7 +572,12 @@ export class ProjectStore {
     updates: Partial<StoryNode>,
     options: { requireBackend?: boolean } = {}
   ): Promise<StoryNode> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật node.'
+    );
     const index = project.nodes.findIndex((n) => n.id === nodeId);
     if (index === -1) {
       throw new Error(`Không tìm thấy node với ID: ${nodeId} trong dự án`);
@@ -553,8 +595,16 @@ export class ProjectStore {
 
     // Thử gọi backend để cập nhật vào Neo4j (không truyền id / createdAt / updatedAt)
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc cập nhật node.'
+      );
       const { id, createdAt, updatedAt, ...updatesForBackend } = effectiveUpdates;
       const res = await api.updateNode(nodeId, updatesForBackend);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc cập nhật node.'
+      );
       if (!res.success && options.requireBackend) {
         throw new Error(res.message || 'Backend không xác nhận đã cập nhật node');
       }
@@ -562,14 +612,22 @@ export class ProjectStore {
         Object.assign(updatedNode, res.data);
       }
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc cập nhật node.'
+      );
       if (options.requireBackend || err instanceof ApiError) {
         throw err;
       }
       console.warn('[ProjectStore] Không thể cập nhật node lên Backend, cập nhật local:', err);
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật node.'
+    );
     project.nodes[index] = updatedNode;
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
 
     return updatedNode;
   }
@@ -578,12 +636,29 @@ export class ProjectStore {
    * Xóa một Node khỏi Project
    */
   async deleteNode(projectId: string, nodeId: string): Promise<void> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc xóa node.'
+    );
 
     // Thử gọi backend để xóa trên Neo4j
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa node.'
+      );
       await api.deleteNode(nodeId);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa node.'
+      );
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa node.'
+      );
       if (err instanceof ApiError) {
         throw err;
       }
@@ -591,20 +666,29 @@ export class ProjectStore {
     }
 
     // Xóa node và các liên kết liên quan
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc xóa node.'
+    );
     project.nodes = project.nodes.filter((n) => n.id !== nodeId);
     project.links = project.links.filter((l) => l.source !== nodeId && l.target !== nodeId);
     project.edges = project.links;
     project.nodeCount = project.nodes.length;
     project.linkCount = project.links.length;
 
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
   }
 
   /**
    * Tạo một Liên kết (Link) mới giữa 2 node trong Project
    */
   async createLink(projectId: string, linkData: Partial<StoryLink>): Promise<StoryLink> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo liên kết.'
+    );
     const linkId = linkData.id && linkData.id.trim()
       ? linkData.id.trim()
       : `link-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -622,6 +706,10 @@ export class ProjectStore {
 
     // Thử gọi backend để lưu quan hệ vào Neo4j
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo liên kết.'
+      );
       const res = await api.createLink({
         id: linkId,
         source: newLink.source,
@@ -632,20 +720,32 @@ export class ProjectStore {
         contextNote: newLink.contextNote,
         tone: newLink.tone,
       });
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo liên kết.'
+      );
       if (res.success && res.data) {
         Object.assign(newLink, res.data);
       }
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo liên kết.'
+      );
       if (err instanceof ApiError) {
         throw err;
       }
       console.warn('[ProjectStore] Không thể lưu link lên Backend, lưu tạm local:', err);
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo liên kết.'
+    );
     project.links = [...project.links, newLink];
     project.edges = project.links;
     project.linkCount = project.links.length;
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
 
     return newLink;
   }
@@ -654,22 +754,43 @@ export class ProjectStore {
    * Xóa một Liên kết (Link) khỏi Project
    */
   async deleteLink(projectId: string, linkId: string): Promise<void> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc xóa liên kết.'
+    );
 
     // Thử gọi backend để xóa quan hệ trên Neo4j
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa liên kết.'
+      );
       await api.deleteLink(linkId);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa liên kết.'
+      );
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc xóa liên kết.'
+      );
       if (err instanceof ApiError) {
         throw err;
       }
       console.warn('[ProjectStore] Không thể xóa link trên Backend, xóa local:', err);
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc xóa liên kết.'
+    );
     project.links = project.links.filter((l) => l.id !== linkId);
     project.edges = project.links;
     project.linkCount = project.links.length;
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
   }
 
   private async getLocalProjects(accountId: string | null): Promise<StoryProject[]> {
@@ -771,7 +892,12 @@ export class ProjectStore {
       events?: any[];
     }
   ): Promise<StoryChapter> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo chương.'
+    );
     const existingChapters = project.chapters || [];
     const num = chapterData.chapterNumber || existingChapters.length + 1;
     const newChapter: StoryChapter = {
@@ -802,6 +928,10 @@ export class ProjectStore {
     }
 
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo chương.'
+      );
       const res = await api.createChapter(projectId, {
         id: newChapter.id,
         chapterNumber: num,
@@ -810,21 +940,38 @@ export class ProjectStore {
         content: newChapter.content,
         events: newChapter.events,
       });
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo chương.'
+      );
       if (!res.success || !res.data) {
         throw new Error(res.message || 'Backend không xác nhận đã tạo chương');
       }
       Object.assign(newChapter, res.data, { syncStatus: 'synced' });
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc tạo chương.'
+      );
       console.warn('[ProjectStore] Không thể tạo chapter lên Backend, lưu local:', err);
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc tạo chương.'
+    );
     project.chapters = [...existingChapters, newChapter];
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
     return newChapter;
   }
 
   async ensureChapterSynced(projectId: string, chapterId: string): Promise<StoryChapter> {
+    const accountContext = this.captureAccountContext();
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+    );
     const chapters = project.chapters;
     if (!chapters) {
       throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
@@ -843,6 +990,10 @@ export class ProjectStore {
     let remoteChapter: StoryChapter | undefined;
     let createError: unknown;
     try {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+      );
       const response = await api.createChapter(projectId, {
         id: chapter.id,
         chapterNumber: chapter.chapterNumber,
@@ -851,21 +1002,41 @@ export class ProjectStore {
         content: chapter.content,
         events: chapter.events,
       });
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+      );
       if (!response.success || !response.data) {
         throw new Error(response.message || 'Backend không xác nhận đã đồng bộ chương');
       }
       remoteChapter = response.data as StoryChapter;
     } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+      );
       createError = err;
     }
 
     if (!remoteChapter) {
       try {
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+        );
         const response = await api.getChapters(projectId);
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+        );
         remoteChapter = response.data.find((item) => item.id === chapter.id) as
           | StoryChapter
           | undefined;
       } catch (verifyError) {
+        this.assertAccountContext(
+          accountContext,
+          'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+        );
         const createMessage =
           createError instanceof Error ? createError.message : String(createError);
         const verifyMessage =
@@ -881,7 +1052,15 @@ export class ProjectStore {
       throw new Error('Backend chưa tạo được chương.');
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+    );
     const latestProject = await this.getProject(projectId, { preferCache: true });
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc đồng bộ chương.'
+    );
     const latestChapters = latestProject.chapters || [];
     const latestChapterIndex = latestChapters.findIndex((item) => item.id === chapterId);
     if (latestChapterIndex === -1) {
@@ -895,7 +1074,7 @@ export class ProjectStore {
     };
     latestChapters[latestChapterIndex] = syncedChapter;
     latestProject.chapters = latestChapters;
-    await this.saveProject(latestProject);
+    await this.saveProject(latestProject, accountContext);
     return syncedChapter;
   }
 
@@ -907,17 +1086,34 @@ export class ProjectStore {
     chapterId: string,
     content: string
   ): Promise<void> {
+    const accountContext = this.captureAccountContext();
     await this.ensureChapterSynced(projectId, chapterId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật chương.'
+    );
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật chương.'
+    );
     const chapters = project.chapters || [];
     const chIdx = chapters.findIndex((c) => c.id === chapterId);
     if (chIdx === -1) {
       throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
     }
 
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật chương.'
+    );
     await api.updateChapter(chapterId, { content });
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật chương.'
+    );
     chapters[chIdx] = { ...chapters[chIdx], content };
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
   }
 
   /**
@@ -1047,13 +1243,26 @@ export class ProjectStore {
     chapterId: string,
     events: StoryChapter['events']
   ): Promise<void> {
+    const accountContext = this.captureAccountContext();
     await this.ensureChapterSynced(projectId, chapterId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật sự kiện chương.'
+    );
     const response = await api.updateChapter(chapterId, { events });
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật sự kiện chương.'
+    );
     if (!response.success) {
       throw new Error(response.message || 'Không thể cập nhật danh sách sự kiện của chương');
     }
 
     const project = await this.getProject(projectId);
+    this.assertAccountContext(
+      accountContext,
+      'Tài khoản đã thay đổi trong lúc cập nhật sự kiện chương.'
+    );
     const chapterIndex = (project.chapters || []).findIndex(
       (chapter) => chapter.id === chapterId
     );
@@ -1061,7 +1270,7 @@ export class ProjectStore {
       throw new Error(`Không tìm thấy chương với ID: ${chapterId}`);
     }
     project.chapters[chapterIndex] = { ...project.chapters[chapterIndex], events };
-    await this.saveProject(project);
+    await this.saveProject(project, accountContext);
   }
 
   async removeEventFromChapter(

@@ -1,7 +1,15 @@
-import { DarkTheme, ThemeProvider, Stack } from 'expo-router';
+import {
+  DarkTheme,
+  ThemeProvider,
+  Stack,
+  useGlobalSearchParams,
+  usePathname,
+  useRouter,
+  type Href,
+} from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import * as SystemUI from 'expo-system-ui';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { Platform, StyleSheet, View } from 'react-native';
 
 import { AuthProvider, useAuth } from '@/context/auth-context';
@@ -17,6 +25,45 @@ const customDarkTheme = {
 
 function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
+  const pathname = usePathname();
+  const searchParams = useGlobalSearchParams();
+  const router = useRouter();
+  const query = Object.entries(searchParams)
+    .flatMap(([key, value]) => {
+      const values = Array.isArray(value) ? value : value === undefined ? [] : [value];
+      return values.map(
+        (item) => `${encodeURIComponent(key)}=${encodeURIComponent(item)}`
+      );
+    })
+    .join('&');
+  const currentUrl = `${pathname}${query ? `?${query}` : ''}`;
+  const isProtectedPath = pathname !== '/' && pathname !== '/index';
+  const pendingProtectedUrlRef = useRef<string | null>(
+    isLoading && isProtectedPath ? currentUrl : null
+  );
+
+  useEffect(() => {
+    if (isLoading && isProtectedPath) {
+      pendingProtectedUrlRef.current = currentUrl;
+    }
+  }, [currentUrl, isLoading, isProtectedPath]);
+
+  useEffect(() => {
+    if (isLoading) return;
+
+    if (!isAuthenticated) {
+      pendingProtectedUrlRef.current = null;
+      return;
+    }
+
+    const pendingUrl = pendingProtectedUrlRef.current;
+    pendingProtectedUrlRef.current = null;
+    if (pendingUrl) {
+      router.replace(pendingUrl as Href);
+    } else if (pathname === '/' || pathname === '/index') {
+      router.replace('/projects');
+    }
+  }, [isAuthenticated, isLoading, pathname, router]);
 
   return (
     <View style={styles.container}>

@@ -22,6 +22,7 @@ type ActiveField = 'penName' | 'email' | 'password' | 'confirmPassword' | null;
 
 export default function AuthScreen() {
   const {
+    isLoading,
     isSubmitting,
     error: authError,
     login,
@@ -173,6 +174,17 @@ export default function AuthScreen() {
 
   const currentVal = getFieldValue(focusedField);
   const isPwd = isPasswordField(focusedField);
+
+  if (isLoading) {
+    return (
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={ThemeColors.gold} />
+          <Text style={styles.loadingText}>Đang khôi phục phiên đăng nhập...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -544,6 +556,16 @@ const styles = StyleSheet.create({
   },
   flex: {
     flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 12,
+  },
+  loadingText: {
+    color: ThemeColors.textSecondary,
+    fontSize: 14,
   },
   scrollContent: {
     paddingHorizontal: 28,
