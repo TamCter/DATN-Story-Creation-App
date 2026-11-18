@@ -52,7 +52,10 @@ function AppNavigator() {
     if (isLoading) return;
 
     if (!isAuthenticated) {
-      pendingProtectedUrlRef.current = null;
+      if (isProtectedPath) {
+        pendingProtectedUrlRef.current = currentUrl;
+        router.replace('/');
+      }
       return;
     }
 
@@ -63,7 +66,7 @@ function AppNavigator() {
     } else if (pathname === '/' || pathname === '/index') {
       router.replace('/projects');
     }
-  }, [isAuthenticated, isLoading, pathname, router]);
+  }, [isAuthenticated, isLoading, pathname, router, isProtectedPath, currentUrl]);
 
   return (
     <View style={styles.container}>
@@ -77,21 +80,18 @@ function AppNavigator() {
           gestureEnabled: true,
           fullScreenGestureEnabled: true,
         }}>
-        <Stack.Protected guard={isLoading || !isAuthenticated}>
-          <Stack.Screen name="index" />
-        </Stack.Protected>
-        <Stack.Protected guard={!isLoading && isAuthenticated}>
-          <Stack.Screen name="projects/index" />
-          <Stack.Screen name="graph/index" />
-          <Stack.Screen name="graph/nodes" />
-          <Stack.Screen name="graph/events" />
-          <Stack.Screen name="graph/chapters" />
-          <Stack.Screen name="graph/locations" />
-          <Stack.Screen name="graph/characters" />
-          <Stack.Screen name="graph/factions" />
-          <Stack.Screen name="graph/items" />
-          <Stack.Screen name="graph/links" />
-        </Stack.Protected>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="projects/index" />
+        {/* Các phần trong dự án: chuyển màn hình tức thì, không trượt */}
+        <Stack.Screen name="graph/index" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/nodes" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/events" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/chapters" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/locations" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/characters" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/factions" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/items" options={{ animation: 'none', gestureEnabled: false }} />
+        <Stack.Screen name="graph/links" options={{ animation: 'none', gestureEnabled: false }} />
       </Stack>
     </View>
   );
