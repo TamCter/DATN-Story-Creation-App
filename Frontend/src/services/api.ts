@@ -364,9 +364,48 @@ class ApiService {
   }
 
   // AI APIs
+  async getAIChatHistory(projectId: string): Promise<{
+    success: boolean;
+    data: { projectId: string; userId: string; messages: any[]; updatedAt?: number | null };
+    message?: string;
+  }> {
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}`,
+      { method: 'GET' }
+    );
+  }
+
+  async saveAIChatHistory(
+    projectId: string,
+    messages: any[]
+  ): Promise<{
+    success: boolean;
+    data: { projectId: string; userId: string; count: number };
+    message?: string;
+  }> {
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ messages }),
+      }
+    );
+  }
+
+  async clearAIChatHistory(projectId: string): Promise<{
+    success: boolean;
+    data: { projectId: string; userId: string };
+    message?: string;
+  }> {
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}`,
+      { method: 'DELETE' }
+    );
+  }
+
   async chatWithAI(payload: {
     messages: { role: 'user' | 'assistant'; content: string }[];
-    projectContext?: { nodes?: any[]; projectTitle?: string };
+    projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
   }): Promise<{
     success: boolean;
     data: { message: string; nodeData: any | null; nodeDataList?: any[] };

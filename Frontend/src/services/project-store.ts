@@ -17,6 +17,216 @@ interface AccountContext {
   version: number;
 }
 
+const PLACEHOLDER_RELATION_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
+
+function cleanRelationalVal(val?: string | null): string {
+  if (!val) return '';
+  const trimmed = String(val).trim();
+  if (!trimmed || PLACEHOLDER_RELATION_PATTERN.test(trimmed)) return '';
+  return trimmed;
+}
+
+function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): void {
+  const findOrAddNode = (
+    name: string,
+    type: StoryNode['type'],
+    defaults: Partial<StoryNode>
+  ): StoryNode => {
+    const existing = (project.nodes || []).find(
+      (n) =>
+        n.type === type &&
+        (n.name.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi') || n.id === name)
+    );
+    if (existing) return existing;
+
+    const prefix = type.slice(0, 4);
+    const created: StoryNode = {
+      id: `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+      name,
+      type,
+      role: defaults.role || '',
+      desc: defaults.desc || '',
+      subType: defaults.subType || '',
+      status: defaults.status || 'Hoạt động',
+      rarity: defaults.rarity || '',
+      region: defaults.region || '',
+      gender: defaults.gender || '',
+      alignment: defaults.alignment || '',
+      x: 160 + Math.random() * 240,
+      y: 260 + Math.random() * 240,
+      syncStatus: 'pending',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    };
+    project.nodes = [...(project.nodes || []), created];
+    return created;
+  };
+
+  const ensureLink = (
+    sourceId: string,
+    targetId: string,
+    category: string,
+    label: string,
+    lineType: 'solid' | 'dashed' = 'solid'
+  ) => {
+    const links = project.links || [];
+    const exists = links.some(
+      (l) => l.source === sourceId && l.target === targetId && (l.category === category || l.label === label)
+    );
+    if (!exists) {
+      const newLink: StoryLink = {
+        id: `link-${sourceId}-${targetId}-${category.toLowerCase()}`,
+        source: sourceId,
+        target: targetId,
+        label,
+        type: lineType,
+        category,
+      };
+      project.links = [...links, newLink];
+    }
+  };
+
+  if (node.type === 'character') {
+    const weapon = cleanRelationalVal(node.weapon);
+    if (weapon) {
+      const item = findOrAddNode(weapon, 'item', {
+        role: 'Quý hiếm',
+        rarity: 'Quý hiếm',
+        desc: `Vật phẩm gắn liền với ${node.name}`,
+        status: 'Nguyên vẹn',
+      });
+      ensureLink(node.id, item.id, 'EQUIPPED', 'Vật dụng', 'solid');
+    }
+    const birthplace = cleanRelationalVal(node.birthplace);
+    if (birthplace) {
+      const loc = findOrAddNode(birthplace, 'location', {
+        role: 'ĐỊA DANH',
+        region: 'Miền Đông',
+        desc: `Nơi sinh của ${node.name}`,
+        status: 'Hoạt động',
+      });
+      ensureLink(node.id, loc.id, 'BIRTHPLACE', 'Nơi sinh', 'dashed');
+    }
+    const sect = cleanRelationalVal(node.sect);
+    if (sect) {
+      const fac = findOrAddNode(sect, 'faction', {
+        role: 'TỔ CHỨC',
+        subType: 'Trung lập',
+        alignment: 'TRUNG LẬP',
+        desc: `Tổ chức của ${node.name}`,
+        status: 'Đang hoạt động',
+      });
+      ensureLink(node.id, fac.id, 'MEMBER_OF', 'Tổ chức', 'solid');
+    }
+    const statusEvent = cleanRelationalVal(node.statusEvent);
+    if (statusEvent && (node.status === 'Đã chết' || node.status === 'Hồi sinh')) {
+      const ev = findOrAddNode(statusEvent, 'event', {
+        role: 'BIẾN CỐ',
+        desc: `Sự kiện liên quan đến ${node.name}`,
+        status: 'Đã diễn ra',
+      });
+      ensureLink(
+        node.id,
+        ev.id,
+        'STATUS_EVENT',
+        node.status === 'Đã chết' ? 'Tử nạn tại' : 'Hồi sinh tại',
+        'solid'
+      );
+    }
+  } else if (node.type === 'item') {
+    const holder = cleanRelationalVal(node.holderOrLocation);
+    if (holder) {
+      const ch = findOrAddNode(holder, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Người sở hữu ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'OWNS', 'Sở hữu', 'solid');
+    }
+    const origin = cleanRelationalVal(node.origin);
+    if (origin) {
+      const loc = findOrAddNode(origin, 'location', {
+        role: 'ĐỊA DANH',
+        region: 'Miền Đông',
+        desc: `Nguồn gốc của ${node.name}`,
+        status: 'Hoạt động',
+      });
+      ensureLink(node.id, loc.id, 'ORIGIN', 'Nguồn gốc', 'dashed');
+    }
+  } else if (node.type === 'faction') {
+    const leader = cleanRelationalVal(node.leader);
+    if (leader) {
+      const ch = findOrAddNode(leader, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Người đại diện / Thủ lĩnh của ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'LEADER_OF', 'Người đại diện / Thủ lĩnh', 'solid');
+    }
+    const hq = cleanRelationalVal(node.headquarters);
+    if (hq) {
+      const loc = findOrAddNode(hq, 'location', {
+        role: 'ĐỊA DANH',
+        region: 'Miền Đông',
+        desc: `Căn cứ địa của ${node.name}`,
+        status: 'Hoạt động',
+      });
+      ensureLink(node.id, loc.id, 'HEADQUARTERS', 'Căn cứ địa', 'solid');
+    }
+    const statusEvent = cleanRelationalVal(node.statusEvent);
+    if (statusEvent && (node.status === 'Tạm ngừng' || node.status === 'Suy tàn')) {
+      const ev = findOrAddNode(statusEvent, 'event', {
+        role: 'BIẾN CỐ',
+        desc: `Sự kiện làm thay đổi trạng thái của ${node.name}`,
+        status: 'Đã diễn ra',
+      });
+      ensureLink(node.id, ev.id, 'STATUS_EVENT', 'Trạng thái thay đổi do', 'solid');
+    }
+  } else if (node.type === 'location') {
+    const ruler = cleanRelationalVal(node.ruler);
+    if (ruler) {
+      const fac = findOrAddNode(ruler, 'faction', {
+        role: 'TỔ CHỨC',
+        subType: 'Trung lập',
+        alignment: 'TRUNG LẬP',
+        desc: `Thế lực cai quản ${node.name}`,
+        status: 'Đang hoạt động',
+      });
+      ensureLink(fac.id, node.id, 'RULER_OF', 'Cai quản', 'solid');
+    }
+  } else if (node.type === 'event') {
+    const locName = cleanRelationalVal(node.location);
+    if (locName) {
+      const loc = findOrAddNode(locName, 'location', {
+        role: 'ĐỊA DANH',
+        region: 'Miền Đông',
+        desc: `Địa danh diễn ra sự kiện ${node.name}`,
+        status: 'Hoạt động',
+      });
+      ensureLink(node.id, loc.id, 'EVENT_LOCATION', 'Nơi diễn ra', 'solid');
+    }
+    const rawChars = `${node.charactersInvolved || ''},${node.characters || ''}`
+      .split(/[,;\n]+/)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    for (const cName of Array.from(new Set(rawChars))) {
+      const ch = findOrAddNode(cName, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Nhân vật tham gia sự kiện ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'PARTICIPATED_IN', 'Tham gia', 'dashed');
+    }
+  }
+
+  project.nodeCount = project.nodes.length;
+  project.linkCount = (project.links || []).length;
+  project.edges = project.links;
+}
+
 function getEventNodesForChapter(project: StoryProject, chapter: StoryChapter): StoryNode[] {
   return (project.nodes || []).filter((node) => eventBelongsToChapter(node, chapter));
 }
@@ -459,8 +669,7 @@ export class ProjectStore {
       'Tài khoản đã thay đổi trong lúc tạo node.'
     );
     project.nodes = [...project.nodes, newNode];
-    project.nodeCount = project.nodes.length;
-    project.edges = project.links;
+    ensureLocalRelatedEntities(project, newNode);
     await this.saveProject(project, accountContext);
 
     return newNode;
@@ -646,6 +855,7 @@ export class ProjectStore {
       'Tài khoản đã thay đổi trong lúc cập nhật node.'
     );
     project.nodes[index] = updatedNode;
+    ensureLocalRelatedEntities(project, updatedNode);
     await this.saveProject(project, accountContext);
 
     return updatedNode;

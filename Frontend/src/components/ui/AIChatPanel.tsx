@@ -13,10 +13,14 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { AppFonts } from '@/constants/theme';
+import { useAuth } from '@/context/auth-context';
 import { api } from '@/services/api';
 import { StoryNode } from '@/constants/story-data';
+
+const AI_CHAT_STORAGE_PREFIX = '@story_app_ai_chat_';
 
 export interface AIChatMessage {
   id: string;
@@ -33,6 +37,7 @@ interface AIChatPanelProps {
   onClose: () => void;
   onCreateNode: (nodeData: Partial<StoryNode>) => void;
   onCreateNodes: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
+  projectId?: string;
   projectTitle?: string;
   existingNodes?: StoryNode[];
 }
@@ -52,9 +57,15 @@ export default function AIChatPanel({
   onClose,
   onCreateNode,
   onCreateNodes,
+  projectId,
   projectTitle,
   existingNodes = [],
 }: AIChatPanelProps) {
+  const { user } = useAuth();
+  const authorKey = user?.id || user?.email || 'guest';
+  const effectiveProjectKey = projectId || projectTitle || 'default';
+  const storageKey = `${AI_CHAT_STORAGE_PREFIX}${encodeURIComponent(authorKey)}_${encodeURIComponent(effectiveProjectKey)}`;
+
   const [messages, setMessages] = useState<AIChatMessage[]>([WELCOME_MSG]);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -62,6 +73,77 @@ export default function AIChatPanel({
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const scrollRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
+
+  const persistMessages = useCallback(
+    async (nextMessages: AIChatMessage[]) => {
+      try {
+        await AsyncStorage.setItem(storageKey, JSON.stringify(nextMessages));
+      } catch (err) {
+        console.warn('[AIChatPanel] Không thể lưu lịch sử chat vào bộ nhớ cục bộ:', err);
+      }
+      if (projectId && user?.id) {
+        try {
+          await api.saveAIChatHistory(projectId, nextMessages);
+        } catch {
+          // Bỏ qua lỗi mạng, đã lưu ở AsyncStorage
+        }
+      }
+    },
+    [projectId, storageKey, user?.id]
+  );
+
+  // Tải lịch sử trò chuyện riêng theo từng tác giả + từng dự án
+  useEffect(() => {
+    let isMounted = true;
+
+    async function loadHistory() {
+      let localMsgs: AIChatMessage[] | null = null;
+      try {
+        const raw = await AsyncStorage.getItem(storageKey);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            localMsgs = parsed;
+            if (isMounted) {
+              setMessages(parsed);
+            }
+          }
+        }
+      } catch {
+        // Ignore parse error
+      }
+
+      if (!localMsgs && isMounted) {
+        setMessages([WELCOME_MSG]);
+      }
+
+      if (projectId && user?.id) {
+        try {
+          const res = await api.getAIChatHistory(projectId);
+          if (!isMounted) return;
+          const remoteMsgs = res.success && Array.isArray(res.data?.messages) ? res.data.messages : [];
+          if (remoteMsgs.length > 0) {
+            const localCount = localMsgs ? localMsgs.length : 0;
+            if (remoteMsgs.length >= localCount) {
+              setMessages(remoteMsgs);
+              await AsyncStorage.setItem(storageKey, JSON.stringify(remoteMsgs));
+            } else if (localMsgs && localMsgs.length > remoteMsgs.length) {
+              await api.saveAIChatHistory(projectId, localMsgs);
+            }
+          } else if (localMsgs && localMsgs.length > 1) {
+            await api.saveAIChatHistory(projectId, localMsgs);
+          }
+        } catch {
+          // Offline hoặc chưa đồng bộ được, giữ nguyên bản lưu cục bộ
+        }
+      }
+    }
+
+    void loadHistory();
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId, storageKey, user?.id]);
 
   // Lắng nghe sự kiện bàn phím để nâng toàn bộ khung chat lên trên bàn phím
   useEffect(() => {
@@ -111,6 +193,7 @@ export default function AIChatPanel({
       const res = await api.chatWithAI({
         messages: apiMessages,
         projectContext: {
+          projectId,
           projectTitle,
           nodes: existingNodes.slice(0, 30),
         },
@@ -129,7 +212,9 @@ export default function AIChatPanel({
               : [],
           timestamp: Date.now(),
         };
-        setMessages((prev) => [...prev, aiMsg]);
+        const nextHistory = [...currentHistory, aiMsg];
+        setMessages(nextHistory);
+        void persistMessages(nextHistory);
         scrollToBottom();
       } else {
         throw new Error(res.message || 'AI không phản hồi');
@@ -142,7 +227,9 @@ export default function AIChatPanel({
         timestamp: Date.now(),
         canRetry: true,
       };
-      setMessages((prev) => [...prev, errMsg]);
+      const nextHistory = [...currentHistory, errMsg];
+      setMessages(nextHistory);
+      void persistMessages(nextHistory);
       scrollToBottom();
     } finally {
       setIsLoading(false);
@@ -165,6 +252,7 @@ export default function AIChatPanel({
 
     const updatedMessages = [...messages, userMsg];
     setMessages(updatedMessages);
+    void persistMessages(updatedMessages);
     await sendMessagesToAI(updatedMessages);
   };
 
@@ -173,7 +261,42 @@ export default function AIChatPanel({
     // Bỏ qua các tin nhắn lỗi hệ thống gần nhất để gửi lại
     const cleanedMessages = messages.filter((m) => m.role !== 'system');
     setMessages(cleanedMessages);
+    void persistMessages(cleanedMessages);
     await sendMessagesToAI(cleanedMessages);
+  };
+
+  const handleClearChat = () => {
+    const doClear = async () => {
+      const resetList = [{ ...WELCOME_MSG, timestamp: Date.now() }];
+      setMessages(resetList);
+      try {
+        await AsyncStorage.removeItem(storageKey);
+      } catch {
+        // Ignore
+      }
+      if (projectId && user?.id) {
+        try {
+          await api.clearAIChatHistory(projectId);
+        } catch {
+          // Ignore
+        }
+      }
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Bạn có muốn xóa lịch sử trò chuyện AI của dự án này không?')) {
+        void doClear();
+      }
+    } else {
+      Alert.alert(
+        'Làm mới trò chuyện',
+        'Bạn có muốn xóa lịch sử trò chuyện AI của dự án này không?',
+        [
+          { text: 'Hủy', style: 'cancel' },
+          { text: 'Xóa', style: 'destructive', onPress: () => void doClear() },
+        ]
+      );
+    }
   };
 
   const handleCopyMessage = async (message: AIChatMessage) => {
@@ -211,12 +334,25 @@ export default function AIChatPanel({
           <Text style={styles.headerIcon}>✦</Text>
           <View>
             <Text style={styles.headerTitle}>Trợ lý AI Sáng tác</Text>
-            <Text style={styles.headerSub}>Powered by Gemini</Text>
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {projectTitle ? `${projectTitle} · Đã lưu tự động` : 'Powered by Gemini'}
+            </Text>
           </View>
         </View>
-        <Pressable style={styles.closeBtn} onPress={onClose}>
-          <Text style={styles.closeBtnText}>✕</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {messages.length > 1 && (
+            <Pressable
+              style={styles.closeBtn}
+              onPress={handleClearChat}
+              accessibilityRole="button"
+              accessibilityLabel="Xóa lịch sử trò chuyện">
+              <Text style={styles.closeBtnText}>🗑️</Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.closeBtn} onPress={onClose}>
+            <Text style={styles.closeBtnText}>✕</Text>
+          </Pressable>
+        </View>
       </View>
 
       {/* Messages */}

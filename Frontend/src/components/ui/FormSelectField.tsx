@@ -48,7 +48,7 @@ export function FormSelectField({
   });
   const [customVal, setCustomVal] = useState(value || '');
 
-  const isDisabled = disabled || options.length === 0;
+  const isDisabled = disabled || (options.length === 0 && !allowCustom && !value);
 
   // Selected Option Object
   const selectedOption = options.find((o) => o.value === value);
@@ -102,7 +102,7 @@ export function FormSelectField({
               styles.triggerText,
               !value && styles.placeholderText,
             ]}>
-            {selectedOption ? selectedOption.label : value ? `✏️ ${value}` : placeholder}
+            {selectedOption ? selectedOption.label : value ? `✨ ${value} (Tạo mới)` : placeholder}
           </Text>
         </View>
 

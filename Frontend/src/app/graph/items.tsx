@@ -120,310 +120,274 @@ const ITEM_EXTRAS: Record<string, ItemExtendedData> = {
   },
 };
 
-    /** Lấy độ hiếm của vật phẩm (khớp với `ITEM_RARITY_OPTIONS`, mặc định 'Quý hiếm'). */
-    function getItemRarity(item: StoryNode): string {
-      const raw = (item.rarity || '').trim();
-      if (raw) {
-        const matched = ITEM_RARITY_OPTIONS.find(
-          (opt) => opt.value.toLocaleLowerCase('vi') === raw.toLocaleLowerCase('vi')
-        );
-        return matched ? matched.value : raw;
-      }
-      for (const preset of PRESET_ITEM_CATEGORIES) {
-        if (preset.pattern.test(combined)) {
-          return { key: preset.key, label: preset.label };
-        }
-      }
+/** Lấy độ hiếm của vật phẩm (khớp với `ITEM_RARITY_OPTIONS`, mặc định 'Quý hiếm'). */
+function getItemRarity(item: StoryNode): string {
+  const raw = (item.rarity || '').trim();
+  if (raw) {
+    const matched = ITEM_RARITY_OPTIONS.find(
+      (opt) => opt.value.toLocaleLowerCase('vi') === raw.toLocaleLowerCase('vi')
+    );
+    return matched ? matched.value : raw;
+  }
+  const roleMatch = ITEM_RARITY_OPTIONS.find(
+    (opt) => opt.value.toLocaleLowerCase('vi') === (item.role || '').trim().toLocaleLowerCase('vi')
+  );
+  if (roleMatch) return roleMatch.value;
+  return 'Quý hiếm';
+}
 
-      if (rawRole) {
-        return { key: `custom:${rawRole.toLocaleLowerCase('vi')}`, label: rawRole };
+export default function ItemsScreen() {
+  const params = useLocalSearchParams();
+  const projectId = (params.projectId as string) || 'project-1';
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+
+  const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
+    const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
+    return (
+      match || {
+        id: projectId,
+        title: 'Đang tải...',
+        genre: '',
+        number: '№ 01',
+        nodeCount: 0,
+        linkCount: 0,
+        updatedAt: 'Vừa xong',
+        nodes: [],
+        links: [],
       }
-      return { key: 'dao-cu', label: 'Đạo cụ' };
-      const roleMatch = ITEM_RARITY_OPTIONS.find(
-        (opt) => opt.value.toLocaleLowerCase('vi') === (item.role || '').trim().toLocaleLowerCase('vi')
-      );
-      if (roleMatch) return roleMatch.value;
-      return 'Quý hiếm';
+    );
+  });
+
+  const [items, setItems] = useState<StoryNode[]>(() =>
+    currentProject.nodes.filter((n) => n.type === 'item')
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    async function load() {
+      try {
+        const proj = await projectStore.getProject(projectId);
+        if (isMounted) {
+          setCurrentProject(proj);
+          setItems(proj.nodes.filter((n) => n.type === 'item'));
+        }
+      } catch (err) {
+        console.warn('Lỗi tải vật phẩm:', err);
+      }
     }
+    void load();
+    return () => {
+      isMounted = false;
+    };
+  }, [projectId]);
 
-    export default function ItemsScreen() {
-      const params = useLocalSearchParams();
-      const projectId = (params.projectId as string) || 'project-1';
-      const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedFilter, setSelectedFilter] = useState<string>('all');
+  const [expandedItemId, setExpandedItemId] = useState<string>('kiem-hoang-hon');
 
-      const [currentProject, setCurrentProject] = useState<StoryProject>(() => {
-        const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
-        return (
-          match || {
-            id: projectId,
-            title: 'Đang tải...',
-            genre: '',
-            number: '№ 01',
-            nodeCount: 0,
-            linkCount: 0,
-            updatedAt: 'Vừa xong',
-            nodes: [],
-            links: [],
-          }
-        );
-      });
+  // Add Item Modal
+  const [addModalOpen, setAddModalOpen] = useState(false);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemRarity, setNewItemRarity] = useState('Quý hiếm');
+  const [newItemDesc, setNewItemDesc] = useState('');
+  const [isCreatingItem, setIsCreatingItem] = useState(false);
 
-      const [items, setItems] = useState<StoryNode[]>(() =>
-        currentProject.nodes.filter((n) => n.type === 'item')
-      );
+  // Danh sách bộ lọc theo Độ hiếm (ITEM_RARITY_OPTIONS)
+  const rarityFilters = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const opt of ITEM_RARITY_OPTIONS) {
+      counts.set(opt.value, 0);
+    }
+    for (const item of items) {
+      const rarity = getItemRarity(item);
+      counts.set(rarity, (counts.get(rarity) || 0) + 1);
+    }
+    return ITEM_RARITY_OPTIONS.map((opt) => ({
+      key: opt.value,
+      label: `${opt.icon} ${opt.label}`,
+      count: counts.get(opt.value) || 0,
+    }));
+  }, [items]);
 
-      useEffect(() => {
-        let isMounted = true;
-        async function load() {
-          try {
-            const proj = await projectStore.getProject(projectId);
-            if (isMounted) {
-              setCurrentProject(proj);
-              setItems(proj.nodes.filter((n) => n.type === 'item'));
-            }
-          } catch (err) {
-            console.warn('Lỗi tải vật phẩm:', err);
-          }
-        }
-        void load();
-        return () => {
-          isMounted = false;
-        };
-      }, [projectId]);
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      const q = searchQuery.trim().toLowerCase();
+      const rarity = getItemRarity(item);
+      const matchesSearch =
+        !q ||
+        item.name.toLowerCase().includes(q) ||
+        item.desc.toLowerCase().includes(q) ||
+        rarity.toLowerCase().includes(q) ||
+        (item.role && item.role.toLowerCase().includes(q));
+      if (!matchesSearch) return false;
 
-      const [searchQuery, setSearchQuery] = useState('');
-      const [selectedFilter, setSelectedFilter] = useState<string>('all');
-      const [expandedItemId, setExpandedItemId] = useState<string>('kiem-hoang-hon');
+      if (selectedFilter === 'all') return true;
+      return rarity === selectedFilter;
+    });
+  }, [items, searchQuery, selectedFilter]);
 
-      // Add Item Modal
-      const [addModalOpen, setAddModalOpen] = useState(false);
-      const [newItemName, setNewItemName] = useState('');
-      const [newItemRole, setNewItemRole] = useState('Bảo vật');
-      const [newItemRarity, setNewItemRarity] = useState('Quý hiếm');
-      const [newItemDesc, setNewItemDesc] = useState('');
-      const [isCreatingItem, setIsCreatingItem] = useState(false);
+  const handleAddItem = async () => {
+    if (!newItemName.trim()) return;
+    const rarityVal = newItemRarity.trim() || 'Quý hiếm';
+    const newItem: Omit<StoryNode, 'id'> = {
+      name: newItemName.trim(),
+      type: 'item',
+      role: rarityVal,
+      subType: '',
+      rarity: rarityVal,
+      status: 'Nguyên vẹn',
+      desc: newItemDesc.trim() || 'Vật phẩm có vai trò trong diễn biến câu chuyện.',
+      x: 220,
+      y: 420,
+    };
 
-      // Danh mục vật phẩm (bao gồm các danh mục chuẩn + danh mục tùy chỉnh từ dữ liệu)
-      const categories = useMemo(() => {
-        const map = new Map<string, { key: string; label: string; count: number }>();
-        for (const preset of PRESET_ITEM_CATEGORIES) {
-          map.set(preset.key, { key: preset.key, label: preset.label, count: 0 });
-          // Danh sách bộ lọc theo Độ hiếm (ITEM_RARITY_OPTIONS)
-          const rarityFilters = useMemo(() => {
-            const counts = new Map<string, number>();
-            for (const opt of ITEM_RARITY_OPTIONS) {
-              counts.set(opt.value, 0);
-            }
-            for (const item of items) {
-              const { key, label } = getItemCategory(item);
-              const existing = map.get(key);
-              if (existing) existing.count += 1;
-              else map.set(key, { key, label, count: 1 });
-              const rarity = getItemRarity(item);
-              counts.set(rarity, (counts.get(rarity) || 0) + 1);
-            }
-            return Array.from(map.values());
-            return ITEM_RARITY_OPTIONS.map((opt) => ({
-              key: opt.value,
-              label: `${opt.icon} ${opt.label}`,
-              count: counts.get(opt.value) || 0,
-            }));
-          }, [items]);
+    setIsCreatingItem(true);
+    try {
+      const createdItem = await projectStore.createNode(projectId, newItem);
+      setItems((prev) => [...prev, createdItem]);
+      setCurrentProject((prev) => ({
+        ...prev,
+        nodes: [...prev.nodes.filter((node) => node.id !== createdItem.id), createdItem],
+      }));
+      setAddModalOpen(false);
+      setNewItemName('');
+      setNewItemRarity('Quý hiếm');
+      setNewItemDesc('');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Không thể tạo vật phẩm.';
+      if (Platform.OS === 'web') window.alert(message);
+      else Alert.alert('Lỗi', message);
+    } finally {
+      setIsCreatingItem(false);
+    }
+  };
 
-          // Nếu danh mục đang chọn không còn tồn tại (ví dụ sau khi xóa), quay về "Tất cả"
-          useEffect(() => {
-            if (selectedFilter !== 'all' && !categories.some((c) => c.key === selectedFilter)) {
-              setSelectedFilter('all');
-            }
-          }, [categories, selectedFilter]);
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      {/* Top Header Bar */}
+      <View style={styles.headerBar}>
+        <View style={styles.headerLeftGroup}>
+          <Pressable
+            hitSlop={12}
+            style={({ pressed }) => [
+              styles.backBtn,
+              pressed && styles.backBtnPressed,
+            ]}
+            onPress={() => setSidebarVisible(true)}>
+            <Text style={styles.backBtnIcon}>☰</Text>
+          </Pressable>
+          <View>
+            <Text style={styles.headerTitle}>Vật phẩm</Text>
+            <Text style={styles.headerSubtitle}>
+              {currentProject.title} · {items.length} VẬT PHẨM
+            </Text>
+          </View>
+        </View>
 
-          const filteredItems = useMemo(() => {
-            return items.filter((item) => {
-              const q = searchQuery.trim().toLowerCase();
-              const rarity = getItemRarity(item);
-              const matchesSearch =
-                !q ||
-                item.name.toLowerCase().includes(q) ||
-                item.desc.toLowerCase().includes(q) ||
-                rarity.toLowerCase().includes(q) ||
-                (item.role && item.role.toLowerCase().includes(q));
-              if (!matchesSearch) return false;
+        <Pressable
+          style={({ pressed }) => [
+            styles.addHeaderBtn,
+            pressed && styles.addHeaderBtnPressed,
+          ]}
+          onPress={() => setAddModalOpen(true)}>
+          <Text style={styles.addHeaderBtnPlus}>+</Text>
+          <Text style={styles.addHeaderBtnText}>Thêm</Text>
+        </Pressable>
+      </View>
 
-              if (selectedFilter === 'all') return true;
-              return getItemCategory(item).key === selectedFilter;
-              return rarity === selectedFilter;
-            });
-          }, [items, searchQuery, selectedFilter]);
+      <ScrollView
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={false}>
+        {/* Search Bar */}
+        <View style={styles.searchBarContainer}>
+          <Text style={styles.searchIcon}>🔍</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Tìm vật phẩm, tài liệu, đạo cụ..."
+            placeholderTextColor="#736a5c"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <Pressable onPress={() => setSearchQuery('')} hitSlop={10}>
+              <Text style={styles.searchClearIcon}>✕</Text>
+            </Pressable>
+          )}
+        </View>
 
-          const handleAddItem = async () => {
-            if (!newItemName.trim()) return;
-            const categoryLabel = newItemRole.trim() || 'Bảo vật';
-            const rarityVal = newItemRarity.trim() || 'Quý hiếm';
-            const newItem: Omit<StoryNode, 'id'> = {
-              name: newItemName.trim(),
-              type: 'item',
-              role: categoryLabel,
-              subType: categoryLabel,
-              role: rarityVal,
-              subType: '',
-              rarity: rarityVal,
-              status: 'Nguyên vẹn',
-              desc: newItemDesc.trim() || 'Vật phẩm có vai trò trong diễn biến câu chuyện.',
-              x: 220,
-              y: 420,
+        {/* Rarity Filters: Lọc theo độ hiếm vật phẩm */}
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.filterRow}>
+          {[
+            { key: 'all', label: 'Tất cả', count: items.length },
+            ...rarityFilters,
+          ].map((item) => {
+            const isSelected = selectedFilter === item.key;
+            return (
+              <Pressable
+                key={item.key}
+                style={[
+                  styles.filterChip,
+                  isSelected && styles.filterChipSelected,
+                ]}
+                onPress={() => setSelectedFilter(item.key)}>
+                <Text
+                  style={[
+                    styles.filterChipText,
+                    isSelected && styles.filterChipTextSelected,
+                  ]}>
+                  {item.label} ({item.count})
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+
+        {/* Items List */}
+        <View style={styles.cardsContainer}>
+          {filteredItems.map((item) => {
+            const extra = ITEM_EXTRAS[item.id] || {
+              rarity: 'VẬT PHẨM',
+              origin: 'Chưa xác định',
+              element: 'Chưa xác định',
+              fragments: [],
+              traits: ['Mang theo ký ức lịch sử'],
+              associatedNodes: [],
             };
+            const itemLinks = currentProject.links.filter(
+              (link) => link.source === item.id || link.target === item.id
+            );
+            const itemAssociations = itemLinks.map((link) => {
+              const targetId = link.source === item.id ? link.target : link.source;
+              return {
+                id: link.id,
+                name: currentProject.nodes.find((node) => node.id === targetId)?.name || 'Thực thể',
+                role: link.label || link.category || 'Liên hệ',
+              };
+            });
 
-            setIsCreatingItem(true);
-            try {
-              const createdItem = await projectStore.createNode(projectId, newItem);
-              setItems((prev) => [...prev, createdItem]);
-              setCurrentProject((prev) => ({
-                ...prev,
-                nodes: [...prev.nodes.filter((node) => node.id !== createdItem.id), createdItem],
-              }));
-              setAddModalOpen(false);
-              setNewItemName('');
-              setNewItemRole('Bảo vật');
-              setNewItemRarity('Quý hiếm');
-              setNewItemDesc('');
-            } catch (error) {
-              const message = error instanceof Error ? error.message : 'Không thể tạo vật phẩm.';
-              if (Platform.OS === 'web') window.alert(message);
-              else Alert.alert('Lỗi', message);
-            } finally {
-              setIsCreatingItem(false);
-            }
-          };
+            const isExpanded = expandedItemId === item.id;
 
-          return (
-            <SafeAreaView style={styles.safeArea}>
-              {/* Top Header Bar */}
-              <View style={styles.headerBar}>
-                <View style={styles.headerLeftGroup}>
-                  <Pressable
-                    hitSlop={12}
-                    style={({ pressed }) => [
-                      styles.backBtn,
-                      pressed && styles.backBtnPressed,
-                    ]}
-                    onPress={() => setSidebarVisible(true)}>
-                    <Text style={styles.backBtnIcon}>☰</Text>
-                  </Pressable>
-                  <View>
-                    <Text style={styles.headerTitle}>Vật phẩm</Text>
-                    <Text style={styles.headerSubtitle}>
-                      {currentProject.title} · {items.length} VẬT PHẨM
-                    </Text>
+            return (
+              <View key={item.id} style={styles.itemCard}>
+                {/* Glow Accent Header */}
+                <View style={styles.cardHeader}>
+                  <View style={styles.emblemAndTitle}>
+                    <View style={styles.emblemGemFrame}>
+                      <Text style={styles.emblemDiamond}>◆</Text>
+                    </View>
+                    <View style={styles.titleArea}>
+                      <Text style={styles.itemName} numberOfLines={2}>
+                        {item.name}
+                      </Text>
+                      <Text style={styles.itemRarity} numberOfLines={1}>
+                        {getItemRarity(item).toUpperCase()}
+                      </Text>
+                    </View>
                   </View>
                 </View>
-
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.addHeaderBtn,
-                    pressed && styles.addHeaderBtnPressed,
-                  ]}
-                  onPress={() => setAddModalOpen(true)}>
-                  <Text style={styles.addHeaderBtnPlus}>+</Text>
-                  <Text style={styles.addHeaderBtnText}>Thêm</Text>
-                </Pressable>
-              </View>
-
-              <ScrollView
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}>
-                {/* Search Bar */}
-                <View style={styles.searchBarContainer}>
-                  <Text style={styles.searchIcon}>🔍</Text>
-                  <TextInput
-                    style={styles.searchInput}
-                    placeholder="Tìm vật phẩm, tài liệu, đạo cụ..."
-                    placeholderTextColor="#736a5c"
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                  />
-                  {searchQuery.length > 0 && (
-                    <Pressable onPress={() => setSearchQuery('')} hitSlop={10}>
-                      <Text style={styles.searchClearIcon}>✕</Text>
-                    </Pressable>
-                  )}
-                </View>
-
-                {/* Category Filters: Danh mục vật phẩm */}
-                {/* Rarity Filters: Lọc theo độ hiếm vật phẩm */}
-                <ScrollView
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.filterRow}>
-                  {[
-                    { key: 'all', label: 'Tất cả', count: items.length },
-                    ...categories,
-                    ...rarityFilters,
-                  ].map((item) => {
-                    const isSelected = selectedFilter === item.key;
-                    return (
-                      <Pressable
-                        key={item.key}
-                        style={[
-                          styles.filterChip,
-                          isSelected && styles.filterChipSelected,
-                        ]}
-                        onPress={() => setSelectedFilter(item.key)}>
-                        <Text
-                          style={[
-                            styles.filterChipText,
-                            isSelected && styles.filterChipTextSelected,
-                          ]}>
-                          {item.label} ({item.count})
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-
-                {/* Items List */}
-                <View style={styles.cardsContainer}>
-                  {filteredItems.map((item) => {
-                    const extra = ITEM_EXTRAS[item.id] || {
-                      rarity: 'VẬT PHẨM',
-                      origin: 'Chưa xác định',
-                      element: 'Chưa xác định',
-                      fragments: [],
-                      traits: ['Mang theo ký ức lịch sử'],
-                      associatedNodes: [],
-                    };
-                    const itemLinks = currentProject.links.filter(
-                      (link) => link.source === item.id || link.target === item.id
-                    );
-                    const itemAssociations = itemLinks.map((link) => {
-                      const targetId = link.source === item.id ? link.target : link.source;
-                      return {
-                        id: link.id,
-                        name: currentProject.nodes.find((node) => node.id === targetId)?.name || 'Thực thể',
-                        role: link.label || link.category || 'Liên hệ',
-                      };
-                    });
-
-                    const isExpanded = expandedItemId === item.id;
-
-                    return (
-                      <View key={item.id} style={styles.itemCard}>
-                        {/* Glow Accent Header */}
-                        <View style={styles.cardHeader}>
-                          <View style={styles.emblemAndTitle}>
-                            <View style={styles.emblemGemFrame}>
-                              <Text style={styles.emblemDiamond}>◆</Text>
-                            </View>
-                            <View style={styles.titleArea}>
-                              <Text style={styles.itemName} numberOfLines={2}>
-                                {item.name}
-                              </Text>
-                              <Text style={styles.itemRarity} numberOfLines={1}>
-                                {(item.role || item.subType || getItemCategory(item).label).toUpperCase()}
-                                {getItemRarity(item).toUpperCase()}
-                              </Text>
-                            </View>
-                          </View>
-                        </View>
 
                         {/* Ancient Inscription Quote Box */}
                         <View style={styles.loreBlock}>
@@ -643,46 +607,30 @@ const ITEM_EXTRAS: Record<string, ItemExtendedData> = {
                     </View>
 
                     <View style={styles.inputGroup}>
-                      <Text style={styles.inputLabel}>DANH MỤC VẬT PHẨM</Text>
                       <Text style={styles.inputLabel}>ĐỘ HIẾM</Text>
                       <View style={styles.filterRow}>
-                        {PRESET_ITEM_CATEGORIES.map((cat) => {
-                          const isActive = newItemRole.trim().toLocaleLowerCase('vi') === cat.label.toLocaleLowerCase('vi');
-                          {
-                            ITEM_RARITY_OPTIONS.map((opt) => {
-                              const isActive = newItemRarity === opt.value;
-                              return (
-                                <Pressable
-                                  key={cat.key}
-                                  key={opt.value}
-                                  style={[
-                                    styles.filterChip,
-                                    isActive && styles.filterChipSelected,
-                                  ]}
-                                  onPress={() => setNewItemRole(cat.label)}
-                                  onPress={() => setNewItemRarity(opt.value)}
-                                  disabled={isCreatingItem}>
-                                  <Text
-                                    style={[
-                                      styles.filterChipText,
-                                      isActive && styles.filterChipTextSelected,
-                                    ]}>
-                                    {cat.label}
-                                    {opt.icon} {opt.label}
-                                  </Text>
-                                </Pressable>
-                              );
-                            })
-                          }
-              </View>
-                      <TextInput
-                        style={styles.textInput}
-                        placeholder="Hoặc nhập danh mục khác (VD: Cổ vật, Tín vật...)"
-                        placeholderTextColor="#665f52"
-                        value={newItemRole}
-                        onChangeText={setNewItemRole}
-                        editable={!isCreatingItem}
-                      />
+                        {ITEM_RARITY_OPTIONS.map((opt) => {
+                          const isActive = newItemRarity === opt.value;
+                          return (
+                            <Pressable
+                              key={opt.value}
+                              style={[
+                                styles.filterChip,
+                                isActive && styles.filterChipSelected,
+                              ]}
+                              onPress={() => setNewItemRarity(opt.value)}
+                              disabled={isCreatingItem}>
+                              <Text
+                                style={[
+                                  styles.filterChipText,
+                                  isActive && styles.filterChipTextSelected,
+                                ]}>
+                                {opt.icon} {opt.label}
+                              </Text>
+                            </Pressable>
+                          );
+                        })}
+                      </View>
                     </View>
 
                     <View style={styles.inputGroup}>

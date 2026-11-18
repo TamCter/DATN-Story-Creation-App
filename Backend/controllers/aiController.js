@@ -1,34 +1,59 @@
 const { GoogleGenAI } = require('@google/genai');
+const { runQuery } = require('../config/neo4j');
 
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
 const AI_PROVIDER_TIMEOUT_MS = 150000;
 const MAX_NODE_GENERATION_ATTEMPTS = 3;
 const MAX_CHAT_MESSAGES = 40;
+const MAX_STORED_CHAT_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH = 4000;
 const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
-const REQUIRED_NODE_FIELDS = {
-  character: ['name', 'type', 'role', 'desc', 'gender', 'dob', 'birthplace', 'weapon', 'sect', 'personality', 'status'],
-  item: ['name', 'type', 'desc', 'rarity', 'origin', 'element', 'holderOrLocation'],
-  location: ['name', 'type', 'desc', 'region', 'climate', 'terrain', 'dangerLevel', 'ruler'],
-  faction: ['name', 'type', 'desc', 'subType', 'alignment', 'status', 'leader', 'headquarters', 'motto'],
-  event: ['name', 'type', 'desc', 'chapter', 'time', 'location', 'status', 'impact'],
+const CORE_REQUIRED_NODE_FIELDS = {
+  character: ['name', 'type', 'role', 'desc', 'gender', 'dob', 'personality', 'status'],
+  item: ['name', 'type', 'desc', 'rarity', 'element'],
+  location: ['name', 'type', 'desc', 'region', 'climate', 'terrain', 'dangerLevel'],
+  faction: ['name', 'type', 'desc', 'subType', 'alignment', 'status', 'motto'],
+  event: ['name', 'type', 'desc', 'time', 'status', 'impact'],
 };
+const RELATIONAL_NODE_FIELDS = [
+  'birthplace',
+  'weapon',
+  'sect',
+  'statusEvent',
+  'origin',
+  'holderOrLocation',
+  'ruler',
+  'leader',
+  'headquarters',
+  'location',
+  'chapter',
+  'charactersInvolved',
+  'characters',
+];
+const PLACEHOLDER_VALUE_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
 
 const SYSTEM_PROMPT = `Bạn là trợ lý AI hỗ trợ phát triển câu chuyện và xây dựng hồ sơ nhân vật, bối cảnh, tổ chức, vật phẩm và sự kiện.
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
 Có 5 loại node:
 1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob, birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
-2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
-3. location (Địa điểm): name, type="location", desc, region, climate, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
+2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
+3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
 4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
-5. event (Sự kiện): name, type="event", desc, chapter, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra)
+5. event (Sự kiện): name, type="event", desc, chapter, time, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), impact, charactersInvolved
+
+QUY TẮC QUAN TRỌNG VỀ CÁC TRƯỜNG LIÊN KẾT / MỐI QUAN HỆ VỚI NODE KHÁC:
+Các trường liên kết gồm: birthplace (Địa điểm), weapon (Vật phẩm), sect (Tổ chức), statusEvent (Sự kiện), origin (Địa điểm), holderOrLocation (Nhân vật), ruler (Tổ chức), leader (Nhân vật), headquarters (Địa điểm), location (Địa điểm).
+- Nếu trong bản đồ node hiện tại của dự án ĐÃ CÓ thực thể phù hợp, hãy dùng chính xác tên của node đó.
+- Nếu thực thể liên quan CHƯA TỒN TẠI trong bản đồ node của dự án, bạn chỉ chọn 1 trong 2 cách:
+  1. TẠO RA NODE MỚI: Đặt tên riêng cụ thể cho thực thể đó (và ưu tiên dùng "create_nodes" để tạo kèm luôn node liên quan đó vào bản đồ, hoặc điền tên cụ thể để hệ thống tự động tạo node mới và nối quan hệ).
+  2. BỎ TRỐNG: Để chuỗi rỗng "" cho trường liên kết đó nếu thực thể không có hoặc chưa cần mối quan hệ đó.
+- TUYỆT ĐỐI KHÔNG điền các chữ giữ chỗ như "không rõ", "chưa rõ", "không xác định", "không có", "trống", "n/a".
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, hỏi thêm thông tin nếu cần
-- Nếu người dùng yêu cầu tạo nhiều node, hãy tạo tối đa 3 node khác nhau trong cùng một lần trả lời.
-- Tự sáng tạo hợp lý mọi thông tin còn thiếu, đặc biệt birthplace, weapon, sect, origin, holderOrLocation, ruler, leader và headquarters. Không để trống, null, "không rõ", "chưa rõ" hoặc "không xác định"; khi chi tiết chưa được nêu, hãy tạo một chi tiết phù hợp với bối cảnh và thể loại của truyện.
-- Mỗi node phải có đầy đủ các trường bắt buộc theo loại:
+- Nếu người dùng yêu cầu tạo nhiều node (hoặc tạo 1 node kèm các node liên quan mới), hãy tạo tối đa 3 node trong cùng một lần trả lời.
+- Mỗi node phải có đầy đủ các trường thông tin cơ bản theo loại:
   character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
   item: name, type, desc, rarity, origin, element, holderOrLocation
   location: name, type, desc, region, climate, terrain, dangerLevel, ruler
@@ -76,23 +101,38 @@ function extractCreateNodeResponse(responseText) {
         if (depth === 0) {
           try {
             const parsed = JSON.parse(responseText.slice(start, end + 1));
-            const nodes = parsed.action === 'create_node'
+            const rawNodes = parsed.action === 'create_node'
               ? [parsed.node]
               : parsed.action === 'create_nodes'
                 ? parsed.nodes
                 : null;
 
-            if (Array.isArray(nodes) && nodes.length > 0 && nodes.length <= 3) {
+            if (Array.isArray(rawNodes) && rawNodes.length > 0 && rawNodes.length <= 3) {
+              const sanitizeNode = (node) => {
+                if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+                const copy = { ...node };
+                for (const relField of RELATIONAL_NODE_FIELDS) {
+                  if (copy[relField] === null || copy[relField] === undefined) {
+                    copy[relField] = '';
+                  } else if (typeof copy[relField] === 'string') {
+                    const trimmed = copy[relField].trim();
+                    copy[relField] = PLACEHOLDER_VALUE_PATTERN.test(trimmed) ? '' : trimmed;
+                  }
+                }
+                return copy;
+              };
+
+              const nodes = rawNodes.map(sanitizeNode);
               const isCompleteNode = (node) =>
                 node &&
                 typeof node === 'object' &&
                 !Array.isArray(node) &&
                 NODE_TYPES.includes(node.type) &&
-                REQUIRED_NODE_FIELDS[node.type].every(
+                CORE_REQUIRED_NODE_FIELDS[node.type].every(
                   (field) =>
                     typeof node[field] === 'string' &&
                     node[field].trim() !== '' &&
-                    !/^(unknown|not known|n\/a|không rõ|chưa rõ|không xác định)$/i.test(node[field].trim())
+                    !PLACEHOLDER_VALUE_PATTERN.test(node[field].trim())
                 ) &&
                 Object.values(node).every(
                   (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
@@ -427,9 +467,10 @@ async function chatWithAI(req, res, next) {
             role: 'user',
             content:
               `${issue} Hãy tiếp tục ngay, không hỏi người dùng và không bỏ node nào. ` +
-              `Tạo đủ ít nhất ${requestedCount} node theo yêu cầu ban đầu; điền mọi trường bắt buộc bằng giá trị cụ thể, ` +
-              'không để trống hoặc ghi "không rõ". Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" ' +
-              'cho một node hoặc "create_nodes" cho nhiều node, tối đa 3 node.',
+              `Tạo đủ ít nhất ${requestedCount} node theo yêu cầu ban đầu; điền đầy đủ các trường cơ bản, ` +
+              'còn các trường quan hệ với node khác (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location) ' +
+              'thì chọn đúng tên node đã có, tạo tên node mới cụ thể, hoặc để chuỗi rỗng "" (tuyệt đối không ghi "không rõ"). ' +
+              'Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" cho một node hoặc "create_nodes" cho nhiều node, tối đa 3 node.',
           },
         ];
       }
@@ -664,14 +705,25 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       });
     }
 
-    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event) => ({
-      ...event,
-      characterStatusChanges: event.characterStatusChanges.map((change) => ({
-        ...change,
-        characterName: change.characterName.trim(),
-        statusEvent: event.name,
-      })),
-    }));
+    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event) => {
+      const rawLoc = typeof event.location === 'string' ? event.location.trim() : '';
+      const cleanLocation = PLACEHOLDER_VALUE_PATTERN.test(rawLoc) ? '' : rawLoc;
+      const cleanCharacters = Array.isArray(event.charactersInvolved)
+        ? event.charactersInvolved
+            .map((name) => String(name).trim())
+            .filter((name) => name && !PLACEHOLDER_VALUE_PATTERN.test(name))
+        : [];
+      return {
+        ...event,
+        location: cleanLocation,
+        charactersInvolved: cleanCharacters,
+        characterStatusChanges: event.characterStatusChanges.map((change) => ({
+          ...change,
+          characterName: change.characterName.trim(),
+          statusEvent: event.name,
+        })),
+      };
+    });
 
     return res.status(200).json({
       success: true,
@@ -813,10 +865,163 @@ YÊU CẦU NGHỆ THUẬT KHI VIẾT CÂU CHUYỆN:
   }
 }
 
+/**
+ * Lấy lịch sử trò chuyện AI của tác giả hiện tại cho một dự án cụ thể
+ * GET /api/ai/chat-history/:projectId
+ */
+async function getChatHistory(req, res) {
+  const { projectId } = req.params;
+  const userId = req.user?.id;
+  if (!userId || !projectId) {
+    return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
+  }
+
+  try {
+    const records = await runQuery(
+      `
+      MATCH (chat:AIChatSession { userId: $userId, projectId: $projectId })
+      RETURN chat.messagesJson AS messagesJson, chat.updatedAt AS updatedAt
+      LIMIT 1
+      `,
+      { userId, projectId },
+      'READ'
+    );
+
+    let messages = [];
+    if (records.length > 0 && records[0].messagesJson) {
+      try {
+        const parsed = JSON.parse(records[0].messagesJson);
+        if (Array.isArray(parsed)) {
+          messages = parsed;
+        }
+      } catch {
+        messages = [];
+      }
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        projectId,
+        userId,
+        messages,
+        updatedAt: records[0]?.updatedAt || null,
+      },
+    });
+  } catch (error) {
+    console.warn('[AI Controller] Không thể tải lịch sử chat từ Neo4j:', error.message);
+    return res.status(200).json({
+      success: true,
+      data: { projectId, userId, messages: [], updatedAt: null },
+    });
+  }
+}
+
+/**
+ * Lưu lịch sử trò chuyện AI của tác giả hiện tại cho một dự án cụ thể
+ * PUT /api/ai/chat-history/:projectId
+ */
+async function saveChatHistory(req, res) {
+  const { projectId } = req.params;
+  const userId = req.user?.id;
+  const { messages = [] } = req.body || {};
+
+  if (!userId || !projectId) {
+    return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
+  }
+  if (!Array.isArray(messages)) {
+    return res.status(400).json({ success: false, message: 'Danh sách tin nhắn không hợp lệ' });
+  }
+
+  try {
+    const sanitized = messages
+      .filter((m) => m && typeof m === 'object' && typeof m.content === 'string')
+      .slice(-MAX_STORED_CHAT_MESSAGES)
+      .map((m) => ({
+        id: String(m.id || `m-${Date.now()}`),
+        role: m.role === 'user' || m.role === 'system' ? m.role : 'assistant',
+        content: m.content.slice(0, MAX_MESSAGE_LENGTH),
+        nodeData: m.nodeData || null,
+        nodeDataList: Array.isArray(m.nodeDataList) ? m.nodeDataList : [],
+        timestamp: Number(m.timestamp) || Date.now(),
+        canRetry: Boolean(m.canRetry),
+      }));
+
+    const messagesJson = JSON.stringify(sanitized);
+
+    await runQuery(
+      `
+      MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
+      ON CREATE SET chat.createdAt = timestamp()
+      SET chat.messagesJson = $messagesJson,
+          chat.updatedAt = timestamp()
+      WITH chat
+      OPTIONAL MATCH (u:User { id: $userId })
+      FOREACH (_ IN CASE WHEN u IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (u)-[:HAS_AI_CHAT]->(chat)
+      )
+      WITH chat
+      OPTIONAL MATCH (p:Project { id: $projectId })
+      FOREACH (_ IN CASE WHEN p IS NOT NULL THEN [1] ELSE [] END |
+        MERGE (chat)-[:FOR_PROJECT]->(p)
+      )
+      RETURN chat.updatedAt AS updatedAt
+      `,
+      { userId, projectId, messagesJson }
+    );
+
+    return res.status(200).json({
+      success: true,
+      data: { projectId, userId, count: sanitized.length },
+    });
+  } catch (error) {
+    console.error('[AI Controller] Lỗi lưu lịch sử chat:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Không thể lưu lịch sử trò chuyện AI',
+    });
+  }
+}
+
+/**
+ * Xóa lịch sử trò chuyện AI của tác giả cho một dự án
+ * DELETE /api/ai/chat-history/:projectId
+ */
+async function clearChatHistory(req, res) {
+  const { projectId } = req.params;
+  const userId = req.user?.id;
+  if (!userId || !projectId) {
+    return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
+  }
+
+  try {
+    await runQuery(
+      `
+      MATCH (chat:AIChatSession { userId: $userId, projectId: $projectId })
+      DETACH DELETE chat
+      `,
+      { userId, projectId }
+    );
+    return res.status(200).json({
+      success: true,
+      data: { projectId, userId },
+    });
+  } catch (error) {
+    console.error('[AI Controller] Lỗi xóa lịch sử chat:', error);
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Không thể xóa lịch sử trò chuyện AI',
+    });
+  }
+}
+
 module.exports = {
   chatWithAI,
+  clearChatHistory,
   extractCreateNodeResponse,
   generateChapterAndEvents,
   generateChapterStory,
+  getChatHistory,
   normalizeEventCharacters,
+  saveChatHistory,
 };
