@@ -436,7 +436,8 @@ class ApiService {
   }> {
     // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
     const MAX_CHAT_REQUEST_BYTES = 85_000;
-    const MAX_SERVER_CHAT_WINDOW = 100;
+    // Khớp giới hạn MAX_CHAT_MESSAGES = 40 của endpoint /ai/chat (riêng lịch sử lưu trữ vẫn giữ 100 tin nhắn)
+    const MAX_SERVER_CHAT_WINDOW = 40;
     const byteLength = (str: string): number =>
       typeof TextEncoder !== 'undefined'
         ? new TextEncoder().encode(str).length
@@ -451,8 +452,26 @@ class ApiService {
         }
       : undefined;
 
-    // 1. Chỉ xét tối đa 100 tin nhắn gần nhất mà server sử dụng, đo mỗi tin nhắn đúng 1 lần để chọn hậu tố lớn nhất
+    // 1. Chỉ xét tối đa 40 tin nhắn gần nhất mà /ai/chat sử dụng
     const recentCandidates = payload.messages.slice(-MAX_SERVER_CHAT_WINDOW);
+    const newestMessage = recentCandidates.length > 0 ? recentCandidates[recentCandidates.length - 1] : null;
+
+    // 2. Xác định projectContext thực sự sẽ gửi trước khi tính ngân sách cho hội thoại:
+    // nếu bản thân context + tin nhắn mới nhất vượt ngân sách, cắt bớt nodes trước
+    if (projectContextCopy?.nodes) {
+      const checkPayload = {
+        messages: newestMessage ? [newestMessage] : [],
+        projectContext: projectContextCopy,
+      };
+      while (
+        projectContextCopy.nodes.length > 0 &&
+        byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES
+      ) {
+        projectContextCopy.nodes.pop();
+      }
+    }
+
+    // 3. Đo overhead của context đã chốt và đo mỗi tin nhắn ứng viên đúng 1 lần để chọn hậu tố hội thoại dài nhất vừa ngân sách
     const baseOverheadBytes = byteLength(
       JSON.stringify({
         messages: [],
@@ -481,19 +500,6 @@ class ApiService {
       messages: boundedMessages,
       ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
     };
-
-    // 2. Nếu vẫn vượt ngân sách (chỉ còn tin cuối + context), giảm bớt số lượng node trong projectContext
-    if (
-      boundedPayload.projectContext?.nodes &&
-      byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
-    ) {
-      while (
-        boundedPayload.projectContext.nodes.length > 0 &&
-        byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
-      ) {
-        boundedPayload.projectContext.nodes.pop();
-      }
-    }
 
     return this.request<{
       success: boolean;

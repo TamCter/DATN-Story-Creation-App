@@ -868,6 +868,57 @@ YÊU CẦU NGHỆ THUẬT KHI VIẾT CÂU CHUYỆN:
   }
 }
 
+let chatSessionConstraintPromise = null;
+
+async function ensureChatSessionConstraint() {
+  if (!chatSessionConstraintPromise) {
+    chatSessionConstraintPromise = (async () => {
+      // 1. Gán sessionKey cho các bản ghi cũ nếu thiếu
+      await runQuery(
+        `
+        MATCH (chat:AIChatSession)
+        WHERE chat.sessionKey IS NULL AND chat.userId IS NOT NULL AND chat.projectId IS NOT NULL
+        SET chat.sessionKey = chat.userId + '::' + chat.projectId
+        `
+      );
+      // 2. Loại bỏ bản sao trùng (userId, projectId) nếu có, giữ lại bản có revision/updatedAt cao nhất
+      await runQuery(
+        `
+        MATCH (chat:AIChatSession)
+        WHERE chat.sessionKey IS NOT NULL
+        WITH chat.sessionKey AS key, chat
+        ORDER BY coalesce(chat.revision, 0) DESC, coalesce(chat.updatedAt, 0) DESC
+        WITH key, collect(chat) AS sessions
+        WHERE size(sessions) > 1
+        FOREACH (dup IN tail(sessions) | DETACH DELETE dup)
+        `
+      );
+      // 3. Tạo ràng buộc duy nhất theo sessionKey (tương thích cả Neo4j Community và Enterprise)
+      await runQuery(
+        `
+        CREATE CONSTRAINT ai_chat_session_key_unique IF NOT EXISTS
+        FOR (chat:AIChatSession) REQUIRE chat.sessionKey IS UNIQUE
+        `
+      );
+    })().catch((err) => {
+      chatSessionConstraintPromise = null;
+      throw err;
+    });
+  }
+  return chatSessionConstraintPromise;
+}
+
+function isNeo4jUniqueConstraintError(error) {
+  if (!error) return false;
+  const code = String(error.code || '');
+  const msg = String(error.message || '');
+  return (
+    code === 'Neo.ClientError.Schema.ConstraintValidationFailed' ||
+    msg.includes('ConstraintValidationFailed') ||
+    msg.includes('already exists with label')
+  );
+}
+
 /**
  * Lấy lịch sử trò chuyện AI của tác giả hiện tại cho một dự án cụ thể
  * GET /api/ai/chat-history/:projectId
@@ -879,17 +930,22 @@ async function getChatHistory(req, res) {
     return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
   }
 
+  const sessionKey = `${userId}::${projectId}`;
+
   try {
     const records = await runQuery(
       `
-      MATCH (chat:AIChatSession { userId: $userId, projectId: $projectId })
+      MATCH (chat:AIChatSession)
+      WHERE chat.sessionKey = $sessionKey
+         OR (chat.userId = $userId AND chat.projectId = $projectId)
       RETURN chat.messagesJson AS messagesJson,
              chat.updatedAt AS updatedAt,
              coalesce(chat.revision, 0) AS revision,
              chat.deletedAt AS deletedAt
+      ORDER BY coalesce(chat.revision, 0) DESC, coalesce(chat.updatedAt, 0) DESC
       LIMIT 1
       `,
-      { userId, projectId },
+      { sessionKey, userId, projectId },
       'READ'
     );
 
@@ -949,7 +1005,11 @@ async function saveChatHistory(req, res) {
     return res.status(400).json({ success: false, message: 'Phiên bản expectedRevision không hợp lệ' });
   }
 
+  const sessionKey = `${userId}::${projectId}`;
+
   try {
+    await ensureChatSessionConstraint();
+
     const sanitized = messages
       .filter((m) => m && typeof m === 'object' && typeof m.content === 'string')
       .slice(-MAX_STORED_CHAT_MESSAGES)
@@ -965,35 +1025,63 @@ async function saveChatHistory(req, res) {
 
     const messagesJson = JSON.stringify(sanitized);
 
-    const saved = await runQuery(
-      `
-      MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
-      ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
-      SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
-      WITH chat, coalesce(chat.revision, 0) AS currentRevision
-      WITH chat, currentRevision,
-           ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS canWrite
-      FOREACH (_ IN CASE WHEN canWrite THEN [1] ELSE [] END |
-        SET chat.messagesJson = $messagesJson,
-            chat.updatedAt = timestamp(),
-            chat.deletedAt = null,
-            chat.revision = currentRevision + 1
-      )
-      REMOVE chat._revisionLock
-      WITH chat, canWrite
-      OPTIONAL MATCH (u:User { id: $userId })
-      FOREACH (_ IN CASE WHEN canWrite AND u IS NOT NULL THEN [1] ELSE [] END |
-        MERGE (u)-[:HAS_AI_CHAT]->(chat)
-      )
-      WITH chat, canWrite
-      OPTIONAL MATCH (p:Project { id: $projectId })
-      FOREACH (_ IN CASE WHEN canWrite AND p IS NOT NULL THEN [1] ELSE [] END |
-        MERGE (chat)-[:FOR_PROJECT]->(p)
-      )
-      RETURN canWrite, chat.updatedAt AS updatedAt, chat.revision AS revision
-      `,
-      { userId, projectId, messagesJson, expectedRevision: parsedExpectedRevision }
-    );
+    const runSaveQuery = () =>
+      runQuery(
+        `
+        MERGE (chat:AIChatSession { sessionKey: $sessionKey })
+        ON CREATE SET chat.userId = $userId,
+                      chat.projectId = $projectId,
+                      chat.createdAt = timestamp(),
+                      chat.revision = 0
+        SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
+        WITH chat, coalesce(chat.revision, 0) AS currentRevision
+        WITH chat, currentRevision,
+             ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS canWrite
+        FOREACH (_ IN CASE WHEN canWrite THEN [1] ELSE [] END |
+          SET chat.messagesJson = $messagesJson,
+              chat.updatedAt = timestamp(),
+              chat.deletedAt = null,
+              chat.revision = currentRevision + 1
+        )
+        REMOVE chat._revisionLock
+        WITH chat, canWrite
+        OPTIONAL MATCH (u:User { id: $userId })
+        FOREACH (_ IN CASE WHEN canWrite AND u IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (u)-[:HAS_AI_CHAT]->(chat)
+        )
+        WITH chat, canWrite
+        OPTIONAL MATCH (p:Project { id: $projectId })
+        FOREACH (_ IN CASE WHEN canWrite AND p IS NOT NULL THEN [1] ELSE [] END |
+          MERGE (chat)-[:FOR_PROJECT]->(p)
+        )
+        RETURN canWrite, chat.updatedAt AS updatedAt, chat.revision AS revision
+        `,
+        { sessionKey, userId, projectId, messagesJson, expectedRevision: parsedExpectedRevision }
+      );
+
+    let saved;
+    try {
+      saved = await runSaveQuery();
+    } catch (saveErr) {
+      if (isNeo4jUniqueConstraintError(saveErr)) {
+        // Hai lần lưu đầu tiên chạy đồng thời đụng ràng buộc duy nhất -> thử lại 1 lần để kiểm tra expectedRevision
+        try {
+          saved = await runSaveQuery();
+        } catch (retryErr) {
+          if (isNeo4jUniqueConstraintError(retryErr)) {
+            return res.status(409).json({
+              success: false,
+              code: 'REVISION_CONFLICT',
+              message: 'Lịch sử trò chuyện trên máy chủ đã thay đổi. Vui lòng đồng bộ trước khi lưu.',
+              data: { projectId, userId },
+            });
+          }
+          throw retryErr;
+        }
+      } else {
+        throw saveErr;
+      }
+    }
 
     if (!saved.length || !saved[0].canWrite) {
       return res.status(409).json({
@@ -1038,19 +1126,41 @@ async function clearChatHistory(req, res) {
     return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
   }
 
+  const sessionKey = `${userId}::${projectId}`;
+
   try {
-    const cleared = await runQuery(
-      `
-      MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
-      ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
-      SET chat.messagesJson = '[]',
-          chat.updatedAt = timestamp(),
-          chat.deletedAt = timestamp(),
-          chat.revision = coalesce(chat.revision, 0) + 1
-      RETURN chat.revision AS revision, chat.deletedAt AS deletedAt
-      `,
-      { userId, projectId }
-    );
+    await ensureChatSessionConstraint();
+
+    const runClearQuery = () =>
+      runQuery(
+        `
+        MERGE (chat:AIChatSession { sessionKey: $sessionKey })
+        ON CREATE SET chat.userId = $userId,
+                      chat.projectId = $projectId,
+                      chat.createdAt = timestamp(),
+                      chat.revision = 0
+        SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1,
+            chat.messagesJson = '[]',
+            chat.updatedAt = timestamp(),
+            chat.deletedAt = timestamp(),
+            chat.revision = coalesce(chat.revision, 0) + 1
+        REMOVE chat._revisionLock
+        RETURN chat.revision AS revision, chat.deletedAt AS deletedAt
+        `,
+        { sessionKey, userId, projectId }
+      );
+
+    let cleared;
+    try {
+      cleared = await runClearQuery();
+    } catch (clearErr) {
+      if (isNeo4jUniqueConstraintError(clearErr)) {
+        cleared = await runClearQuery();
+      } else {
+        throw clearErr;
+      }
+    }
+
     return res.status(200).json({
       success: true,
       data: {
