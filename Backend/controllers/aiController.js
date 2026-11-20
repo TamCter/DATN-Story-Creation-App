@@ -969,6 +969,7 @@ async function saveChatHistory(req, res) {
       `
       MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
       ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
+      SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
       WITH chat, coalesce(chat.revision, 0) AS currentRevision
       WITH chat, currentRevision,
            ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS canWrite
@@ -978,6 +979,7 @@ async function saveChatHistory(req, res) {
             chat.deletedAt = null,
             chat.revision = currentRevision + 1
       )
+      REMOVE chat._revisionLock
       WITH chat, canWrite
       OPTIONAL MATCH (u:User { id: $userId })
       FOREACH (_ IN CASE WHEN canWrite AND u IS NOT NULL THEN [1] ELSE [] END |

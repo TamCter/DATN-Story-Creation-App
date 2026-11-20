@@ -436,37 +436,53 @@ class ApiService {
   }> {
     // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
     const MAX_CHAT_REQUEST_BYTES = 85_000;
+    const MAX_SERVER_CHAT_WINDOW = 100;
     const byteLength = (str: string): number =>
       typeof TextEncoder !== 'undefined'
         ? new TextEncoder().encode(str).length
         : encodeURIComponent(str).replace(/%[A-F\d]{2}/g, 'U').length;
 
+    const projectContextCopy = payload.projectContext
+      ? {
+          ...payload.projectContext,
+          nodes: Array.isArray(payload.projectContext.nodes)
+            ? [...payload.projectContext.nodes]
+            : undefined,
+        }
+      : undefined;
+
+    // 1. Chỉ xét tối đa 100 tin nhắn gần nhất mà server sử dụng, đo mỗi tin nhắn đúng 1 lần để chọn hậu tố lớn nhất
+    const recentCandidates = payload.messages.slice(-MAX_SERVER_CHAT_WINDOW);
+    const baseOverheadBytes = byteLength(
+      JSON.stringify({
+        messages: [],
+        ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
+      })
+    );
+
+    const selectedReversed: { role: 'user' | 'assistant'; content: string }[] = [];
+    let runningBytes = baseOverheadBytes;
+    for (let i = recentCandidates.length - 1; i >= 0; i -= 1) {
+      const msg = recentCandidates[i];
+      const msgBytes = byteLength(JSON.stringify(msg)) + (selectedReversed.length > 0 ? 1 : 0);
+      if (selectedReversed.length === 0 || runningBytes + msgBytes <= MAX_CHAT_REQUEST_BYTES) {
+        selectedReversed.push(msg);
+        runningBytes += msgBytes;
+      } else {
+        break;
+      }
+    }
+    const boundedMessages = selectedReversed.reverse();
+
     const boundedPayload: {
       messages: { role: 'user' | 'assistant'; content: string }[];
       projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
     } = {
-      messages: [...payload.messages],
-      ...(payload.projectContext
-        ? {
-            projectContext: {
-              ...payload.projectContext,
-              nodes: Array.isArray(payload.projectContext.nodes)
-                ? [...payload.projectContext.nodes]
-                : undefined,
-            },
-          }
-        : {}),
+      messages: boundedMessages,
+      ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
     };
 
-    // 1. Giảm dần các tin nhắn cũ nhưng luôn giữ lại tin nhắn mới nhất của người dùng
-    while (
-      boundedPayload.messages.length > 1 &&
-      byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
-    ) {
-      boundedPayload.messages.shift();
-    }
-
-    // 2. Nếu vẫn vượt ngân sách, giảm bớt số lượng node trong projectContext
+    // 2. Nếu vẫn vượt ngân sách (chỉ còn tin cuối + context), giảm bớt số lượng node trong projectContext
     if (
       boundedPayload.projectContext?.nodes &&
       byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
