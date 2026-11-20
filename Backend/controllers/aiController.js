@@ -932,13 +932,21 @@ async function getChatHistory(req, res) {
 async function saveChatHistory(req, res) {
   const { projectId } = req.params;
   const userId = req.user?.id;
-  const { messages = [] } = req.body || {};
+  const { messages = [], expectedRevision } = req.body || {};
 
   if (!userId || !projectId) {
     return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
   }
   if (!Array.isArray(messages)) {
     return res.status(400).json({ success: false, message: 'Danh sách tin nhắn không hợp lệ' });
+  }
+  const hasExpectedRevision = expectedRevision !== undefined && expectedRevision !== null;
+  const parsedExpectedRevision = hasExpectedRevision ? Number(expectedRevision) : null;
+  if (
+    hasExpectedRevision &&
+    (!Number.isInteger(parsedExpectedRevision) || parsedExpectedRevision < 0)
+  ) {
+    return res.status(400).json({ success: false, message: 'Phiên bản expectedRevision không hợp lệ' });
   }
 
   try {
@@ -961,24 +969,42 @@ async function saveChatHistory(req, res) {
       `
       MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
       ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
-      SET chat.messagesJson = $messagesJson,
-          chat.updatedAt = timestamp(),
-          chat.deletedAt = null,
-          chat.revision = coalesce(chat.revision, 0) + 1
-      WITH chat
+      WITH chat, coalesce(chat.revision, 0) AS currentRevision
+      WITH chat, currentRevision,
+           ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS canWrite
+      FOREACH (_ IN CASE WHEN canWrite THEN [1] ELSE [] END |
+        SET chat.messagesJson = $messagesJson,
+            chat.updatedAt = timestamp(),
+            chat.deletedAt = null,
+            chat.revision = currentRevision + 1
+      )
+      WITH chat, canWrite
       OPTIONAL MATCH (u:User { id: $userId })
-      FOREACH (_ IN CASE WHEN u IS NOT NULL THEN [1] ELSE [] END |
+      FOREACH (_ IN CASE WHEN canWrite AND u IS NOT NULL THEN [1] ELSE [] END |
         MERGE (u)-[:HAS_AI_CHAT]->(chat)
       )
-      WITH chat
+      WITH chat, canWrite
       OPTIONAL MATCH (p:Project { id: $projectId })
-      FOREACH (_ IN CASE WHEN p IS NOT NULL THEN [1] ELSE [] END |
+      FOREACH (_ IN CASE WHEN canWrite AND p IS NOT NULL THEN [1] ELSE [] END |
         MERGE (chat)-[:FOR_PROJECT]->(p)
       )
-      RETURN chat.updatedAt AS updatedAt, chat.revision AS revision
+      RETURN canWrite, chat.updatedAt AS updatedAt, chat.revision AS revision
       `,
-      { userId, projectId, messagesJson }
+      { userId, projectId, messagesJson, expectedRevision: parsedExpectedRevision }
     );
+
+    if (!saved.length || !saved[0].canWrite) {
+      return res.status(409).json({
+        success: false,
+        code: 'REVISION_CONFLICT',
+        message: 'Lịch sử trò chuyện trên máy chủ đã thay đổi. Vui lòng đồng bộ trước khi lưu.',
+        data: {
+          projectId,
+          userId,
+          revision: Number(saved[0]?.revision) || 0,
+        },
+      });
+    }
 
     return res.status(200).json({
       success: true,

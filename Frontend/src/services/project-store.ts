@@ -811,33 +811,9 @@ export class ProjectStore {
 
           const key = `${node.type}::${(node.name || '').trim().toLocaleLowerCase()}`;
           const matchedRemoteIdx = remoteByNameType.get(key);
-          if (matchedRemoteIdx !== undefined) {
-            if (node.autoCreatedStub) {
-              // Stub tự sinh cục bộ đã có thực thể chuẩn trên server -> bỏ stub
-              continue;
-            }
-            // Thực thể pending có chỉnh sửa chưa đồng bộ: chuyển dữ liệu pending sang node chuẩn và giữ trạng thái pending cho tới khi đồng bộ xong
-            const remoteTarget = remoteNodes[matchedRemoteIdx];
-            const pendingOverrides: Partial<StoryNode> = {};
-            for (const [field, val] of Object.entries(node)) {
-              if (
-                field === 'id' ||
-                field === 'syncStatus' ||
-                field === 'createdAt' ||
-                field === 'updatedAt'
-              ) {
-                continue;
-              }
-              if (typeof val === 'string' ? val.trim().length > 0 : val !== undefined && val !== null) {
-                (pendingOverrides as Record<string, unknown>)[field] = val;
-              }
-            }
-            remoteNodes[matchedRemoteIdx] = {
-              ...remoteTarget,
-              ...pendingOverrides,
-              id: remoteTarget.id,
-              syncStatus: 'pending',
-            };
+          // Chỉ bỏ node cục bộ khi nó được xác nhận là stub tự sinh trùng với thực thể chuẩn trên server;
+          // không bao giờ gộp hai node do tác giả tự tạo chỉ vì trùng tên.
+          if (matchedRemoteIdx !== undefined && node.autoCreatedStub === true) {
             continue;
           }
 

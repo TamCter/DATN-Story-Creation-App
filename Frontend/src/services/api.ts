@@ -384,7 +384,8 @@ class ApiService {
 
   async saveAIChatHistory(
     projectId: string,
-    messages: any[]
+    messages: any[],
+    options?: { expectedRevision?: number }
   ): Promise<{
     success: boolean;
     data: {
@@ -396,11 +397,15 @@ class ApiService {
     };
     message?: string;
   }> {
+    const body: Record<string, unknown> = { messages };
+    if (typeof options?.expectedRevision === 'number') {
+      body.expectedRevision = options.expectedRevision;
+    }
     return this.request(
       `/ai/chat-history/${encodeURIComponent(projectId)}`,
       {
         method: 'PUT',
-        body: JSON.stringify({ messages }),
+        body: JSON.stringify(body),
       }
     );
   }
@@ -429,6 +434,51 @@ class ApiService {
     data: { message: string; nodeData: any | null; nodeDataList?: any[] };
     message?: string;
   }> {
+    // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
+    const MAX_CHAT_REQUEST_BYTES = 85_000;
+    const byteLength = (str: string): number =>
+      typeof TextEncoder !== 'undefined'
+        ? new TextEncoder().encode(str).length
+        : encodeURIComponent(str).replace(/%[A-F\d]{2}/g, 'U').length;
+
+    const boundedPayload: {
+      messages: { role: 'user' | 'assistant'; content: string }[];
+      projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
+    } = {
+      messages: [...payload.messages],
+      ...(payload.projectContext
+        ? {
+            projectContext: {
+              ...payload.projectContext,
+              nodes: Array.isArray(payload.projectContext.nodes)
+                ? [...payload.projectContext.nodes]
+                : undefined,
+            },
+          }
+        : {}),
+    };
+
+    // 1. Giảm dần các tin nhắn cũ nhưng luôn giữ lại tin nhắn mới nhất của người dùng
+    while (
+      boundedPayload.messages.length > 1 &&
+      byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
+    ) {
+      boundedPayload.messages.shift();
+    }
+
+    // 2. Nếu vẫn vượt ngân sách, giảm bớt số lượng node trong projectContext
+    if (
+      boundedPayload.projectContext?.nodes &&
+      byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
+    ) {
+      while (
+        boundedPayload.projectContext.nodes.length > 0 &&
+        byteLength(JSON.stringify(boundedPayload)) > MAX_CHAT_REQUEST_BYTES
+      ) {
+        boundedPayload.projectContext.nodes.pop();
+      }
+    }
+
     return this.request<{
       success: boolean;
       data: { message: string; nodeData: any | null; nodeDataList?: any[] };
@@ -437,7 +487,7 @@ class ApiService {
       '/ai/chat',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: JSON.stringify(boundedPayload),
       },
       480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
     );

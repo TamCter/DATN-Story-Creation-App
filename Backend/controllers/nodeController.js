@@ -460,6 +460,12 @@ async function updateNode(req, res, next) {
       updates[field] = body[field] !== null ? String(body[field]).trim() : '';
     }
   }
+  if (body.autoCreatedStub !== undefined) {
+    if (typeof body.autoCreatedStub !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'autoCreatedStub phải là giá trị boolean' });
+    }
+    updates.autoCreatedStub = body.autoCreatedStub;
+  }
   if (body.charactersInvolved !== undefined && body.characters === undefined) {
     updates.characters = '';
   }
