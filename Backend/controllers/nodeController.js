@@ -582,6 +582,7 @@ async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
     name,
     type,
     ...defaults,
+    autoCreatedStub: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     x: 100 + Math.random() * 400,

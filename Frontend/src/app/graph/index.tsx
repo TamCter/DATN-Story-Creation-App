@@ -486,6 +486,9 @@ const handleCreateNodesFromAI = async (
   const remainingNodes = [...nodeDataList];
 
   try {
+    const initialProject = await projectStore.getProject(currentProject.id);
+    const initialNodeIds = new Set((initialProject.nodes || []).map((n) => n.id));
+
     for (let index = 0; index < remainingNodes.length; index += 1) {
       const nodeData = remainingNodes[index];
       const normalizedType = nodeData.type || 'character';
@@ -500,19 +503,27 @@ const handleCreateNodesFromAI = async (
         continue;
       }
 
-      // Kiểm tra xem node đã được tự động tạo (stub) trong đồ thị bởi lượt trước trong batch chưa
+      // Chỉ cập nhật (làm giàu) node stub được tự động tạo trước đó trong batch hoặc được đánh dấu autoCreatedStub;
+      // tuyệt đối không ghi đè node do tác giả tự tạo sẵn.
       const latestProject = await projectStore.getProject(currentProject.id);
-      const existingMatch = normalizedName
+      const existingStubMatch = normalizedName
         ? (latestProject.nodes || []).find(
             (n) =>
               n.type === normalizedType &&
-              n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi')
+              n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi') &&
+              (n.autoCreatedStub === true || !initialNodeIds.has(n.id))
           )
         : undefined;
 
-      const savedNode = existingMatch
-        ? await projectStore.updateNode(currentProject.id, existingMatch.id, nodeData)
-        : await projectStore.createNode(currentProject.id, nodeData);
+      const savedNode = existingStubMatch
+        ? await projectStore.updateNode(currentProject.id, existingStubMatch.id, {
+            ...nodeData,
+            autoCreatedStub: false,
+          })
+        : await projectStore.createNode(currentProject.id, {
+            ...nodeData,
+            autoCreatedStub: false,
+          });
       createdNodes.push(savedNode);
     }
 

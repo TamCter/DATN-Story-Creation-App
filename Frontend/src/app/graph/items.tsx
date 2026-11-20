@@ -182,7 +182,7 @@ export default function ItemsScreen() {
   }, [projectId]);
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedFilter, setSelectedFilter] = useState<string>('all');
+  const [selectedFilter, setSelectedFilter] = useState<string | null>(null);
   const [expandedItemId, setExpandedItemId] = useState<string>('kiem-hoang-hon');
 
   // Add Item Modal
@@ -205,14 +205,15 @@ export default function ItemsScreen() {
       counts.set(rarity, (counts.get(rarity) || 0) + 1);
     }
     const baseFilters = ITEM_RARITY_OPTIONS.map((opt) => ({
-      key: opt.value,
+      id: `rarity:${opt.value}`,
+      value: opt.value as string | null,
       label: `${opt.icon} ${opt.label}`,
       count: counts.get(opt.value) || 0,
     }));
-    const extraFilters: Array<{ key: string; label: string; count: number }> = [];
+    const extraFilters: Array<{ id: string; value: string | null; label: string; count: number }> = [];
     for (const [rarity, count] of counts.entries()) {
       if (!configuredKeys.has(rarity) && count > 0) {
-        extraFilters.push({ key: rarity, label: rarity, count });
+        extraFilters.push({ id: `rarity:${rarity}`, value: rarity, label: rarity, count });
       }
     }
     return [...baseFilters, ...extraFilters];
@@ -230,7 +231,7 @@ export default function ItemsScreen() {
         (item.role && item.role.toLowerCase().includes(q));
       if (!matchesSearch) return false;
 
-      if (selectedFilter === 'all') return true;
+      if (selectedFilter === null) return true;
       return rarity === selectedFilter;
     });
   }, [items, searchQuery, selectedFilter]);
@@ -330,18 +331,18 @@ export default function ItemsScreen() {
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={styles.filterRow}>
           {[
-            { key: 'all', label: 'Tất cả', count: items.length },
+            { id: 'filter-all', value: null as string | null, label: 'Tất cả', count: items.length },
             ...rarityFilters,
           ].map((item) => {
-            const isSelected = selectedFilter === item.key;
+            const isSelected = selectedFilter === item.value;
             return (
               <Pressable
-                key={item.key}
+                key={item.id}
                 style={[
                   styles.filterChip,
                   isSelected && styles.filterChipSelected,
                 ]}
-                onPress={() => setSelectedFilter(item.key)}>
+                onPress={() => setSelectedFilter(item.value)}>
                 <Text
                   style={[
                     styles.filterChipText,

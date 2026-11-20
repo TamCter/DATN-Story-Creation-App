@@ -883,7 +883,10 @@ async function getChatHistory(req, res) {
     const records = await runQuery(
       `
       MATCH (chat:AIChatSession { userId: $userId, projectId: $projectId })
-      RETURN chat.messagesJson AS messagesJson, chat.updatedAt AS updatedAt
+      RETURN chat.messagesJson AS messagesJson,
+             chat.updatedAt AS updatedAt,
+             coalesce(chat.revision, 0) AS revision,
+             chat.deletedAt AS deletedAt
       LIMIT 1
       `,
       { userId, projectId },
@@ -909,13 +912,15 @@ async function getChatHistory(req, res) {
         userId,
         messages,
         updatedAt: records[0]?.updatedAt || null,
+        revision: Number(records[0]?.revision) || 0,
+        deletedAt: records[0]?.deletedAt || null,
       },
     });
   } catch (error) {
     console.warn('[AI Controller] Không thể tải lịch sử chat từ Neo4j:', error.message);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Không thể tải lịch sử trò chuyện AI từ máy chủ.',
+      message: 'Không thể tải lịch sử trò chuyện AI từ máy chủ.',
     });
   }
 }
@@ -952,12 +957,14 @@ async function saveChatHistory(req, res) {
 
     const messagesJson = JSON.stringify(sanitized);
 
-    await runQuery(
+    const saved = await runQuery(
       `
       MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
-      ON CREATE SET chat.createdAt = timestamp()
+      ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
       SET chat.messagesJson = $messagesJson,
-          chat.updatedAt = timestamp()
+          chat.updatedAt = timestamp(),
+          chat.deletedAt = null,
+          chat.revision = coalesce(chat.revision, 0) + 1
       WITH chat
       OPTIONAL MATCH (u:User { id: $userId })
       FOREACH (_ IN CASE WHEN u IS NOT NULL THEN [1] ELSE [] END |
@@ -968,20 +975,26 @@ async function saveChatHistory(req, res) {
       FOREACH (_ IN CASE WHEN p IS NOT NULL THEN [1] ELSE [] END |
         MERGE (chat)-[:FOR_PROJECT]->(p)
       )
-      RETURN chat.updatedAt AS updatedAt
+      RETURN chat.updatedAt AS updatedAt, chat.revision AS revision
       `,
       { userId, projectId, messagesJson }
     );
 
     return res.status(200).json({
       success: true,
-      data: { projectId, userId, count: sanitized.length },
+      data: {
+        projectId,
+        userId,
+        count: sanitized.length,
+        updatedAt: saved[0]?.updatedAt || Date.now(),
+        revision: Number(saved[0]?.revision) || 1,
+      },
     });
   } catch (error) {
     console.error('[AI Controller] Lỗi lưu lịch sử chat:', error);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Không thể lưu lịch sử trò chuyện AI',
+      message: 'Không thể lưu lịch sử trò chuyện AI',
     });
   }
 }
@@ -998,22 +1011,32 @@ async function clearChatHistory(req, res) {
   }
 
   try {
-    await runQuery(
+    const cleared = await runQuery(
       `
-      MATCH (chat:AIChatSession { userId: $userId, projectId: $projectId })
-      DETACH DELETE chat
+      MERGE (chat:AIChatSession { userId: $userId, projectId: $projectId })
+      ON CREATE SET chat.createdAt = timestamp(), chat.revision = 0
+      SET chat.messagesJson = '[]',
+          chat.updatedAt = timestamp(),
+          chat.deletedAt = timestamp(),
+          chat.revision = coalesce(chat.revision, 0) + 1
+      RETURN chat.revision AS revision, chat.deletedAt AS deletedAt
       `,
       { userId, projectId }
     );
     return res.status(200).json({
       success: true,
-      data: { projectId, userId },
+      data: {
+        projectId,
+        userId,
+        revision: Number(cleared[0]?.revision) || 1,
+        deletedAt: cleared[0]?.deletedAt || Date.now(),
+      },
     });
   } catch (error) {
     console.error('[AI Controller] Lỗi xóa lịch sử chat:', error);
     return res.status(500).json({
       success: false,
-      message: error.message || 'Không thể xóa lịch sử trò chuyện AI',
+      message: 'Không thể xóa lịch sử trò chuyện AI',
     });
   }
 }

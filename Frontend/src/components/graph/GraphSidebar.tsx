@@ -66,13 +66,17 @@ export function GraphSidebar({
   visibleRef.current = visible;
   const drawerWidthRef = useRef(drawerWidth);
   drawerWidthRef.current = drawerWidth;
+  const prevDrawerWidthRef = useRef(drawerWidth);
 
-  // Khi chiều rộng cửa sổ thay đổi trong lúc đóng, giữ vị trí ẩn khớp với drawerWidth mới
+  // Chỉ đồng bộ lại vị trí ẩn khi drawerWidth thay đổi trong lúc thanh bên đang đóng
   useEffect(() => {
-    if (!visible) {
-      translateX.setValue(-drawerWidth);
+    if (prevDrawerWidthRef.current !== drawerWidth) {
+      prevDrawerWidthRef.current = drawerWidth;
+      if (!visibleRef.current) {
+        translateX.setValue(-drawerWidth);
+      }
     }
-  }, [drawerWidth, visible, translateX]);
+  }, [drawerWidth, translateX]);
 
   // Animation trượt ra / trượt vào theo prop `visible`
   useEffect(() => {
@@ -198,6 +202,7 @@ export function GraphSidebar({
     <View
       style={styles.root}
       pointerEvents={visible ? 'auto' : 'none'}
+      accessibilityViewIsModal={visible}
       accessibilityElementsHidden={!visible}
       importantForAccessibility={visible ? 'auto' : 'no-hide-descendants'}>
       {/* Nền tối: bấm ra ngoài để đóng */}

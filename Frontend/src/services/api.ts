@@ -366,7 +366,14 @@ class ApiService {
   // AI APIs
   async getAIChatHistory(projectId: string): Promise<{
     success: boolean;
-    data: { projectId: string; userId: string; messages: any[]; updatedAt?: number | null };
+    data: {
+      projectId: string;
+      userId: string;
+      messages: any[];
+      updatedAt?: number | null;
+      revision?: number;
+      deletedAt?: number | null;
+    };
     message?: string;
   }> {
     return this.request(
@@ -380,7 +387,13 @@ class ApiService {
     messages: any[]
   ): Promise<{
     success: boolean;
-    data: { projectId: string; userId: string; count: number };
+    data: {
+      projectId: string;
+      userId: string;
+      count: number;
+      updatedAt?: number;
+      revision?: number;
+    };
     message?: string;
   }> {
     return this.request(
@@ -394,7 +407,12 @@ class ApiService {
 
   async clearAIChatHistory(projectId: string): Promise<{
     success: boolean;
-    data: { projectId: string; userId: string };
+    data: {
+      projectId: string;
+      userId: string;
+      revision?: number;
+      deletedAt?: number;
+    };
     message?: string;
   }> {
     return this.request(

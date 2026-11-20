@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -22,10 +22,44 @@ import { StoryNode } from '@/constants/story-data';
 
 const AI_CHAT_STORAGE_PREFIX = '@story_app_ai_chat_';
 const AI_CHAT_PENDING_DELETE_PREFIX = '@story_app_ai_chat_pending_delete_';
+const AI_CHAT_LOCAL_CLEANUP_PREFIX = '@story_app_ai_chat_local_cleanup_';
+// Giữ payload JSON dưới giới hạn 100KB mặc định của express.json()
+const MAX_CHAT_SYNC_BYTES = 85_000;
 
 interface StoredChatPayload {
   messages: AIChatMessage[];
   updatedAt: number;
+  serverRevision?: number;
+  dirty?: boolean;
+}
+
+function getUtf8ByteLength(value: string): number {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(value).length;
+  }
+  return encodeURIComponent(value).replace(/%[A-F\d]{2}/g, 'U').length;
+}
+
+function fitMessagesToByteBudget(
+  messages: AIChatMessage[],
+  maxBytes: number = MAX_CHAT_SYNC_BYTES
+): { payload: AIChatMessage[]; trimmed: boolean } {
+  const fullBytes = getUtf8ByteLength(JSON.stringify({ messages }));
+  if (fullBytes <= maxBytes) {
+    return { payload: messages, trimmed: false };
+  }
+
+  // Giữ các tin nhắn mới nhất trong ngân sách byte
+  const kept: AIChatMessage[] = [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const candidate = [messages[i], ...kept];
+    if (getUtf8ByteLength(JSON.stringify({ messages: candidate })) <= maxBytes) {
+      kept.unshift(messages[i]);
+    } else {
+      break;
+    }
+  }
+  return { payload: kept, trimmed: true };
 }
 
 function parseStoredChatPayload(raw: string): StoredChatPayload | null {
@@ -36,7 +70,7 @@ function parseStoredChatPayload(raw: string): StoredChatPayload | null {
         (max, m) => Math.max(max, Number(m?.timestamp) || 0),
         0
       );
-      return { messages: parsed, updatedAt: latestTs };
+      return { messages: parsed, updatedAt: latestTs, serverRevision: 0, dirty: false };
     }
     if (
       parsed &&
@@ -47,6 +81,8 @@ function parseStoredChatPayload(raw: string): StoredChatPayload | null {
       return {
         messages: parsed.messages,
         updatedAt: Number(parsed.updatedAt) || 0,
+        serverRevision: Number(parsed.serverRevision) || 0,
+        dirty: Boolean(parsed.dirty),
       };
     }
   } catch {
@@ -97,8 +133,10 @@ export default function AIChatPanel({
   const { user } = useAuth();
   const authorKey = user?.id || user?.email || 'guest';
   const effectiveProjectKey = projectId || projectTitle || 'default';
-  const storageKey = `${AI_CHAT_STORAGE_PREFIX}${encodeURIComponent(authorKey)}_${encodeURIComponent(effectiveProjectKey)}`;
-  const pendingDeleteKey = `${AI_CHAT_PENDING_DELETE_PREFIX}${encodeURIComponent(authorKey)}_${encodeURIComponent(effectiveProjectKey)}`;
+  const scopeSuffix = `${encodeURIComponent(authorKey)}_${encodeURIComponent(effectiveProjectKey)}`;
+  const storageKey = `${AI_CHAT_STORAGE_PREFIX}${scopeSuffix}`;
+  const pendingDeleteKey = `${AI_CHAT_PENDING_DELETE_PREFIX}${scopeSuffix}`;
+  const localCleanupKey = `${AI_CHAT_LOCAL_CLEANUP_PREFIX}${scopeSuffix}`;
 
   const [chatState, setChatState] = useState<{
     scopeKey: string;
@@ -110,6 +148,7 @@ export default function AIChatPanel({
     loaded: false,
   });
   const [pendingDeleteFailed, setPendingDeleteFailed] = useState(false);
+  const [serverSyncWarning, setServerSyncWarning] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -117,12 +156,17 @@ export default function AIChatPanel({
   const scrollRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
 
-  // Quản lý thế hệ thao tác (generation), phiên bản (revision) và hàng đợi lưu tuần tự theo từng cuộc hội thoại
+  // Quản lý scope đang commit, phiên tài khoản, generation, revision và hàng đợi ghi tuần tự
   const activeScopeRef = useRef(storageKey);
-  activeScopeRef.current = storageKey;
+  const activeUserIdRef = useRef<string | undefined>(user?.id);
   const scopeGenerationRef = useRef(0);
   const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
   const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+
+  useLayoutEffect(() => {
+    activeScopeRef.current = storageKey;
+    activeUserIdRef.current = user?.id;
+  }, [storageKey, user?.id]);
 
   const getRevision = useCallback((scope: string) => {
     return scopeRevisionsRef.current.get(scope) || 0;
@@ -153,26 +197,79 @@ export default function AIChatPanel({
     (
       targetScopeKey: string,
       targetPendingDeleteKey: string,
+      targetLocalCleanupKey: string,
       targetProjectId: string | undefined,
       targetUserId: string | undefined,
       nextMessages: AIChatMessage[]
     ) => {
-      const payload: StoredChatPayload = {
-        messages: nextMessages,
-        updatedAt: Date.now(),
-      };
       return enqueueScopedWrite(targetScopeKey, async () => {
+        let prevServerRevision = 0;
         try {
-          await AsyncStorage.removeItem(targetPendingDeleteKey);
-          await AsyncStorage.setItem(targetScopeKey, JSON.stringify(payload));
+          const existingRaw = await AsyncStorage.getItem(targetScopeKey);
+          const existing = existingRaw ? parseStoredChatPayload(existingRaw) : null;
+          prevServerRevision = existing?.serverRevision || 0;
+        } catch {
+          // Ignore read error
+        }
+
+        const localPayload: StoredChatPayload = {
+          messages: nextMessages,
+          updatedAt: Date.now(),
+          serverRevision: prevServerRevision,
+          dirty: Boolean(targetProjectId && targetUserId),
+        };
+
+        try {
+          // Ghi đè bằng lịch sử mới: bỏ đánh dấu dọn dẹp cục bộ, nhưng giữ pendingDeleteKey cho tới khi server xác nhận PUT hoặc DELETE
+          await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+          await AsyncStorage.setItem(targetScopeKey, JSON.stringify(localPayload));
         } catch (err) {
           console.warn('[AIChatPanel] Không thể lưu lịch sử chat vào bộ nhớ cục bộ:', err);
         }
-        if (targetProjectId && targetUserId) {
-          try {
-            await api.saveAIChatHistory(targetProjectId, nextMessages);
-          } catch {
-            // Bỏ qua lỗi mạng, đã lưu ở AsyncStorage
+
+        if (!targetProjectId || !targetUserId) {
+          return;
+        }
+        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động
+        if (activeUserIdRef.current !== targetUserId) {
+          return;
+        }
+
+        const { payload: boundedMessages, trimmed } = fitMessagesToByteBudget(nextMessages);
+        if (boundedMessages.length === 0 && nextMessages.length > 0) {
+          if (activeScopeRef.current === targetScopeKey) {
+            setServerSyncWarning('Lịch sử vượt quá giới hạn dung lượng máy chủ; bản đầy đủ vẫn được lưu cục bộ.');
+          }
+          return;
+        }
+
+        try {
+          const saveRes = await api.saveAIChatHistory(targetProjectId, boundedMessages);
+          const confirmedRevision = Number(saveRes.data?.revision) || prevServerRevision + 1;
+          // Chỉ gỡ pendingDeleteKey sau khi replacement PUT thành công trên server
+          await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+          await AsyncStorage.setItem(
+            targetScopeKey,
+            JSON.stringify({
+              messages: nextMessages,
+              updatedAt: saveRes.data?.updatedAt || localPayload.updatedAt,
+              serverRevision: confirmedRevision,
+              dirty: trimmed,
+            } satisfies StoredChatPayload)
+          ).catch(() => undefined);
+
+          if (activeScopeRef.current === targetScopeKey) {
+            setPendingDeleteFailed(false);
+            setServerSyncWarning(
+              trimmed
+                ? 'Bản lưu trên máy chủ đã rút gọn do giới hạn dung lượng; bản đầy đủ vẫn được giữ trên thiết bị này.'
+                : null
+            );
+          }
+        } catch {
+          // Giữ bản đầy đủ ở cục bộ (dirty: true) và giữ pendingDeleteKey nếu còn
+          if (activeScopeRef.current === targetScopeKey) {
+            setServerSyncWarning('Chưa đồng bộ được lịch sử mới nhất lên máy chủ; dữ liệu vẫn được lưu cục bộ.');
           }
         }
       });
@@ -180,24 +277,41 @@ export default function AIChatPanel({
     [enqueueScopedWrite]
   );
 
-  const retryServerDelete = useCallback(
+  // Thực thi DELETE bên trong một tác vụ đã được xếp hàng theo scope
+  const executeServerDeleteInQueue = useCallback(
     async (
       targetProjectId: string | undefined,
+      targetUserId: string | undefined,
       targetPendingDeleteKey: string,
       targetScopeKey: string
     ): Promise<boolean> => {
-      if (!targetProjectId) {
+      if (!targetProjectId || !targetUserId) {
         await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
         if (activeScopeRef.current === targetScopeKey) {
           setPendingDeleteFailed(false);
         }
         return true;
       }
+
+      const stillPending = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+      if (!stillPending) {
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(false);
+        }
+        return true;
+      }
+
+      // Không gửi DELETE bằng thông tin xác thực của tài khoản khác
+      if (activeUserIdRef.current !== targetUserId) {
+        return false;
+      }
+
       try {
         await api.clearAIChatHistory(targetProjectId);
         await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
         if (activeScopeRef.current === targetScopeKey) {
           setPendingDeleteFailed(false);
+          setServerSyncWarning(null);
         }
         return true;
       } catch {
@@ -210,11 +324,33 @@ export default function AIChatPanel({
     []
   );
 
+  const retryServerDelete = useCallback(
+    async (
+      targetProjectId: string | undefined,
+      targetUserId: string | undefined,
+      targetPendingDeleteKey: string,
+      targetScopeKey: string
+    ): Promise<boolean> => {
+      let cleared = false;
+      await enqueueScopedWrite(targetScopeKey, async () => {
+        cleared = await executeServerDeleteInQueue(
+          targetProjectId,
+          targetUserId,
+          targetPendingDeleteKey,
+          targetScopeKey
+        );
+      });
+      return cleared;
+    },
+    [enqueueScopedWrite, executeServerDeleteInQueue]
+  );
+
   // Tải lịch sử trò chuyện riêng theo từng tác giả + từng dự án
   useEffect(() => {
     let isMounted = true;
     const targetScope = storageKey;
     const targetPendingDelete = pendingDeleteKey;
+    const targetLocalCleanup = localCleanupKey;
     const targetProjectId = projectId;
     const targetUserId = user?.id;
 
@@ -222,6 +358,7 @@ export default function AIChatPanel({
     scopeGenerationRef.current += 1;
     setIsLoading(false);
     setPendingDeleteFailed(false);
+    setServerSyncWarning(null);
     setChatState((prev) =>
       prev.scopeKey === targetScope
         ? prev
@@ -231,31 +368,83 @@ export default function AIChatPanel({
     const startRevision = getRevision(targetScope);
 
     async function loadHistory() {
-      // Nếu lần xóa trước lên máy chủ thất bại, thử xóa lại trước khi tải lịch sử từ máy chủ
-      if (targetProjectId && targetUserId) {
-        const hasPendingDelete = await AsyncStorage.getItem(targetPendingDelete).catch(() => null);
-        if (hasPendingDelete) {
-          const cleared = await retryServerDelete(targetProjectId, targetPendingDelete, targetScope);
-          if (!isMounted || activeScopeRef.current !== targetScope) return;
-          if (!cleared) {
-            setChatState({
-              scopeKey: targetScope,
-              messages: [{ ...WELCOME_MSG, timestamp: Date.now() }],
-              loaded: true,
-            });
-            return;
+      // Chờ các thao tác ghi/xóa đang chờ của chính scope này hoàn tất trước khi đọc
+      const pendingWrite = saveQueuesRef.current.get(targetScope);
+      if (pendingWrite) {
+        await pendingWrite.catch(() => undefined);
+      }
+      if (!isMounted || activeScopeRef.current !== targetScope) return;
+
+      // Xử lý ý định dọn dẹp cục bộ (áp dụng cho cả hội thoại chỉ lưu local và có server)
+      let localCleanupPending = false;
+      try {
+        const hasLocalCleanup = await AsyncStorage.getItem(targetLocalCleanup);
+        if (hasLocalCleanup) {
+          localCleanupPending = true;
+          try {
+            await AsyncStorage.removeItem(targetScope);
+            await AsyncStorage.removeItem(targetLocalCleanup);
+            localCleanupPending = false;
+          } catch {
+            // Giữ localCleanupPending = true để không khôi phục bản đã đánh dấu xóa
           }
+        }
+      } catch {
+        // Ignore storage read error
+      }
+
+      if (!isMounted || activeScopeRef.current !== targetScope) return;
+
+      // Nếu lần xóa trước lên máy chủ thất bại, thử xóa lại qua hàng đợi trước khi tải lịch sử từ máy chủ
+      let localPayload: StoredChatPayload | null = null;
+      if (!localCleanupPending) {
+        try {
+          const raw = await AsyncStorage.getItem(targetScope);
+          if (raw) {
+            localPayload = parseStoredChatPayload(raw);
+          }
+        } catch {
+          // Ignore parse error
         }
       }
 
-      let localPayload: StoredChatPayload | null = null;
-      try {
-        const raw = await AsyncStorage.getItem(targetScope);
-        if (raw) {
-          localPayload = parseStoredChatPayload(raw);
+      const hasLocalUserMessages = Boolean(
+        localPayload?.messages.some((m) => m.role === 'user')
+      );
+
+      if (targetProjectId && targetUserId) {
+        const hasPendingDelete = await AsyncStorage.getItem(targetPendingDelete).catch(() => null);
+        if (hasPendingDelete) {
+          if (hasLocalUserMessages && localPayload) {
+            // Người dùng đã gửi tin nhắn mới sau khi xóa thất bại -> giữ tin mới và đồng bộ thay thế lên server
+            void persistMessagesForScope(
+              targetScope,
+              targetPendingDelete,
+              targetLocalCleanup,
+              targetProjectId,
+              targetUserId,
+              localPayload.messages
+            );
+          } else {
+            const cleared = await retryServerDelete(
+              targetProjectId,
+              targetUserId,
+              targetPendingDelete,
+              targetScope
+            );
+            if (!isMounted || activeScopeRef.current !== targetScope) return;
+            if (!cleared) {
+              if (getRevision(targetScope) === startRevision) {
+                setChatState({
+                  scopeKey: targetScope,
+                  messages: [{ ...WELCOME_MSG, timestamp: Date.now() }],
+                  loaded: true,
+                });
+              }
+              return;
+            }
+          }
         }
-      } catch {
-        // Ignore parse error
       }
 
       if (!isMounted || activeScopeRef.current !== targetScope) return;
@@ -267,53 +456,88 @@ export default function AIChatPanel({
         });
       }
 
-      if (targetProjectId && targetUserId) {
+      if (targetProjectId && targetUserId && activeUserIdRef.current === targetUserId) {
         try {
           const res = await api.getAIChatHistory(targetProjectId);
           if (!isMounted || activeScopeRef.current !== targetScope) return;
+          if (activeUserIdRef.current !== targetUserId) return;
           // Chỉ áp dụng dữ liệu từ server nếu cuộc hội thoại chưa bị người dùng chỉnh sửa/xóa trong lúc chờ
           if (getRevision(targetScope) !== startRevision) return;
 
           const remoteMsgs =
             res.success && Array.isArray(res.data?.messages) ? res.data.messages : [];
           const remoteUpdatedAt = Number(res.data?.updatedAt) || 0;
-          const localUpdatedAt = localPayload?.updatedAt || 0;
-          const hasLocalUserMessages = Boolean(
-            localPayload?.messages.some((m) => m.role === 'user')
-          );
+          const remoteRevision = Number(res.data?.revision) || 0;
+          const remoteDeletedAt = res.data?.deletedAt || null;
+          const localServerRevision = localPayload?.serverRevision || 0;
+          const hasUnackedLocalChanges = Boolean(localPayload?.dirty);
 
           if (remoteMsgs.length > 0) {
-            if (!hasLocalUserMessages || remoteUpdatedAt >= localUpdatedAt) {
-              setChatState({
-                scopeKey: targetScope,
-                messages: remoteMsgs,
-                loaded: true,
-              });
-              await AsyncStorage.setItem(
-                targetScope,
-                JSON.stringify({
+            if (!hasUnackedLocalChanges) {
+              if (!hasLocalUserMessages || remoteRevision >= localServerRevision) {
+                setChatState({
+                  scopeKey: targetScope,
                   messages: remoteMsgs,
-                  updatedAt: remoteUpdatedAt || Date.now(),
-                })
-              );
-            } else if (localPayload && localUpdatedAt > remoteUpdatedAt) {
-              // Bản cục bộ mới hơn theo timestamp/revision -> giữ bản cục bộ và đồng bộ lên server
+                  loaded: true,
+                });
+                await AsyncStorage.setItem(
+                  targetScope,
+                  JSON.stringify({
+                    messages: remoteMsgs,
+                    updatedAt: remoteUpdatedAt || Date.now(),
+                    serverRevision: remoteRevision,
+                    dirty: false,
+                  } satisfies StoredChatPayload)
+                ).catch(() => undefined);
+              }
+            } else if (localPayload && remoteRevision <= localServerRevision) {
+              // Bản cục bộ có thay đổi chưa đồng bộ và máy chủ chưa có revision mới hơn -> đẩy lên máy chủ
               void persistMessagesForScope(
                 targetScope,
                 targetPendingDelete,
+                targetLocalCleanup,
+                targetProjectId,
+                targetUserId,
+                localPayload.messages
+              );
+            } else {
+              // Xung đột: cả máy chủ và cục bộ đều có thay đổi -> giữ nguyên tin chưa đồng bộ ở cục bộ và cảnh báo
+              setServerSyncWarning('Phát hiện thay đổi chưa đồng bộ với máy chủ; đang giữ bản trên thiết bị này.');
+            }
+          } else {
+            const serverConfirmedDeletion = Boolean(remoteDeletedAt) || remoteRevision > 0;
+            if (serverConfirmedDeletion) {
+              if (!hasUnackedLocalChanges) {
+                // Máy chủ xác nhận đã xóa -> không tải lại cache cũ lên máy chủ
+                await AsyncStorage.removeItem(targetScope).catch(() => undefined);
+                setChatState({
+                  scopeKey: targetScope,
+                  messages: [WELCOME_MSG],
+                  loaded: true,
+                });
+              } else if (localPayload && remoteRevision <= localServerRevision) {
+                void persistMessagesForScope(
+                  targetScope,
+                  targetPendingDelete,
+                  targetLocalCleanup,
+                  targetProjectId,
+                  targetUserId,
+                  localPayload.messages
+                );
+              } else {
+                setServerSyncWarning('Lịch sử đã bị xóa ở nơi khác nhưng thiết bị này còn tin nhắn chưa đồng bộ.');
+              }
+            } else if (localPayload && hasLocalUserMessages) {
+              // Hội thoại chưa từng đồng bộ lên máy chủ (revision === 0 && !deletedAt) -> tải lên máy chủ
+              void persistMessagesForScope(
+                targetScope,
+                targetPendingDelete,
+                targetLocalCleanup,
                 targetProjectId,
                 targetUserId,
                 localPayload.messages
               );
             }
-          } else if (localPayload && hasLocalUserMessages) {
-            void persistMessagesForScope(
-              targetScope,
-              targetPendingDelete,
-              targetProjectId,
-              targetUserId,
-              localPayload.messages
-            );
           }
         } catch {
           // Lỗi mạng / lỗi server: giữ nguyên bản lưu cục bộ, không ghi đè lên server
@@ -327,6 +551,7 @@ export default function AIChatPanel({
     };
   }, [
     getRevision,
+    localCleanupKey,
     pendingDeleteKey,
     persistMessagesForScope,
     projectId,
@@ -373,6 +598,7 @@ export default function AIChatPanel({
     currentHistory: AIChatMessage[],
     capturedScope: string,
     capturedPendingDelete: string,
+    capturedLocalCleanup: string,
     capturedProjectId: string | undefined,
     capturedUserId: string | undefined,
     capturedGen: number
@@ -423,6 +649,7 @@ export default function AIChatPanel({
         void persistMessagesForScope(
           capturedScope,
           capturedPendingDelete,
+          capturedLocalCleanup,
           capturedProjectId,
           capturedUserId,
           nextHistory
@@ -451,6 +678,7 @@ export default function AIChatPanel({
       void persistMessagesForScope(
         capturedScope,
         capturedPendingDelete,
+        capturedLocalCleanup,
         capturedProjectId,
         capturedUserId,
         nextHistory
@@ -472,6 +700,7 @@ export default function AIChatPanel({
 
     const capturedScope = storageKey;
     const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
     const capturedProjectId = projectId;
     const capturedUserId = user?.id;
     const capturedGen = scopeGenerationRef.current;
@@ -488,11 +717,11 @@ export default function AIChatPanel({
 
     const updatedMessages = [...messages, userMsg];
     bumpRevision(capturedScope);
-    setPendingDeleteFailed(false);
     setChatState({ scopeKey: capturedScope, messages: updatedMessages, loaded: true });
     void persistMessagesForScope(
       capturedScope,
       capturedPendingDelete,
+      capturedLocalCleanup,
       capturedProjectId,
       capturedUserId,
       updatedMessages
@@ -501,6 +730,7 @@ export default function AIChatPanel({
       updatedMessages,
       capturedScope,
       capturedPendingDelete,
+      capturedLocalCleanup,
       capturedProjectId,
       capturedUserId,
       capturedGen
@@ -511,6 +741,7 @@ export default function AIChatPanel({
     if (isLoading || !isScopeLoaded) return;
     const capturedScope = storageKey;
     const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
     const capturedProjectId = projectId;
     const capturedUserId = user?.id;
     const capturedGen = scopeGenerationRef.current;
@@ -522,6 +753,7 @@ export default function AIChatPanel({
     void persistMessagesForScope(
       capturedScope,
       capturedPendingDelete,
+      capturedLocalCleanup,
       capturedProjectId,
       capturedUserId,
       cleanedMessages
@@ -530,6 +762,7 @@ export default function AIChatPanel({
       cleanedMessages,
       capturedScope,
       capturedPendingDelete,
+      capturedLocalCleanup,
       capturedProjectId,
       capturedUserId,
       capturedGen
@@ -539,27 +772,55 @@ export default function AIChatPanel({
   const handleClearChat = () => {
     const capturedScope = storageKey;
     const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
     const capturedProjectId = projectId;
     const capturedUserId = user?.id;
 
     const doClear = async () => {
+      // Ghi nhận ý định dọn dẹp cục bộ trước khi xóa snapshot; nếu không ghi được thì báo lỗi và dừng
+      try {
+        await AsyncStorage.setItem(capturedLocalCleanup, String(Date.now()));
+      } catch {
+        const msg = 'Không thể lưu trạng thái xóa lịch sử trò chuyện. Vui lòng thử lại.';
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert('Không thể xóa lịch sử', msg);
+        }
+        return;
+      }
+
       scopeGenerationRef.current += 1;
       bumpRevision(capturedScope);
       setIsLoading(false);
+      setServerSyncWarning(null);
       const resetList = [{ ...WELCOME_MSG, timestamp: Date.now() }];
       setChatState({ scopeKey: capturedScope, messages: resetList, loaded: true });
 
       await enqueueScopedWrite(capturedScope, async () => {
         try {
           await AsyncStorage.removeItem(capturedScope);
-          if (capturedProjectId && capturedUserId) {
-            await AsyncStorage.setItem(capturedPendingDelete, String(Date.now()));
-          }
+          await AsyncStorage.removeItem(capturedLocalCleanup).catch(() => undefined);
         } catch {
-          // Ignore storage error
+          // Giữ capturedLocalCleanup để lần tải sau tiếp tục dọn dẹp mà không khôi phục bản cũ
+          if (activeScopeRef.current === capturedScope) {
+            setServerSyncWarning('Chưa thể xóa hoàn toàn bộ nhớ cục bộ; hệ thống sẽ tự dọn lại khi tải lại.');
+          }
         }
         if (capturedProjectId && capturedUserId) {
-          await retryServerDelete(capturedProjectId, capturedPendingDelete, capturedScope);
+          try {
+            await AsyncStorage.setItem(capturedPendingDelete, String(Date.now()));
+          } catch {
+            if (activeScopeRef.current === capturedScope) {
+              setPendingDeleteFailed(true);
+            }
+          }
+          await executeServerDeleteInQueue(
+            capturedProjectId,
+            capturedUserId,
+            capturedPendingDelete,
+            capturedScope
+          );
         }
       });
     };
@@ -661,10 +922,29 @@ export default function AIChatPanel({
               borderColor: '#e5a93c',
             }}
             onPress={() => {
-              void retryServerDelete(projectId, pendingDeleteKey, storageKey);
+              void retryServerDelete(projectId, user?.id, pendingDeleteKey, storageKey);
             }}>
             <Text style={{ color: '#e5a93c', fontSize: 12, fontWeight: '600' }}>Thử lại</Text>
           </Pressable>
+        </View>
+      )}
+
+      {serverSyncWarning && !pendingDeleteFailed && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            backgroundColor: '#262015',
+            borderBottomWidth: 1,
+            borderBottomColor: '#544225',
+            gap: 8,
+          }}>
+          <Text style={{ flex: 1, color: '#ecd2a0', fontSize: 12 }}>
+            ⚠️ {serverSyncWarning}
+          </Text>
         </View>
       )}
 
