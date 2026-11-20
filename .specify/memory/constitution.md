@@ -1,19 +1,3 @@
-<!--
-Sync Impact Report
-- Version change: 0.0.0 (initial template) -> 1.0.0
-- Modified principles:
-  - [PRINCIPLE_1_NAME] -> I. Đồ thị Cốt truyện là Nguồn Chân lý Duy nhất (Graph-First Single Source of Truth)
-  - [PRINCIPLE_2_NAME] -> II. Cô lập Ngữ cảnh Tài khoản & An toàn Giao dịch (Account Isolation & Transactional Rollback)
-  - [PRINCIPLE_3_NAME] -> III. Thẩm mỹ Cổ phong Tối & Trải nghiệm Mượt mà 60fps (Dark Oriental UI & Smooth UX)
-  - [PRINCIPLE_4_NAME] -> IV. Tích hợp AI Có Kiểm soát & Chịu lỗi (Resilient & Structured AI Generation)
-  - [PRINCIPLE_5_NAME] -> V. An toàn Kiểu dữ liệu & Tương thích Đa nền tảng (Type Safety & Cross-Platform Parity)
-- Added sections:
-  - Kiến trúc & Công nghệ (Technology Stack & Constraints)
-  - Quy trình Phát triển & Kiểm soát Chất lượng (Development Workflow & Quality Gates)
-- Removed sections: None
-- Templates requiring updates: None (resolved dynamically at runtime)
-- Follow-up TODOs: None
--->
 # Story-Create-App Constitution
 
 ## Core Principles

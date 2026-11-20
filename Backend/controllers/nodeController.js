@@ -1093,14 +1093,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode { id: $nodeId })
-        WHERE coalesce(c.weapon, '') <> item.name AND coalesce(c.weapon, '') <> item.id
+        WHERE toLower(coalesce(c.weapon, '')) <> toLower(item.name)
+          AND coalesce(c.weapon, '') <> item.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (item:StoryNode { id: $nodeId })
-        WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
+        WHERE (toLower(c.weapon) = toLower(item.name) OR c.weapon = item.id)
+          AND c.weapon IS NOT NULL AND c.weapon <> ''
         MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
         ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
                       r.label = 'Vật dụng',
@@ -1113,14 +1115,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(c.birthplace, '') <> loc.name AND coalesce(c.birthplace, '') <> loc.id
+        WHERE toLower(coalesce(c.birthplace, '')) <> toLower(loc.name)
+          AND coalesce(c.birthplace, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (c.birthplace = loc.name OR c.birthplace = loc.id) AND c.birthplace IS NOT NULL AND c.birthplace <> ''
+        WHERE (toLower(c.birthplace) = toLower(loc.name) OR c.birthplace = loc.id)
+          AND c.birthplace IS NOT NULL AND c.birthplace <> ''
         MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
         ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
                       r.label = 'Nơi sinh',
@@ -1133,14 +1137,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(item.origin, '') <> loc.name AND coalesce(item.origin, '') <> loc.id
+        WHERE toLower(coalesce(item.origin, '')) <> toLower(loc.name)
+          AND coalesce(item.origin, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (item.origin = loc.name OR item.origin = loc.id) AND item.origin IS NOT NULL AND item.origin <> ''
+        WHERE (toLower(item.origin) = toLower(loc.name) OR item.origin = loc.id)
+          AND item.origin IS NOT NULL AND item.origin <> ''
         MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
         ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
                       r.label = 'Nguồn gốc',

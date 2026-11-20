@@ -134,6 +134,9 @@ function extractCreateNodeResponse(responseText) {
                     node[field].trim() !== '' &&
                     !PLACEHOLDER_VALUE_PATTERN.test(node[field].trim())
                 ) &&
+                RELATIONAL_NODE_FIELDS.every(
+                  (field) => !(field in node) || typeof node[field] === 'string'
+                ) &&
                 Object.values(node).every(
                   (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
                 );
@@ -910,9 +913,9 @@ async function getChatHistory(req, res) {
     });
   } catch (error) {
     console.warn('[AI Controller] Không thể tải lịch sử chat từ Neo4j:', error.message);
-    return res.status(200).json({
-      success: true,
-      data: { projectId, userId, messages: [], updatedAt: null },
+    return res.status(500).json({
+      success: false,
+      message: error.message || 'Không thể tải lịch sử trò chuyện AI từ máy chủ.',
     });
   }
 }

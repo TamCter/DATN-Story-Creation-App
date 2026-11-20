@@ -488,9 +488,11 @@ const handleCreateNodesFromAI = async (
   try {
     for (let index = 0; index < remainingNodes.length; index += 1) {
       const nodeData = remainingNodes[index];
-      const stableKey = `${nodeData.type || 'unknown'}:${(nodeData.name || '').trim()}:${(nodeData.desc || '').trim()}`;
+      const normalizedType = nodeData.type || 'character';
+      const normalizedName = (nodeData.name || '').trim();
+      const stableKey = `${normalizedType}:${normalizedName.toLocaleLowerCase('vi')}:${(nodeData.desc || '').trim()}`;
       const alreadyCreated = createdNodes.some((createdNode) => {
-        const createdKey = `${createdNode.type}:${(createdNode.name || '').trim()}:${(createdNode.desc || '').trim()}`;
+        const createdKey = `${createdNode.type}:${(createdNode.name || '').trim().toLocaleLowerCase('vi')}:${(createdNode.desc || '').trim()}`;
         return createdKey === stableKey;
       });
 
@@ -498,8 +500,20 @@ const handleCreateNodesFromAI = async (
         continue;
       }
 
-      const createdNode = await projectStore.createNode(currentProject.id, nodeData);
-      createdNodes.push(createdNode);
+      // Kiểm tra xem node đã được tự động tạo (stub) trong đồ thị bởi lượt trước trong batch chưa
+      const latestProject = await projectStore.getProject(currentProject.id);
+      const existingMatch = normalizedName
+        ? (latestProject.nodes || []).find(
+            (n) =>
+              n.type === normalizedType &&
+              n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi')
+          )
+        : undefined;
+
+      const savedNode = existingMatch
+        ? await projectStore.updateNode(currentProject.id, existingMatch.id, nodeData)
+        : await projectStore.createNode(currentProject.id, nodeData);
+      createdNodes.push(savedNode);
     }
 
     await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);

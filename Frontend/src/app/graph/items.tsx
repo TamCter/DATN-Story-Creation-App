@@ -192,21 +192,30 @@ export default function ItemsScreen() {
   const [newItemDesc, setNewItemDesc] = useState('');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
 
-  // Danh sách bộ lọc theo Độ hiếm (ITEM_RARITY_OPTIONS)
+  // Danh sách bộ lọc theo Độ hiếm (ITEM_RARITY_OPTIONS + các độ hiếm khác có trong dữ liệu)
   const rarityFilters = useMemo(() => {
     const counts = new Map<string, number>();
+    const configuredKeys = new Set<string>();
     for (const opt of ITEM_RARITY_OPTIONS) {
       counts.set(opt.value, 0);
+      configuredKeys.add(opt.value);
     }
     for (const item of items) {
       const rarity = getItemRarity(item);
       counts.set(rarity, (counts.get(rarity) || 0) + 1);
     }
-    return ITEM_RARITY_OPTIONS.map((opt) => ({
+    const baseFilters = ITEM_RARITY_OPTIONS.map((opt) => ({
       key: opt.value,
       label: `${opt.icon} ${opt.label}`,
       count: counts.get(opt.value) || 0,
     }));
+    const extraFilters: Array<{ key: string; label: string; count: number }> = [];
+    for (const [rarity, count] of counts.entries()) {
+      if (!configuredKeys.has(rarity) && count > 0) {
+        extraFilters.push({ key: rarity, label: rarity, count });
+      }
+    }
+    return [...baseFilters, ...extraFilters];
   }, [items]);
 
   const filteredItems = useMemo(() => {

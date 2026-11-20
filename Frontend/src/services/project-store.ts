@@ -2,6 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   eventBelongsToChapter,
   INITIAL_PROJECTS,
+  parseEventParticipants,
   StoryChapter,
   StoryLink,
   StoryNode,
@@ -62,6 +63,18 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
     return created;
   };
 
+  const removeObsoleteGeneratedLinks = (
+    direction: 'outgoing' | 'incoming',
+    ownerId: string,
+    category: string
+  ) => {
+    project.links = (project.links || []).filter((l) => {
+      const isGenerated = typeof l.id === 'string' && l.id.startsWith('link-');
+      if (!isGenerated || l.category !== category) return true;
+      return direction === 'outgoing' ? l.source !== ownerId : l.target !== ownerId;
+    });
+  };
+
   const ensureLink = (
     sourceId: string,
     targetId: string,
@@ -87,6 +100,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
   };
 
   if (node.type === 'character') {
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'EQUIPPED');
     const weapon = cleanRelationalVal(node.weapon);
     if (weapon) {
       const item = findOrAddNode(weapon, 'item', {
@@ -97,6 +111,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(node.id, item.id, 'EQUIPPED', 'Vật dụng', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'BIRTHPLACE');
     const birthplace = cleanRelationalVal(node.birthplace);
     if (birthplace) {
       const loc = findOrAddNode(birthplace, 'location', {
@@ -107,6 +123,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(node.id, loc.id, 'BIRTHPLACE', 'Nơi sinh', 'dashed');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'MEMBER_OF');
     const sect = cleanRelationalVal(node.sect);
     if (sect) {
       const fac = findOrAddNode(sect, 'faction', {
@@ -118,6 +136,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(node.id, fac.id, 'MEMBER_OF', 'Tổ chức', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'STATUS_EVENT');
     const statusEvent = cleanRelationalVal(node.statusEvent);
     if (statusEvent && (node.status === 'Đã chết' || node.status === 'Hồi sinh')) {
       const ev = findOrAddNode(statusEvent, 'event', {
@@ -134,6 +154,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       );
     }
   } else if (node.type === 'item') {
+    removeObsoleteGeneratedLinks('incoming', node.id, 'OWNS');
     const holder = cleanRelationalVal(node.holderOrLocation);
     if (holder) {
       const ch = findOrAddNode(holder, 'character', {
@@ -144,6 +165,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(ch.id, node.id, 'OWNS', 'Sở hữu', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'ORIGIN');
     const origin = cleanRelationalVal(node.origin);
     if (origin) {
       const loc = findOrAddNode(origin, 'location', {
@@ -155,6 +178,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(node.id, loc.id, 'ORIGIN', 'Nguồn gốc', 'dashed');
     }
   } else if (node.type === 'faction') {
+    removeObsoleteGeneratedLinks('incoming', node.id, 'LEADER_OF');
     const leader = cleanRelationalVal(node.leader);
     if (leader) {
       const ch = findOrAddNode(leader, 'character', {
@@ -165,6 +189,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(ch.id, node.id, 'LEADER_OF', 'Người đại diện / Thủ lĩnh', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'HEADQUARTERS');
     const hq = cleanRelationalVal(node.headquarters);
     if (hq) {
       const loc = findOrAddNode(hq, 'location', {
@@ -175,6 +201,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(node.id, loc.id, 'HEADQUARTERS', 'Căn cứ địa', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'STATUS_EVENT');
     const statusEvent = cleanRelationalVal(node.statusEvent);
     if (statusEvent && (node.status === 'Tạm ngừng' || node.status === 'Suy tàn')) {
       const ev = findOrAddNode(statusEvent, 'event', {
@@ -185,6 +213,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(node.id, ev.id, 'STATUS_EVENT', 'Trạng thái thay đổi do', 'solid');
     }
   } else if (node.type === 'location') {
+    removeObsoleteGeneratedLinks('incoming', node.id, 'RULER_OF');
     const ruler = cleanRelationalVal(node.ruler);
     if (ruler) {
       const fac = findOrAddNode(ruler, 'faction', {
@@ -197,6 +226,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(fac.id, node.id, 'RULER_OF', 'Cai quản', 'solid');
     }
   } else if (node.type === 'event') {
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'EVENT_LOCATION');
     const locName = cleanRelationalVal(node.location);
     if (locName) {
       const loc = findOrAddNode(locName, 'location', {
@@ -207,8 +237,12 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(node.id, loc.id, 'EVENT_LOCATION', 'Nơi diễn ra', 'solid');
     }
-    const rawChars = `${node.charactersInvolved || ''},${node.characters || ''}`
-      .split(/[,;\n]+/)
+
+    removeObsoleteGeneratedLinks('incoming', node.id, 'PARTICIPATED_IN');
+    const rawChars = [
+      ...parseEventParticipants(node.charactersInvolved),
+      ...parseEventParticipants(node.characters),
+    ]
       .map((s) => cleanRelationalVal(s))
       .filter(Boolean);
     for (const cName of Array.from(new Set(rawChars))) {
@@ -637,6 +671,7 @@ export class ProjectStore {
       updatedAt: Date.now(),
     };
 
+    let backendSynced = false;
     // Thử gọi backend để lưu vào Neo4j (không truyền createdAt / updatedAt thủ công)
     try {
       this.assertAccountContext(
@@ -651,6 +686,7 @@ export class ProjectStore {
       );
       if (res.success && res.data) {
         Object.assign(newNode, res.data, { syncStatus: 'synced' });
+        backendSynced = true;
       }
     } catch (err) {
       this.assertAccountContext(
@@ -668,11 +704,96 @@ export class ProjectStore {
       accountContext,
       'Tài khoản đã thay đổi trong lúc tạo node.'
     );
-    project.nodes = [...project.nodes, newNode];
-    ensureLocalRelatedEntities(project, newNode);
-    await this.saveProject(project, accountContext);
+    project.nodes = [
+      ...project.nodes.filter((n) => n.id !== generatedId && n.id !== newNode.id),
+      newNode,
+    ];
+    if (backendSynced) {
+      await this.refreshProjectAfterBackendMutation(
+        projectId,
+        accountContext,
+        project,
+        [generatedId, newNode.id]
+      );
+    } else {
+      ensureLocalRelatedEntities(project, newNode);
+      await this.saveProject(project, accountContext);
+    }
 
     return newNode;
+  }
+
+  private async refreshProjectAfterBackendMutation(
+    projectId: string,
+    accountContext: AccountContext,
+    fallbackProject: StoryProject,
+    reconciledNodeIds: string[] = []
+  ): Promise<void> {
+    const reconciledIdSet = new Set(reconciledNodeIds.filter(Boolean));
+    try {
+      const res = await api.getProjectGraph(projectId);
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ dữ liệu dự án.'
+      );
+      if (res.success && res.data) {
+        const { project, nodes = [], links = [], edges, chapters } = res.data;
+        const actualLinks = (Array.isArray(edges) && edges.length > 0 ? edges : links) as StoryLink[];
+        const remoteChapters = Array.isArray(chapters)
+          ? (chapters as StoryChapter[])
+          : project.chapters || fallbackProject.chapters || [];
+        const remoteNodes = (nodes as StoryNode[]).map((remoteNode) => ({
+          ...remoteNode,
+          syncStatus: 'synced' as const,
+        }));
+        const remoteIdSet = new Set(remoteNodes.map((n) => n.id));
+        const remoteNameTypeKeys = new Set(
+          remoteNodes.map((n) => `${n.type}::${(n.name || '').trim().toLocaleLowerCase()}`)
+        );
+
+        const pendingNodes = (fallbackProject.nodes || []).filter((node) => {
+          if (node.syncStatus !== 'pending') return false;
+          if (reconciledIdSet.has(node.id) || remoteIdSet.has(node.id)) return false;
+          const key = `${node.type}::${(node.name || '').trim().toLocaleLowerCase()}`;
+          return !remoteNameTypeKeys.has(key);
+        });
+        const mergedNodes = [...remoteNodes, ...pendingNodes];
+
+        const pendingChapters = (fallbackProject.chapters || []).filter(
+          (chapter) => chapter.syncStatus === 'pending'
+        );
+        const mergedChapters = [
+          ...remoteChapters,
+          ...pendingChapters.filter(
+            (pending) =>
+              !remoteChapters.some(
+                (chapter: StoryChapter) => chapter.id === pending.id
+              )
+          ),
+        ];
+
+        const canonicalProject: StoryProject = {
+          ...fallbackProject,
+          ...project,
+          nodeCount: mergedNodes.length,
+          linkCount: actualLinks.length,
+          nodes: mergedNodes,
+          links: actualLinks,
+          edges: actualLinks,
+          chapters: mergedChapters,
+        };
+        await this.saveProject(canonicalProject, accountContext);
+        return;
+      }
+    } catch (err) {
+      this.assertAccountContext(
+        accountContext,
+        'Tài khoản đã thay đổi trong lúc đồng bộ dữ liệu dự án.'
+      );
+      console.warn('[ProjectStore] Không thể làm mới graph từ Backend sau khi lưu node:', err);
+    }
+
+    await this.saveProject(fallbackProject, accountContext);
   }
 
   async ensureNodeSynced(projectId: string, nodeId: string): Promise<StoryNode> {
@@ -821,6 +942,7 @@ export class ProjectStore {
       updatedAt: Date.now(),
     };
 
+    let backendSynced = false;
     // Thử gọi backend để cập nhật vào Neo4j (không truyền id / createdAt / updatedAt)
     try {
       this.assertAccountContext(
@@ -837,7 +959,8 @@ export class ProjectStore {
         throw new Error(res.message || 'Backend không xác nhận đã cập nhật node');
       }
       if (res.success && res.data) {
-        Object.assign(updatedNode, res.data);
+        Object.assign(updatedNode, res.data, { syncStatus: 'synced' });
+        backendSynced = true;
       }
     } catch (err) {
       this.assertAccountContext(
@@ -855,8 +978,17 @@ export class ProjectStore {
       'Tài khoản đã thay đổi trong lúc cập nhật node.'
     );
     project.nodes[index] = updatedNode;
-    ensureLocalRelatedEntities(project, updatedNode);
-    await this.saveProject(project, accountContext);
+    if (backendSynced) {
+      await this.refreshProjectAfterBackendMutation(
+        projectId,
+        accountContext,
+        project,
+        [nodeId, updatedNode.id]
+      );
+    } else {
+      ensureLocalRelatedEntities(project, updatedNode);
+      await this.saveProject(project, accountContext);
+    }
 
     return updatedNode;
   }

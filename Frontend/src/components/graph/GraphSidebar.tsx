@@ -1,9 +1,8 @@
 import { router } from 'expo-router';
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Animated,
   BackHandler,
-  Dimensions,
   Easing,
   PanResponder,
   Platform,
@@ -11,6 +10,7 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -18,8 +18,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getProjectChapters, StoryProject } from '@/constants/story-data';
 import { AppFonts } from '@/constants/theme';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const DRAWER_WIDTH = Math.min(320, Math.floor(SCREEN_WIDTH * 0.84));
 const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 const OPEN_DURATION = 280;
 const CLOSE_DURATION = 220;
@@ -43,9 +41,9 @@ interface GraphSidebarProps {
 
 /**
  * Thanh bên điều hướng dự án.
- * - Luôn được mount (không dùng Modal) để tránh lỗi kẹt trạng thái khi mở/đóng liên tục.
+ * - Không dùng Modal để tránh lỗi kẹt trạng thái khi mở/đóng liên tục.
+ * - Gỡ khỏi cây layout/focus sau khi animation đóng hoàn tất.
  * - Trạng thái mở/đóng hoàn toàn do prop `visible` của màn hình cha quyết định.
- * - `translateX` điều khiển cả animation trượt lẫn cử chỉ vuốt để đóng.
  */
 export function GraphSidebar({
   visible,
@@ -53,24 +51,46 @@ export function GraphSidebar({
   activeSection,
   onClose,
 }: GraphSidebarProps) {
+  const { width: windowWidth } = useWindowDimensions();
+  const drawerWidth = Math.min(320, Math.floor(windowWidth * 0.84));
   const insets = useSafeAreaInsets();
   const chapters = getProjectChapters(project);
 
-  // -DRAWER_WIDTH = đóng hoàn toàn, 0 = mở hoàn toàn
-  const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+  const [isRendered, setIsRendered] = useState(visible);
+
+  // -drawerWidth = đóng hoàn toàn, 0 = mở hoàn toàn
+  const translateX = useRef(new Animated.Value(visible ? 0 : -drawerWidth)).current;
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
+  const visibleRef = useRef(visible);
+  visibleRef.current = visible;
+  const drawerWidthRef = useRef(drawerWidth);
+  drawerWidthRef.current = drawerWidth;
+
+  // Khi chiều rộng cửa sổ thay đổi trong lúc đóng, giữ vị trí ẩn khớp với drawerWidth mới
+  useEffect(() => {
+    if (!visible) {
+      translateX.setValue(-drawerWidth);
+    }
+  }, [drawerWidth, visible, translateX]);
 
   // Animation trượt ra / trượt vào theo prop `visible`
   useEffect(() => {
+    if (visible) {
+      setIsRendered(true);
+    }
     translateX.stopAnimation();
     Animated.timing(translateX, {
-      toValue: visible ? 0 : -DRAWER_WIDTH,
+      toValue: visible ? 0 : -drawerWidth,
       duration: visible ? OPEN_DURATION : CLOSE_DURATION,
       easing: visible ? Easing.out(Easing.cubic) : Easing.in(Easing.cubic),
       useNativeDriver: USE_NATIVE_DRIVER,
-    }).start();
-  }, [visible, translateX]);
+    }).start(({ finished }) => {
+      if (finished && !visibleRef.current) {
+        setIsRendered(false);
+      }
+    });
+  }, [visible, drawerWidth, translateX]);
 
   // Nút Back trên Android đóng thanh bên
   useEffect(() => {
@@ -87,16 +107,28 @@ export function GraphSidebar({
     () =>
       PanResponder.create({
         onMoveShouldSetPanResponder: (_, g) =>
-          Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
+          visibleRef.current &&
+          Math.abs(g.dx) > 8 &&
+          Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
         onPanResponderGrant: () => {
           translateX.stopAnimation();
         },
         onPanResponderMove: (_, g) => {
-          translateX.setValue(Math.max(-DRAWER_WIDTH, Math.min(0, g.dx)));
+          const w = drawerWidthRef.current;
+          translateX.setValue(Math.max(-w, Math.min(0, g.dx)));
         },
         onPanResponderRelease: (_, g) => {
-          if (g.dx < -DRAWER_WIDTH * 0.3 || g.vx < -0.5) {
+          const w = drawerWidthRef.current;
+          if (!visibleRef.current || g.dx < -w * 0.3 || g.vx < -0.5) {
             onCloseRef.current();
+            if (!visibleRef.current) {
+              Animated.spring(translateX, {
+                toValue: -w,
+                friction: 9,
+                tension: 70,
+                useNativeDriver: USE_NATIVE_DRIVER,
+              }).start();
+            }
           } else {
             Animated.spring(translateX, {
               toValue: 0,
@@ -107,8 +139,9 @@ export function GraphSidebar({
           }
         },
         onPanResponderTerminate: () => {
+          const w = drawerWidthRef.current;
           Animated.spring(translateX, {
-            toValue: 0,
+            toValue: visibleRef.current ? 0 : -w,
             friction: 9,
             tension: 70,
             useNativeDriver: USE_NATIVE_DRIVER,
@@ -118,11 +151,19 @@ export function GraphSidebar({
     [translateX]
   );
 
-  const backdropOpacity = translateX.interpolate({
-    inputRange: [-DRAWER_WIDTH, 0],
-    outputRange: [0, 0.65],
-    extrapolate: 'clamp',
-  });
+  const backdropOpacity = useMemo(
+    () =>
+      translateX.interpolate({
+        inputRange: [-drawerWidth, 0],
+        outputRange: [0, 0.65],
+        extrapolate: 'clamp',
+      }),
+    [translateX, drawerWidth]
+  );
+
+  if (!isRendered && !visible) {
+    return null;
+  }
 
   const handleNavigate = (route: string, isActive: boolean) => {
     onClose();
@@ -175,7 +216,7 @@ export function GraphSidebar({
         style={[
           styles.drawer,
           {
-            width: DRAWER_WIDTH,
+            width: drawerWidth,
             transform: [{ translateX }],
           },
         ]}>
