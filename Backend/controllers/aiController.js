@@ -1062,15 +1062,17 @@ async function saveChatHistory(req, res) {
         SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
         WITH chat, coalesce(chat.revision, 0) AS currentRevision
         WITH chat, currentRevision,
-             ($writeId IS NOT NULL AND chat.lastWriteId = $writeId) AS isReplay,
+             coalesce($writeId IS NOT NULL AND chat.lastWriteId = $writeId, false) AS isReplay,
              ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS matchesExpected
-        WITH chat, currentRevision, isReplay, (isReplay OR matchesExpected) AS canWrite
+        WITH chat, currentRevision, isReplay, matchesExpected, (isReplay OR matchesExpected) AS canWrite
         FOREACH (_ IN CASE WHEN matchesExpected AND NOT isReplay THEN [1] ELSE [] END |
           SET chat.messagesJson = $messagesJson,
               chat.updatedAt = timestamp(),
               chat.deletedAt = null,
               chat.revision = currentRevision + 1,
-              chat.lastWriteId = $writeId
+              chat.lastWriteId = $writeId,
+              chat.lastClearId = null,
+              chat.lastClearRevision = null
         )
         REMOVE chat._revisionLock
         WITH chat, canWrite, isReplay
@@ -1195,7 +1197,13 @@ async function clearChatHistory(req, res) {
         SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
         WITH chat, coalesce(chat.revision, 0) AS currentRevision
         WITH chat, currentRevision,
-             ($clearId IS NOT NULL AND chat.lastClearId = $clearId) AS isReplay,
+             coalesce(
+               $clearId IS NOT NULL
+                 AND chat.lastClearId = $clearId
+                 AND chat.deletedAt IS NOT NULL
+                 AND chat.lastClearRevision = currentRevision,
+               false
+             ) AS isReplay,
              ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS matchesExpected
         WITH chat, currentRevision, isReplay, matchesExpected, (isReplay OR matchesExpected) AS canClear
         FOREACH (_ IN CASE WHEN matchesExpected AND NOT isReplay THEN [1] ELSE [] END |
@@ -1204,6 +1212,7 @@ async function clearChatHistory(req, res) {
               chat.deletedAt = timestamp(),
               chat.revision = currentRevision + 1,
               chat.lastClearId = $clearId,
+              chat.lastClearRevision = currentRevision + 1,
               chat.lastWriteId = null
         )
         REMOVE chat._revisionLock

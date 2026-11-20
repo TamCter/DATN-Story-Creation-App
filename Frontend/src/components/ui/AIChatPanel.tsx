@@ -259,9 +259,9 @@ export default function AIChatPanel({
   const prevVisibleRef = useRef<boolean>(visible);
   const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
   const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
-  // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET)
+  // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET) kèm opId
   const lastLocalWriteAckRef = useRef<
-    Map<string, { revision: number; messageIds: string[] }>
+    Map<string, { revision: number; messageIds: string[]; opId: number }>
   >(new Map());
 
   const nextOpId = useCallback(() => {
@@ -422,6 +422,7 @@ export default function AIChatPanel({
           lastLocalWriteAckRef.current.set(targetScopeKey, {
             revision: confirmedRevision,
             messageIds: nextMessages.map((m) => m.id),
+            opId: saveOpId,
           });
           await AsyncStorage.setItem(targetServerRevKey, String(confirmedRevision)).catch(() => undefined);
 
@@ -526,6 +527,31 @@ export default function AIChatPanel({
       const clearId = clearMarker?.clearId ?? pendingDelMarker?.clearId;
       const expectedRevision = clearMarker?.baseRevision ?? pendingDelMarker?.baseRevision;
 
+      // Chỉ tự động thử lại DELETE khi marker có baseRevision xác định;
+      // với marker cũ chỉ có timestamp (không có baseRevision), dừng tự động xóa để tải & hiển thị lịch sử hiện tại trước khi người dùng xác nhận xóa lại.
+      if (typeof expectedRevision !== 'number') {
+        if (pendingDelMarker && pendingDelMarker.opId <= targetOpId) {
+          await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+        }
+        if (clearMarker && clearMarker.opId <= targetOpId) {
+          if (clearMarker.localPending) {
+            await AsyncStorage.setItem(
+              targetLocalCleanupKey,
+              JSON.stringify({ ...clearMarker, serverPending: false })
+            ).catch(() => undefined);
+          } else {
+            await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+          }
+        }
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(false);
+          setServerSyncWarning(
+            'Đã hủy lệnh xóa cũ chưa có phiên bản gốc; vui lòng kiểm tra lịch sử hiện tại và nhấn xóa lại nếu cần.'
+          );
+        }
+        return true;
+      }
+
       try {
         const clearRes = await api.clearAIChatHistory(targetProjectId, {
           clearId,
@@ -536,6 +562,7 @@ export default function AIChatPanel({
           lastLocalWriteAckRef.current.set(targetScopeKey, {
             revision: confirmedRev,
             messageIds: [],
+            opId: targetOpId,
           });
           await AsyncStorage.setItem(targetServerRevKey, String(confirmedRev)).catch(() => undefined);
         }
@@ -1358,23 +1385,18 @@ export default function AIChatPanel({
       const createdAt = Date.now();
       const clearId = `clear-${clearOpId}-${Math.random().toString(36).slice(2, 8)}`;
       const needsServerDelete = Boolean(capturedProjectId && capturedUserId);
-      const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
-      const intendedClearBaseRev =
-        lastLocalAck && lastLocalAck.revision > capturedBaseRevision
-          ? lastLocalAck.revision
-          : capturedBaseRevision;
-      const clearRecord: ClearIntentMarker = {
+      const initialClearRecord: ClearIntentMarker = {
         clearId,
         opId: clearOpId,
         createdAt,
         localPending: true,
         serverPending: needsServerDelete,
-        baseRevision: intendedClearBaseRev,
+        baseRevision: capturedBaseRevision,
       };
 
       // Dùng clearRecord duy nhất làm điểm commit bền vững: nếu ghi thất bại thì dừng hẳn trước khi dọn dẹp
       try {
-        await AsyncStorage.setItem(capturedLocalCleanup, JSON.stringify(clearRecord));
+        await AsyncStorage.setItem(capturedLocalCleanup, JSON.stringify(initialClearRecord));
       } catch {
         const msg = 'Không thể lưu trạng thái xóa lịch sử trò chuyện. Vui lòng thử lại.';
         if (Platform.OS === 'web') {
@@ -1396,7 +1418,7 @@ export default function AIChatPanel({
           scopeKey: capturedScope,
           messages: resetList,
           loaded: true,
-          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : intendedClearBaseRev,
+          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : capturedBaseRevision,
         }));
       }
 
@@ -1408,14 +1430,32 @@ export default function AIChatPanel({
           return;
         }
 
+        // Chốt baseRevision khi tác vụ xóa bắt đầu chạy trong hàng đợi:
+        // chỉ nâng theo xác nhận từ thao tác ghi cục bộ liền trước (opId < clearOpId), không dùng revision từ GET.
+        const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
+        const resolvedClearBaseRev =
+          lastLocalAck &&
+          lastLocalAck.opId < clearOpId &&
+          lastLocalAck.revision > capturedBaseRevision
+            ? lastLocalAck.revision
+            : capturedBaseRevision;
+        const resolvedClearRecord: ClearIntentMarker = {
+          ...initialClearRecord,
+          baseRevision: resolvedClearBaseRev,
+        };
+
         if (needsServerDelete) {
+          await AsyncStorage.setItem(
+            capturedLocalCleanup,
+            JSON.stringify(resolvedClearRecord)
+          ).catch(() => undefined);
           await AsyncStorage.setItem(
             capturedPendingDelete,
             JSON.stringify({
               opId: clearOpId,
-              createdAt: clearRecord.createdAt,
+              createdAt: resolvedClearRecord.createdAt,
               clearId,
-              baseRevision: intendedClearBaseRev,
+              baseRevision: resolvedClearBaseRev,
             } satisfies PendingDeleteMarker)
           ).catch(() => undefined);
         }
@@ -1435,7 +1475,7 @@ export default function AIChatPanel({
           if (localCleared) {
             await AsyncStorage.setItem(
               capturedLocalCleanup,
-              JSON.stringify({ ...clearRecord, localPending: false, serverPending: true })
+              JSON.stringify({ ...resolvedClearRecord, localPending: false, serverPending: true })
             ).catch(() => undefined);
           }
           await executeServerDeleteInQueue(
