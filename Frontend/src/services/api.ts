@@ -373,6 +373,8 @@ class ApiService {
       updatedAt?: number | null;
       revision?: number;
       deletedAt?: number | null;
+      lastWriteId?: string | null;
+      lastClearId?: string | null;
     };
     message?: string;
   }> {
@@ -385,7 +387,7 @@ class ApiService {
   async saveAIChatHistory(
     projectId: string,
     messages: any[],
-    options?: { expectedRevision?: number }
+    options?: { expectedRevision?: number; writeId?: string }
   ): Promise<{
     success: boolean;
     data: {
@@ -394,12 +396,16 @@ class ApiService {
       count: number;
       updatedAt?: number;
       revision?: number;
+      replayed?: boolean;
     };
     message?: string;
   }> {
     const body: Record<string, unknown> = { messages };
     if (typeof options?.expectedRevision === 'number') {
       body.expectedRevision = options.expectedRevision;
+    }
+    if (typeof options?.writeId === 'string' && options.writeId.trim().length > 0) {
+      body.writeId = options.writeId.trim();
     }
     return this.request(
       `/ai/chat-history/${encodeURIComponent(projectId)}`,
@@ -410,19 +416,38 @@ class ApiService {
     );
   }
 
-  async clearAIChatHistory(projectId: string): Promise<{
+  async clearAIChatHistory(
+    projectId: string,
+    options?: { clearId?: string; expectedRevision?: number }
+  ): Promise<{
     success: boolean;
     data: {
       projectId: string;
       userId: string;
       revision?: number;
       deletedAt?: number;
+      replayed?: boolean;
     };
     message?: string;
   }> {
+    const params = new URLSearchParams();
+    const body: Record<string, unknown> = {};
+    if (typeof options?.clearId === 'string' && options.clearId.trim().length > 0) {
+      const cleanId = options.clearId.trim();
+      body.clearId = cleanId;
+      params.set('clearId', cleanId);
+    }
+    if (typeof options?.expectedRevision === 'number') {
+      body.expectedRevision = options.expectedRevision;
+      params.set('expectedRevision', String(options.expectedRevision));
+    }
+    const querySuffix = params.toString() ? `?${params.toString()}` : '';
     return this.request(
-      `/ai/chat-history/${encodeURIComponent(projectId)}`,
-      { method: 'DELETE' }
+      `/ai/chat-history/${encodeURIComponent(projectId)}${querySuffix}`,
+      {
+        method: 'DELETE',
+        ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
+      }
     );
   }
 
@@ -457,17 +482,33 @@ class ApiService {
     const newestMessage = recentCandidates.length > 0 ? recentCandidates[recentCandidates.length - 1] : null;
 
     // 2. Xác định projectContext thực sự sẽ gửi trước khi tính ngân sách cho hội thoại:
-    // nếu bản thân context + tin nhắn mới nhất vượt ngân sách, cắt bớt nodes trước
-    if (projectContextCopy?.nodes) {
+    // nếu bản thân context + tin nhắn mới nhất vượt ngân sách, cắt bớt nodes rồi rút gọn projectTitle
+    if (projectContextCopy) {
       const checkPayload = {
         messages: newestMessage ? [newestMessage] : [],
         projectContext: projectContextCopy,
       };
-      while (
-        projectContextCopy.nodes.length > 0 &&
+      if (projectContextCopy.nodes) {
+        while (
+          projectContextCopy.nodes.length > 0 &&
+          byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES
+        ) {
+          projectContextCopy.nodes.pop();
+        }
+      }
+      if (
+        typeof projectContextCopy.projectTitle === 'string' &&
+        projectContextCopy.projectTitle.length > 0 &&
         byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES
       ) {
-        projectContextCopy.nodes.pop();
+        let title = projectContextCopy.projectTitle;
+        while (title.length > 0 && byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES) {
+          title = title.slice(0, Math.floor(title.length / 2));
+          projectContextCopy.projectTitle = title;
+        }
+        if (title.length === 0) {
+          delete projectContextCopy.projectTitle;
+        }
       }
     }
 
@@ -501,6 +542,14 @@ class ApiService {
       ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
     };
 
+    const serializedBody = JSON.stringify(boundedPayload);
+    if (byteLength(serializedBody) > MAX_CHAT_REQUEST_BYTES) {
+      throw new ApiError(
+        'Tin nhắn vượt quá giới hạn dung lượng của máy chủ. Vui lòng rút gọn nội dung và thử lại.',
+        413
+      );
+    }
+
     return this.request<{
       success: boolean;
       data: { message: string; nodeData: any | null; nodeDataList?: any[] };
@@ -509,7 +558,7 @@ class ApiService {
       '/ai/chat',
       {
         method: 'POST',
-        body: JSON.stringify(boundedPayload),
+        body: serializedBody,
       },
       480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
     );

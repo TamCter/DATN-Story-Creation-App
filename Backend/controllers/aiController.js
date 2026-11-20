@@ -873,27 +873,44 @@ let chatSessionConstraintPromise = null;
 async function ensureChatSessionConstraint() {
   if (!chatSessionConstraintPromise) {
     chatSessionConstraintPromise = (async () => {
-      // 1. Gán sessionKey cho các bản ghi cũ nếu thiếu
+      // Kiểm tra trước xem constraint đã tồn tại chưa để tránh chạy dọn dẹp lặp lại giữa nhiều tiến trình
+      const existingConstraints = await runQuery(
+        `
+        SHOW CONSTRAINTS
+        YIELD name
+        WHERE name = 'ai_chat_session_key_unique'
+        RETURN name
+        `,
+        {},
+        'READ'
+      ).catch(() => []);
+      if (existingConstraints.length > 0) {
+        return;
+      }
+
+      // Khóa chéo tiến trình trên Neo4j trong quá trình chuẩn hóa và tạo constraint
       await runQuery(
         `
-        MATCH (chat:AIChatSession)
+        MERGE (lock:SchemaLock { name: 'ai_chat_session_constraint' })
+        SET lock.lockedAt = timestamp()
+        WITH lock
+        OPTIONAL MATCH (chat:AIChatSession)
         WHERE chat.sessionKey IS NULL AND chat.userId IS NOT NULL AND chat.projectId IS NOT NULL
         SET chat.sessionKey = chat.userId + '::' + chat.projectId
-        `
-      );
-      // 2. Loại bỏ bản sao trùng (userId, projectId) nếu có, giữ lại bản có revision/updatedAt cao nhất
-      await runQuery(
-        `
-        MATCH (chat:AIChatSession)
-        WHERE chat.sessionKey IS NOT NULL
-        WITH chat.sessionKey AS key, chat
-        ORDER BY coalesce(chat.revision, 0) DESC, coalesce(chat.updatedAt, 0) DESC
-        WITH key, collect(chat) AS sessions
+        WITH lock
+        OPTIONAL MATCH (dupChat:AIChatSession)
+        WHERE dupChat.sessionKey IS NOT NULL
+        WITH lock, dupChat.sessionKey AS key, dupChat
+        ORDER BY coalesce(dupChat.revision, 0) DESC,
+                 coalesce(dupChat.updatedAt, 0) DESC,
+                 coalesce(dupChat.createdAt, 0) ASC,
+                 elementId(dupChat) ASC
+        WITH lock, key, collect(dupChat) AS sessions
         WHERE size(sessions) > 1
         FOREACH (dup IN tail(sessions) | DETACH DELETE dup)
         `
       );
-      // 3. Tạo ràng buộc duy nhất theo sessionKey (tương thích cả Neo4j Community và Enterprise)
+      // Tạo ràng buộc duy nhất theo sessionKey (tương thích cả Neo4j Community và Enterprise)
       await runQuery(
         `
         CREATE CONSTRAINT ai_chat_session_key_unique IF NOT EXISTS
@@ -941,8 +958,13 @@ async function getChatHistory(req, res) {
       RETURN chat.messagesJson AS messagesJson,
              chat.updatedAt AS updatedAt,
              coalesce(chat.revision, 0) AS revision,
-             chat.deletedAt AS deletedAt
-      ORDER BY coalesce(chat.revision, 0) DESC, coalesce(chat.updatedAt, 0) DESC
+             chat.deletedAt AS deletedAt,
+             chat.lastWriteId AS lastWriteId,
+             chat.lastClearId AS lastClearId
+      ORDER BY coalesce(chat.revision, 0) DESC,
+               coalesce(chat.updatedAt, 0) DESC,
+               coalesce(chat.createdAt, 0) ASC,
+               elementId(chat) ASC
       LIMIT 1
       `,
       { sessionKey, userId, projectId },
@@ -970,6 +992,8 @@ async function getChatHistory(req, res) {
         updatedAt: records[0]?.updatedAt || null,
         revision: Number(records[0]?.revision) || 0,
         deletedAt: records[0]?.deletedAt || null,
+        lastWriteId: records[0]?.lastWriteId || null,
+        lastClearId: records[0]?.lastClearId || null,
       },
     });
   } catch (error) {
@@ -988,7 +1012,7 @@ async function getChatHistory(req, res) {
 async function saveChatHistory(req, res) {
   const { projectId } = req.params;
   const userId = req.user?.id;
-  const { messages = [], expectedRevision } = req.body || {};
+  const { messages = [], expectedRevision, writeId } = req.body || {};
 
   if (!userId || !projectId) {
     return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
@@ -1004,6 +1028,8 @@ async function saveChatHistory(req, res) {
   ) {
     return res.status(400).json({ success: false, message: 'Phiên bản expectedRevision không hợp lệ' });
   }
+  const normalizedWriteId =
+    typeof writeId === 'string' && writeId.trim().length > 0 ? writeId.trim().slice(0, 128) : null;
 
   const sessionKey = `${userId}::${projectId}`;
 
@@ -1036,27 +1062,37 @@ async function saveChatHistory(req, res) {
         SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
         WITH chat, coalesce(chat.revision, 0) AS currentRevision
         WITH chat, currentRevision,
-             ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS canWrite
-        FOREACH (_ IN CASE WHEN canWrite THEN [1] ELSE [] END |
+             ($writeId IS NOT NULL AND chat.lastWriteId = $writeId) AS isReplay,
+             ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS matchesExpected
+        WITH chat, currentRevision, isReplay, (isReplay OR matchesExpected) AS canWrite
+        FOREACH (_ IN CASE WHEN matchesExpected AND NOT isReplay THEN [1] ELSE [] END |
           SET chat.messagesJson = $messagesJson,
               chat.updatedAt = timestamp(),
               chat.deletedAt = null,
-              chat.revision = currentRevision + 1
+              chat.revision = currentRevision + 1,
+              chat.lastWriteId = $writeId
         )
         REMOVE chat._revisionLock
-        WITH chat, canWrite
+        WITH chat, canWrite, isReplay
         OPTIONAL MATCH (u:User { id: $userId })
-        FOREACH (_ IN CASE WHEN canWrite AND u IS NOT NULL THEN [1] ELSE [] END |
+        FOREACH (_ IN CASE WHEN canWrite AND NOT isReplay AND u IS NOT NULL THEN [1] ELSE [] END |
           MERGE (u)-[:HAS_AI_CHAT]->(chat)
         )
-        WITH chat, canWrite
+        WITH chat, canWrite, isReplay
         OPTIONAL MATCH (p:Project { id: $projectId })
-        FOREACH (_ IN CASE WHEN canWrite AND p IS NOT NULL THEN [1] ELSE [] END |
+        FOREACH (_ IN CASE WHEN canWrite AND NOT isReplay AND p IS NOT NULL THEN [1] ELSE [] END |
           MERGE (chat)-[:FOR_PROJECT]->(p)
         )
-        RETURN canWrite, chat.updatedAt AS updatedAt, chat.revision AS revision
+        RETURN canWrite, isReplay, chat.updatedAt AS updatedAt, chat.revision AS revision
         `,
-        { sessionKey, userId, projectId, messagesJson, expectedRevision: parsedExpectedRevision }
+        {
+          sessionKey,
+          userId,
+          projectId,
+          messagesJson,
+          expectedRevision: parsedExpectedRevision,
+          writeId: normalizedWriteId,
+        }
       );
 
     let saved;
@@ -1104,6 +1140,7 @@ async function saveChatHistory(req, res) {
         count: sanitized.length,
         updatedAt: saved[0]?.updatedAt || Date.now(),
         revision: Number(saved[0]?.revision) || 1,
+        replayed: Boolean(saved[0]?.isReplay),
       },
     });
   } catch (error) {
@@ -1126,6 +1163,22 @@ async function clearChatHistory(req, res) {
     return res.status(400).json({ success: false, message: 'Thiếu thông tin tác giả hoặc dự án' });
   }
 
+  const rawClearId = req.body?.clearId ?? req.query?.clearId;
+  const normalizedClearId =
+    typeof rawClearId === 'string' && rawClearId.trim().length > 0
+      ? rawClearId.trim().slice(0, 128)
+      : null;
+  const rawExpectedRevision = req.body?.expectedRevision ?? req.query?.expectedRevision;
+  const hasExpectedRevision =
+    rawExpectedRevision !== undefined && rawExpectedRevision !== null && rawExpectedRevision !== '';
+  const parsedExpectedRevision = hasExpectedRevision ? Number(rawExpectedRevision) : null;
+  if (
+    hasExpectedRevision &&
+    (!Number.isInteger(parsedExpectedRevision) || parsedExpectedRevision < 0)
+  ) {
+    return res.status(400).json({ success: false, message: 'Phiên bản expectedRevision không hợp lệ' });
+  }
+
   const sessionKey = `${userId}::${projectId}`;
 
   try {
@@ -1139,15 +1192,30 @@ async function clearChatHistory(req, res) {
                       chat.projectId = $projectId,
                       chat.createdAt = timestamp(),
                       chat.revision = 0
-        SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1,
-            chat.messagesJson = '[]',
-            chat.updatedAt = timestamp(),
-            chat.deletedAt = timestamp(),
-            chat.revision = coalesce(chat.revision, 0) + 1
+        SET chat._revisionLock = coalesce(chat._revisionLock, 0) + 1
+        WITH chat, coalesce(chat.revision, 0) AS currentRevision
+        WITH chat, currentRevision,
+             ($clearId IS NOT NULL AND chat.lastClearId = $clearId) AS isReplay,
+             ($expectedRevision IS NULL OR currentRevision = $expectedRevision) AS matchesExpected
+        WITH chat, currentRevision, isReplay, matchesExpected, (isReplay OR matchesExpected) AS canClear
+        FOREACH (_ IN CASE WHEN matchesExpected AND NOT isReplay THEN [1] ELSE [] END |
+          SET chat.messagesJson = '[]',
+              chat.updatedAt = timestamp(),
+              chat.deletedAt = timestamp(),
+              chat.revision = currentRevision + 1,
+              chat.lastClearId = $clearId,
+              chat.lastWriteId = null
+        )
         REMOVE chat._revisionLock
-        RETURN chat.revision AS revision, chat.deletedAt AS deletedAt
+        RETURN canClear, isReplay, chat.revision AS revision, chat.deletedAt AS deletedAt
         `,
-        { sessionKey, userId, projectId }
+        {
+          sessionKey,
+          userId,
+          projectId,
+          clearId: normalizedClearId,
+          expectedRevision: parsedExpectedRevision,
+        }
       );
 
     let cleared;
@@ -1161,6 +1229,19 @@ async function clearChatHistory(req, res) {
       }
     }
 
+    if (!cleared.length || !cleared[0].canClear) {
+      return res.status(409).json({
+        success: false,
+        code: 'REVISION_CONFLICT',
+        message: 'Lịch sử trò chuyện trên máy chủ đã có cập nhật mới hơn.',
+        data: {
+          projectId,
+          userId,
+          revision: Number(cleared[0]?.revision) || 0,
+        },
+      });
+    }
+
     return res.status(200).json({
       success: true,
       data: {
@@ -1168,6 +1249,7 @@ async function clearChatHistory(req, res) {
         userId,
         revision: Number(cleared[0]?.revision) || 1,
         deletedAt: cleared[0]?.deletedAt || Date.now(),
+        replayed: Boolean(cleared[0]?.isReplay),
       },
     });
   } catch (error) {

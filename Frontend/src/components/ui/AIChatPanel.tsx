@@ -34,6 +34,7 @@ interface StoredChatPayload {
   dirty?: boolean;
   serverTruncated?: boolean;
   replacedClearId?: string;
+  pendingWriteId?: string;
 }
 
 interface ClearIntentMarker {
@@ -42,11 +43,14 @@ interface ClearIntentMarker {
   createdAt: number;
   localPending: boolean;
   serverPending: boolean;
+  baseRevision?: number;
 }
 
 interface PendingDeleteMarker {
   opId: number;
   createdAt: number;
+  clearId?: string;
+  baseRevision?: number;
 }
 
 function parseClearIntentMarker(raw: string | null): ClearIntentMarker | null {
@@ -64,6 +68,10 @@ function parseClearIntentMarker(raw: string | null): ClearIntentMarker | null {
         createdAt,
         localPending: Boolean(parsed.localPending),
         serverPending: Boolean(parsed.serverPending),
+        baseRevision:
+          typeof parsed.baseRevision === 'number' && Number.isInteger(parsed.baseRevision) && parsed.baseRevision >= 0
+            ? parsed.baseRevision
+            : undefined,
       };
     }
   } catch {
@@ -87,6 +95,11 @@ function parsePendingDeleteMarker(raw: string | null): PendingDeleteMarker | nul
       return {
         opId: parsed.opId,
         createdAt: Number(parsed.createdAt) || 0,
+        clearId: typeof parsed.clearId === 'string' && parsed.clearId ? parsed.clearId : undefined,
+        baseRevision:
+          typeof parsed.baseRevision === 'number' && Number.isInteger(parsed.baseRevision) && parsed.baseRevision >= 0
+            ? parsed.baseRevision
+            : undefined,
       };
     }
   } catch {
@@ -157,6 +170,10 @@ function parseStoredChatPayload(raw: string): StoredChatPayload | null {
         serverTruncated: Boolean(parsed.serverTruncated),
         replacedClearId:
           typeof parsed.replacedClearId === 'string' ? parsed.replacedClearId : undefined,
+        pendingWriteId:
+          typeof parsed.pendingWriteId === 'string' && parsed.pendingWriteId
+            ? parsed.pendingWriteId
+            : undefined,
       };
     }
   } catch {
@@ -292,12 +309,23 @@ export default function AIChatPanel({
       targetProjectId: string | undefined,
       targetUserId: string | undefined,
       nextMessages: AIChatMessage[],
-      turnRevision: { current: number }
+      turnRevision: { current: number },
+      options?: { expectedLocalScopeRevision?: number; writeId?: string }
     ) => {
       // Tạo opId bền vững qua các lần khởi động lại trước khi xếp hàng
       const saveOpId = nextOpId();
+      const writeId =
+        options?.writeId || `w-${saveOpId}-${Math.random().toString(36).slice(2, 8)}`;
 
       return enqueueScopedWrite(targetScopeKey, async () => {
+        // Nếu là thao tác phục hồi snapshot cũ, bỏ qua nếu cuộc hội thoại đã có lượt mới làm đổi revision cục bộ
+        if (
+          options?.expectedLocalScopeRevision !== undefined &&
+          getRevision(targetScopeKey) !== options.expectedLocalScopeRevision
+        ) {
+          return;
+        }
+
         // Kiểm tra xem có lệnh xóa nào mới hơn thao tác lưu này không (không xóa marker trước khi ghi snapshot thay thế)
         let supersededClearMarker: ClearIntentMarker | null = null;
         try {
@@ -328,18 +356,20 @@ export default function AIChatPanel({
           }
         }
 
+        const isServerBacked = Boolean(targetProjectId && targetUserId);
         const localPayload: StoredChatPayload = {
           messages: nextMessages,
           updatedAt: Date.now(),
           serverRevision: baseRevisionForPut,
-          dirty: Boolean(targetProjectId && targetUserId),
+          dirty: isServerBacked,
           serverTruncated: false,
+          ...(isServerBacked ? { pendingWriteId: writeId } : {}),
           ...(supersededClearMarker ? { replacedClearId: supersededClearMarker.clearId } : {}),
         };
 
         let localWriteSucceeded = false;
         try {
-          // Ghi snapshot thay thế gắn với clearId TRƯỚC khi đánh dấu dọn dẹp cục bộ đã xong
+          // Ghi snapshot thay thế gắn với clearId và pendingWriteId TRƯỚC khi đánh dấu dọn dẹp cục bộ đã xong
           await AsyncStorage.setItem(targetScopeKey, JSON.stringify(localPayload));
           localWriteSucceeded = true;
         } catch (err) {
@@ -366,7 +396,7 @@ export default function AIChatPanel({
           }
         }
 
-        if (!targetProjectId || !targetUserId) {
+        if (!isServerBacked || !targetProjectId || !targetUserId) {
           return;
         }
         // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động
@@ -385,6 +415,7 @@ export default function AIChatPanel({
         try {
           const saveRes = await api.saveAIChatHistory(targetProjectId, boundedMessages, {
             expectedRevision: baseRevisionForPut,
+            writeId,
           });
           const confirmedRevision = Number(saveRes.data?.revision) || baseRevisionForPut + 1;
           turnRevision.current = confirmedRevision;
@@ -435,7 +466,7 @@ export default function AIChatPanel({
             }
           }
         } catch (err) {
-          // Xung đột phiên bản (409) hoặc lỗi mạng: giữ bản đầy đủ ở cục bộ (dirty: true) để đối chiếu
+          // Xung đột phiên bản (409) hoặc lỗi mạng: giữ bản đầy đủ ở cục bộ (dirty: true, pendingWriteId) để đối chiếu/replay
           if (activeScopeRef.current === targetScopeKey) {
             if (err instanceof ApiError && err.status === 409) {
               setServerSyncWarning(
@@ -450,7 +481,7 @@ export default function AIChatPanel({
         }
       });
     },
-    [enqueueScopedWrite, nextOpId]
+    [enqueueScopedWrite, getRevision, nextOpId]
   );
 
   // Thực thi DELETE bên trong một tác vụ đã được xếp hàng theo scope
@@ -492,9 +523,14 @@ export default function AIChatPanel({
 
       const targetOpId =
         expectedClearOpId ?? clearMarker?.opId ?? pendingDelMarker?.opId ?? 0;
+      const clearId = clearMarker?.clearId ?? pendingDelMarker?.clearId;
+      const expectedRevision = clearMarker?.baseRevision ?? pendingDelMarker?.baseRevision;
 
       try {
-        const clearRes = await api.clearAIChatHistory(targetProjectId);
+        const clearRes = await api.clearAIChatHistory(targetProjectId, {
+          clearId,
+          expectedRevision,
+        });
         const confirmedRev = Number(clearRes.data?.revision) || 0;
         if (confirmedRev > 0) {
           lastLocalWriteAckRef.current.set(targetScopeKey, {
@@ -537,7 +573,32 @@ export default function AIChatPanel({
           setServerSyncWarning(null);
         }
         return true;
-      } catch {
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          // Máy chủ đã có revision mới hơn -> không ghi đè, gỡ pending delete cũ và báo xung đột
+          const latestPendingRaw = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+          const latestPending = parsePendingDeleteMarker(latestPendingRaw);
+          if (latestPending && latestPending.opId <= targetOpId) {
+            await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+          }
+          const latestClearRaw = await AsyncStorage.getItem(targetLocalCleanupKey).catch(() => null);
+          const latestClear = parseClearIntentMarker(latestClearRaw);
+          if (latestClear && latestClear.opId <= targetOpId) {
+            if (latestClear.localPending) {
+              await AsyncStorage.setItem(
+                targetLocalCleanupKey,
+                JSON.stringify({ ...latestClear, serverPending: false })
+              ).catch(() => undefined);
+            } else {
+              await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+            }
+          }
+          if (activeScopeRef.current === targetScopeKey) {
+            setPendingDeleteFailed(false);
+            setServerSyncWarning('Lịch sử trên máy chủ đã có cập nhật mới hơn lệnh xóa trước đó.');
+          }
+          return true;
+        }
         if (activeScopeRef.current === targetScopeKey) {
           setPendingDeleteFailed(true);
         }
@@ -637,22 +698,20 @@ export default function AIChatPanel({
           lastOpIdRef.current = Math.max(lastOpIdRef.current, clearMarker.opId);
         }
         if (clearMarker?.localPending) {
-          const existingRaw = await AsyncStorage.getItem(targetScope).catch(() => null);
-          const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
-          if (existingSnap && existingSnap.replacedClearId === clearMarker.clearId) {
-            // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> chỉ hoàn tất cờ localPending
-            if (clearMarker.serverPending) {
-              clearMarker = { ...clearMarker, localPending: false };
-              await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
-            } else {
-              await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
-              clearMarker = null;
-            }
-          } else {
+          let existingRaw: string | null = null;
+          let existingReadFailed = false;
+          try {
+            existingRaw = await AsyncStorage.getItem(targetScope);
+          } catch {
+            // Phân biệt lỗi đọc AsyncStorage với trường hợp key không tồn tại: giữ cleanup pending khi đọc thất bại
+            existingReadFailed = true;
             localCleanupPending = true;
-            try {
-              await AsyncStorage.removeItem(targetScope);
-              localCleanupPending = false;
+          }
+
+          if (!existingReadFailed) {
+            const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
+            if (existingSnap && existingSnap.replacedClearId === clearMarker.clearId) {
+              // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> chỉ hoàn tất cờ localPending
               if (clearMarker.serverPending) {
                 clearMarker = { ...clearMarker, localPending: false };
                 await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
@@ -660,8 +719,21 @@ export default function AIChatPanel({
                 await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
                 clearMarker = null;
               }
-            } catch {
-              // Giữ localCleanupPending = true để không khôi phục bản đã đánh dấu xóa
+            } else {
+              localCleanupPending = true;
+              try {
+                await AsyncStorage.removeItem(targetScope);
+                localCleanupPending = false;
+                if (clearMarker.serverPending) {
+                  clearMarker = { ...clearMarker, localPending: false };
+                  await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
+                } else {
+                  await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
+                  clearMarker = null;
+                }
+              } catch {
+                // Giữ localCleanupPending = true để không khôi phục bản đã đánh dấu xóa
+              }
             }
           }
         }
@@ -683,12 +755,11 @@ export default function AIChatPanel({
         }
       }
 
-      // Không nâng base revision của bản cục bộ đang dirty bằng lastObservedServerRev;
-      // bản dirty phải dùng chính serverRevision của nó để kiểm tra xung đột và retry PUT.
+      // Luôn dùng serverRevision đi kèm chính snapshot hiện có (cả bản sạch lẫn bản dirty);
+      // chỉ fallback sang lastObservedServerRev khi không có snapshot cục bộ (lịch sử trống đã xác nhận).
       const isDirtyLocal = Boolean(localPayload?.dirty);
-      const snapshotBaseRev = isDirtyLocal
-        ? localPayload?.serverRevision || 0
-        : Math.max(localPayload?.serverRevision || 0, lastObservedServerRev);
+      const snapshotBaseRev =
+        localPayload !== null ? localPayload.serverRevision || 0 : lastObservedServerRev;
       const hasLocalUserMessages = Boolean(
         localPayload?.messages.some((m) => m.role === 'user')
       );
@@ -702,17 +773,23 @@ export default function AIChatPanel({
         const hasPendingDelete = Boolean(pendingDelMarker) || Boolean(clearMarker?.serverPending);
         if (hasPendingDelete) {
           if (hasLocalUserMessages && localPayload) {
-            // Người dùng đã gửi tin nhắn mới sau khi xóa thất bại -> giữ tin mới và đồng bộ thay thế lên server
-            void persistMessagesForScope(
-              targetScope,
-              targetPendingDelete,
-              targetLocalCleanup,
-              targetServerRev,
-              targetProjectId,
-              targetUserId,
-              localPayload.messages,
-              { current: snapshotBaseRev }
-            );
+            // Chỉ xếp hàng lưu phục hồi khi revision cục bộ chưa thay đổi bởi lượt mới
+            if (getRevision(targetScope) === startRevision) {
+              void persistMessagesForScope(
+                targetScope,
+                targetPendingDelete,
+                targetLocalCleanup,
+                targetServerRev,
+                targetProjectId,
+                targetUserId,
+                localPayload.messages,
+                { current: snapshotBaseRev },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
+              );
+            }
           } else {
             const clearOpId = clearMarker?.opId ?? pendingDelMarker?.opId ?? 0;
             const cleared = await retryServerDelete(
@@ -772,18 +849,51 @@ export default function AIChatPanel({
           const remoteUpdatedAt = Number(res.data?.updatedAt) || 0;
           const remoteRevision = Number(res.data?.revision) || 0;
           const remoteDeletedAt = res.data?.deletedAt || null;
+          const remoteLastWriteId = res.data?.lastWriteId || null;
           const localServerRevision = snapshotBaseRev;
           const hasUnackedLocalChanges = isDirtyLocal;
           const localHasFullOfTruncatedServer = Boolean(localPayload?.serverTruncated);
+          const pendingWriteAlreadyAcked = Boolean(
+            hasUnackedLocalChanges &&
+              localPayload?.pendingWriteId &&
+              remoteLastWriteId &&
+              remoteLastWriteId === localPayload.pendingWriteId
+          );
 
           if (remoteMsgs.length > 0) {
-            if (!hasUnackedLocalChanges) {
+            if (!hasUnackedLocalChanges || pendingWriteAlreadyAcked) {
               await enqueueScopedWrite(targetScope, async () => {
                 if (!isStillCurrent()) return;
                 if (remoteRevision > 0) {
                   await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
                 }
                 if (!isStillCurrent()) return;
+
+                if (pendingWriteAlreadyAcked && localPayload) {
+                  // Server đã xác nhận chính thao tác ghi pendingWriteId này -> khôi phục xác nhận và nâng base revision
+                  await AsyncStorage.setItem(
+                    targetScope,
+                    JSON.stringify({
+                      messages: localPayload.messages,
+                      updatedAt: remoteUpdatedAt || localPayload.updatedAt,
+                      serverRevision: remoteRevision,
+                      dirty: false,
+                      serverTruncated: localPayload.messages.length > remoteMsgs.length,
+                      ...(localPayload.replacedClearId
+                        ? { replacedClearId: localPayload.replacedClearId }
+                        : {}),
+                    } satisfies StoredChatPayload)
+                  ).catch(() => undefined);
+                  if (!isStillCurrent()) return;
+                  setChatState({
+                    scopeKey: targetScope,
+                    messages: localPayload.messages,
+                    loaded: true,
+                    baseRevision: remoteRevision,
+                  });
+                  setServerSyncWarning(null);
+                  return;
+                }
 
                 // Nếu bản server ở cùng revision đã xác nhận và đang là bản rút gọn, giữ nguyên bản đầy đủ cục bộ
                 if (localHasFullOfTruncatedServer && remoteRevision === localServerRevision) {
@@ -836,10 +946,14 @@ export default function AIChatPanel({
                 targetProjectId,
                 targetUserId,
                 localPayload.messages,
-                { current: localServerRevision }
+                { current: localServerRevision },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
               );
             } else {
-              // Xung đột: cả máy chủ và cục bộ đều có thay đổi -> giữ nguyên tin chưa đồng bộ ở cục bộ và cảnh báo
+              // Xung đột từ một thao tác ghi khác trên máy chủ -> giữ nguyên tin chưa đồng bộ ở cục bộ và cảnh báo
               if (remoteRevision > 0) {
                 await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
               }
@@ -890,7 +1004,11 @@ export default function AIChatPanel({
                   targetProjectId,
                   targetUserId,
                   localPayload.messages,
-                  { current: localServerRevision }
+                  { current: localServerRevision },
+                  {
+                    expectedLocalScopeRevision: startRevision,
+                    writeId: localPayload.pendingWriteId,
+                  }
                 );
               } else {
                 if (remoteRevision > 0) {
@@ -921,7 +1039,11 @@ export default function AIChatPanel({
                 targetProjectId,
                 targetUserId,
                 localPayload.messages,
-                { current: 0 }
+                { current: 0 },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
               );
             } else {
               // Máy chủ chưa có lịch sử và cục bộ trống -> đánh dấu đã tải xong với revision 0
@@ -1228,18 +1350,26 @@ export default function AIChatPanel({
     const capturedServerRev = serverRevKey;
     const capturedProjectId = projectId;
     const capturedUserId = user?.id;
+    const capturedBaseRevision =
+      chatState.scopeKey === capturedScope ? chatState.baseRevision : 0;
 
     const doClear = async () => {
       const clearOpId = nextOpId();
       const createdAt = Date.now();
       const clearId = `clear-${clearOpId}-${Math.random().toString(36).slice(2, 8)}`;
       const needsServerDelete = Boolean(capturedProjectId && capturedUserId);
+      const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
+      const intendedClearBaseRev =
+        lastLocalAck && lastLocalAck.revision > capturedBaseRevision
+          ? lastLocalAck.revision
+          : capturedBaseRevision;
       const clearRecord: ClearIntentMarker = {
         clearId,
         opId: clearOpId,
         createdAt,
         localPending: true,
         serverPending: needsServerDelete,
+        baseRevision: intendedClearBaseRev,
       };
 
       // Dùng clearRecord duy nhất làm điểm commit bền vững: nếu ghi thất bại thì dừng hẳn trước khi dọn dẹp
@@ -1266,7 +1396,7 @@ export default function AIChatPanel({
           scopeKey: capturedScope,
           messages: resetList,
           loaded: true,
-          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : 0,
+          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : intendedClearBaseRev,
         }));
       }
 
@@ -1281,7 +1411,12 @@ export default function AIChatPanel({
         if (needsServerDelete) {
           await AsyncStorage.setItem(
             capturedPendingDelete,
-            JSON.stringify({ opId: clearOpId, createdAt: clearRecord.createdAt } satisfies PendingDeleteMarker)
+            JSON.stringify({
+              opId: clearOpId,
+              createdAt: clearRecord.createdAt,
+              clearId,
+              baseRevision: intendedClearBaseRev,
+            } satisfies PendingDeleteMarker)
           ).catch(() => undefined);
         }
 
