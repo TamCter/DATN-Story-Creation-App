@@ -3,8 +3,11 @@ const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const {
   chatWithAI,
+  clearChatHistory,
   generateChapterAndEvents,
   generateChapterStory,
+  getChatHistory,
+  saveChatHistory,
 } = require('../controllers/aiController');
 const { verifyToken } = require('../middlewares/authMiddleware');
 
@@ -35,6 +38,9 @@ const aiChatAggregateLimiter = rateLimit({
 });
 
 router.use(verifyToken);
+router.get('/chat-history/:projectId', getChatHistory);
+router.put('/chat-history/:projectId', saveChatHistory);
+router.delete('/chat-history/:projectId', clearChatHistory);
 router.post('/chat', aiChatLimiter, aiChatAggregateLimiter, chatWithAI);
 router.post('/generate-chapter-events', aiChatLimiter, aiChatAggregateLimiter, generateChapterAndEvents);
 router.post('/generate-chapter-story', aiChatLimiter, aiChatAggregateLimiter, generateChapterStory);

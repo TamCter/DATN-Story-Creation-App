@@ -364,14 +364,192 @@ class ApiService {
   }
 
   // AI APIs
+  async getAIChatHistory(projectId: string): Promise<{
+    success: boolean;
+    data: {
+      projectId: string;
+      userId: string;
+      messages: any[];
+      updatedAt?: number | null;
+      revision?: number;
+      deletedAt?: number | null;
+      lastWriteId?: string | null;
+      lastClearId?: string | null;
+    };
+    message?: string;
+  }> {
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}`,
+      { method: 'GET' }
+    );
+  }
+
+  async saveAIChatHistory(
+    projectId: string,
+    messages: any[],
+    options?: { expectedRevision?: number; writeId?: string }
+  ): Promise<{
+    success: boolean;
+    data: {
+      projectId: string;
+      userId: string;
+      count: number;
+      updatedAt?: number;
+      revision?: number;
+      replayed?: boolean;
+    };
+    message?: string;
+  }> {
+    const body: Record<string, unknown> = { messages };
+    if (typeof options?.expectedRevision === 'number') {
+      body.expectedRevision = options.expectedRevision;
+    }
+    if (typeof options?.writeId === 'string' && options.writeId.trim().length > 0) {
+      body.writeId = options.writeId.trim();
+    }
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      }
+    );
+  }
+
+  async clearAIChatHistory(
+    projectId: string,
+    options?: { clearId?: string; expectedRevision?: number }
+  ): Promise<{
+    success: boolean;
+    data: {
+      projectId: string;
+      userId: string;
+      revision?: number;
+      deletedAt?: number;
+      replayed?: boolean;
+    };
+    message?: string;
+  }> {
+    const params = new URLSearchParams();
+    const body: Record<string, unknown> = {};
+    if (typeof options?.clearId === 'string' && options.clearId.trim().length > 0) {
+      const cleanId = options.clearId.trim();
+      body.clearId = cleanId;
+      params.set('clearId', cleanId);
+    }
+    if (typeof options?.expectedRevision === 'number') {
+      body.expectedRevision = options.expectedRevision;
+      params.set('expectedRevision', String(options.expectedRevision));
+    }
+    const querySuffix = params.toString() ? `?${params.toString()}` : '';
+    return this.request(
+      `/ai/chat-history/${encodeURIComponent(projectId)}${querySuffix}`,
+      {
+        method: 'DELETE',
+        ...(Object.keys(body).length > 0 ? { body: JSON.stringify(body) } : {}),
+      }
+    );
+  }
+
   async chatWithAI(payload: {
     messages: { role: 'user' | 'assistant'; content: string }[];
-    projectContext?: { nodes?: any[]; projectTitle?: string };
+    projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
   }): Promise<{
     success: boolean;
     data: { message: string; nodeData: any | null; nodeDataList?: any[] };
     message?: string;
   }> {
+    // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
+    const MAX_CHAT_REQUEST_BYTES = 85_000;
+    // Khớp giới hạn MAX_CHAT_MESSAGES = 40 của endpoint /ai/chat (riêng lịch sử lưu trữ vẫn giữ 100 tin nhắn)
+    const MAX_SERVER_CHAT_WINDOW = 40;
+    const byteLength = (str: string): number =>
+      typeof TextEncoder !== 'undefined'
+        ? new TextEncoder().encode(str).length
+        : encodeURIComponent(str).replace(/%[A-F\d]{2}/g, 'U').length;
+
+    const projectContextCopy = payload.projectContext
+      ? {
+          ...payload.projectContext,
+          nodes: Array.isArray(payload.projectContext.nodes)
+            ? [...payload.projectContext.nodes]
+            : undefined,
+        }
+      : undefined;
+
+    // 1. Chỉ xét tối đa 40 tin nhắn gần nhất mà /ai/chat sử dụng
+    const recentCandidates = payload.messages.slice(-MAX_SERVER_CHAT_WINDOW);
+    const newestMessage = recentCandidates.length > 0 ? recentCandidates[recentCandidates.length - 1] : null;
+
+    // 2. Xác định projectContext thực sự sẽ gửi trước khi tính ngân sách cho hội thoại:
+    // nếu bản thân context + tin nhắn mới nhất vượt ngân sách, cắt bớt nodes rồi rút gọn projectTitle
+    if (projectContextCopy) {
+      const checkPayload = {
+        messages: newestMessage ? [newestMessage] : [],
+        projectContext: projectContextCopy,
+      };
+      if (projectContextCopy.nodes) {
+        while (
+          projectContextCopy.nodes.length > 0 &&
+          byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES
+        ) {
+          projectContextCopy.nodes.pop();
+        }
+      }
+      if (
+        typeof projectContextCopy.projectTitle === 'string' &&
+        projectContextCopy.projectTitle.length > 0 &&
+        byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES
+      ) {
+        let title = projectContextCopy.projectTitle;
+        while (title.length > 0 && byteLength(JSON.stringify(checkPayload)) > MAX_CHAT_REQUEST_BYTES) {
+          title = title.slice(0, Math.floor(title.length / 2));
+          projectContextCopy.projectTitle = title;
+        }
+        if (title.length === 0) {
+          delete projectContextCopy.projectTitle;
+        }
+      }
+    }
+
+    // 3. Đo overhead của context đã chốt và đo mỗi tin nhắn ứng viên đúng 1 lần để chọn hậu tố hội thoại dài nhất vừa ngân sách
+    const baseOverheadBytes = byteLength(
+      JSON.stringify({
+        messages: [],
+        ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
+      })
+    );
+
+    const selectedReversed: { role: 'user' | 'assistant'; content: string }[] = [];
+    let runningBytes = baseOverheadBytes;
+    for (let i = recentCandidates.length - 1; i >= 0; i -= 1) {
+      const msg = recentCandidates[i];
+      const msgBytes = byteLength(JSON.stringify(msg)) + (selectedReversed.length > 0 ? 1 : 0);
+      if (selectedReversed.length === 0 || runningBytes + msgBytes <= MAX_CHAT_REQUEST_BYTES) {
+        selectedReversed.push(msg);
+        runningBytes += msgBytes;
+      } else {
+        break;
+      }
+    }
+    const boundedMessages = selectedReversed.reverse();
+
+    const boundedPayload: {
+      messages: { role: 'user' | 'assistant'; content: string }[];
+      projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
+    } = {
+      messages: boundedMessages,
+      ...(projectContextCopy ? { projectContext: projectContextCopy } : {}),
+    };
+
+    const serializedBody = JSON.stringify(boundedPayload);
+    if (byteLength(serializedBody) > MAX_CHAT_REQUEST_BYTES) {
+      throw new ApiError(
+        'Tin nhắn vượt quá giới hạn dung lượng của máy chủ. Vui lòng rút gọn nội dung và thử lại.',
+        413
+      );
+    }
+
     return this.request<{
       success: boolean;
       data: { message: string; nodeData: any | null; nodeDataList?: any[] };
@@ -380,7 +558,7 @@ class ApiService {
       '/ai/chat',
       {
         method: 'POST',
-        body: JSON.stringify(payload),
+        body: serializedBody,
       },
       480000 // Cho phép backend hoàn tất tối đa 3 lượt tạo node.
     );

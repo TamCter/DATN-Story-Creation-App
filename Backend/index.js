@@ -1,6 +1,7 @@
+const path = require('path');
 const express = require('express');
 const cors = require('cors');
-require('dotenv').config();
+require('dotenv').config({ path: path.resolve(__dirname, '.env') });
 
 const { testConnection, runQuery } = require('./config/neo4j');
 const errorHandler = require('./middlewares/errorHandler');

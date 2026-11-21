@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -13,10 +13,174 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import { AppFonts } from '@/constants/theme';
-import { api } from '@/services/api';
+import { useAuth } from '@/context/auth-context';
+import { api, ApiError } from '@/services/api';
 import { StoryNode } from '@/constants/story-data';
+
+const AI_CHAT_STORAGE_PREFIX = '@story_app_ai_chat_';
+const AI_CHAT_PENDING_DELETE_PREFIX = '@story_app_ai_chat_pending_delete_';
+const AI_CHAT_LOCAL_CLEANUP_PREFIX = '@story_app_ai_chat_local_cleanup_';
+const AI_CHAT_SERVER_REV_PREFIX = '@story_app_ai_chat_server_rev_';
+// Giữ payload JSON dưới giới hạn 100KB mặc định của express.json()
+const MAX_CHAT_SYNC_BYTES = 85_000;
+
+interface StoredChatPayload {
+  messages: AIChatMessage[];
+  updatedAt: number;
+  serverRevision?: number;
+  dirty?: boolean;
+  serverTruncated?: boolean;
+  replacedClearId?: string;
+  pendingWriteId?: string;
+}
+
+interface ClearIntentMarker {
+  clearId: string;
+  opId: number;
+  createdAt: number;
+  localPending: boolean;
+  serverPending: boolean;
+  baseRevision?: number;
+}
+
+interface PendingDeleteMarker {
+  opId: number;
+  createdAt: number;
+  clearId?: string;
+  baseRevision?: number;
+}
+
+function parseClearIntentMarker(raw: string | null): ClearIntentMarker | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && typeof parsed.opId === 'number') {
+      const createdAt = Number(parsed.createdAt) || 0;
+      return {
+        clearId:
+          typeof parsed.clearId === 'string' && parsed.clearId
+            ? parsed.clearId
+            : `legacy-${parsed.opId}-${createdAt}`,
+        opId: parsed.opId,
+        createdAt,
+        localPending: Boolean(parsed.localPending),
+        serverPending: Boolean(parsed.serverPending),
+        baseRevision:
+          typeof parsed.baseRevision === 'number' && Number.isInteger(parsed.baseRevision) && parsed.baseRevision >= 0
+            ? parsed.baseRevision
+            : undefined,
+      };
+    }
+  } catch {
+    // Tương thích ngược định dạng timestamp chuỗi cũ
+  }
+  const ts = Number(raw) || 0;
+  return {
+    clearId: `legacy-0-${ts}`,
+    opId: 0,
+    createdAt: ts,
+    localPending: true,
+    serverPending: false,
+  };
+}
+
+function parsePendingDeleteMarker(raw: string | null): PendingDeleteMarker | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    if (parsed && typeof parsed === 'object' && typeof parsed.opId === 'number') {
+      return {
+        opId: parsed.opId,
+        createdAt: Number(parsed.createdAt) || 0,
+        clearId: typeof parsed.clearId === 'string' && parsed.clearId ? parsed.clearId : undefined,
+        baseRevision:
+          typeof parsed.baseRevision === 'number' && Number.isInteger(parsed.baseRevision) && parsed.baseRevision >= 0
+            ? parsed.baseRevision
+            : undefined,
+      };
+    }
+  } catch {
+    // Tương thích ngược định dạng timestamp chuỗi cũ
+  }
+  return {
+    opId: 0,
+    createdAt: Number(raw) || 0,
+  };
+}
+
+function getUtf8ByteLength(value: string): number {
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(value).length;
+  }
+  return encodeURIComponent(value).replace(/%[A-F\d]{2}/g, 'U').length;
+}
+
+function fitMessagesToByteBudget(
+  messages: AIChatMessage[],
+  maxBytes: number = MAX_CHAT_SYNC_BYTES
+): { payload: AIChatMessage[]; trimmed: boolean } {
+  const fullBytes = getUtf8ByteLength(JSON.stringify({ messages }));
+  if (fullBytes <= maxBytes) {
+    return { payload: messages, trimmed: false };
+  }
+
+  // Giữ các tin nhắn mới nhất trong ngân sách byte
+  const kept: AIChatMessage[] = [];
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const candidate = [messages[i], ...kept];
+    if (getUtf8ByteLength(JSON.stringify({ messages: candidate })) <= maxBytes) {
+      kept.unshift(messages[i]);
+    } else {
+      break;
+    }
+  }
+  return { payload: kept, trimmed: true };
+}
+
+function parseStoredChatPayload(raw: string): StoredChatPayload | null {
+  try {
+    const parsed = JSON.parse(raw);
+    if (Array.isArray(parsed) && parsed.length > 0) {
+      const latestTs = parsed.reduce(
+        (max, m) => Math.max(max, Number(m?.timestamp) || 0),
+        0
+      );
+      return {
+        messages: parsed,
+        updatedAt: latestTs,
+        serverRevision: 0,
+        dirty: false,
+        serverTruncated: false,
+      };
+    }
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      Array.isArray(parsed.messages) &&
+      parsed.messages.length > 0
+    ) {
+      return {
+        messages: parsed.messages,
+        updatedAt: Number(parsed.updatedAt) || 0,
+        serverRevision: Number(parsed.serverRevision) || 0,
+        dirty: Boolean(parsed.dirty),
+        serverTruncated: Boolean(parsed.serverTruncated),
+        replacedClearId:
+          typeof parsed.replacedClearId === 'string' ? parsed.replacedClearId : undefined,
+        pendingWriteId:
+          typeof parsed.pendingWriteId === 'string' && parsed.pendingWriteId
+            ? parsed.pendingWriteId
+            : undefined,
+      };
+    }
+  } catch {
+    // Ignore parse error
+  }
+  return null;
+}
 
 export interface AIChatMessage {
   id: string;
@@ -33,6 +197,7 @@ interface AIChatPanelProps {
   onClose: () => void;
   onCreateNode: (nodeData: Partial<StoryNode>) => void;
   onCreateNodes: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
+  projectId?: string;
   projectTitle?: string;
   existingNodes?: StoryNode[];
 }
@@ -52,16 +217,945 @@ export default function AIChatPanel({
   onClose,
   onCreateNode,
   onCreateNodes,
+  projectId,
   projectTitle,
   existingNodes = [],
 }: AIChatPanelProps) {
-  const [messages, setMessages] = useState<AIChatMessage[]>([WELCOME_MSG]);
+  const { user } = useAuth();
+  const authorKey = user?.id || user?.email || 'guest';
+  const effectiveProjectKey = projectId || projectTitle || 'default';
+  const scopeSuffix = `${encodeURIComponent(authorKey)}_${encodeURIComponent(effectiveProjectKey)}`;
+  const storageKey = `${AI_CHAT_STORAGE_PREFIX}${scopeSuffix}`;
+  const pendingDeleteKey = `${AI_CHAT_PENDING_DELETE_PREFIX}${scopeSuffix}`;
+  const localCleanupKey = `${AI_CHAT_LOCAL_CLEANUP_PREFIX}${scopeSuffix}`;
+  const serverRevKey = `${AI_CHAT_SERVER_REV_PREFIX}${scopeSuffix}`;
+
+  const [chatState, setChatState] = useState<{
+    scopeKey: string;
+    messages: AIChatMessage[];
+    loaded: boolean;
+    baseRevision: number;
+  }>({
+    scopeKey: storageKey,
+    messages: [WELCOME_MSG],
+    loaded: false,
+    baseRevision: 0,
+  });
+  const [pendingDeleteFailed, setPendingDeleteFailed] = useState(false);
+  const [serverSyncWarning, setServerSyncWarning] = useState<string | null>(null);
+  const [clearingScopeKey, setClearingScopeKey] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const scrollRef = useRef<any>(null);
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
+
+  // Quản lý scope đang commit, phiên tài khoản, generation, revision, thứ tự thao tác bền vững và hàng đợi ghi tuần tự
+  const activeScopeRef = useRef(storageKey);
+  const activeUserIdRef = useRef<string | undefined>(user?.id);
+  const scopeGenerationRef = useRef(0);
+  const lastOpIdRef = useRef(Date.now() * 1000);
+  const lastLoadedScopeRef = useRef<string | null>(null);
+  const prevVisibleRef = useRef<boolean>(visible);
+  const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
+  const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const clearingScopesRef = useRef<Set<string>>(new Set());
+  // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET) kèm opId
+  const lastLocalWriteAckRef = useRef<
+    Map<string, { revision: number; messageIds: string[]; opId: number }>
+  >(new Map());
+
+  const nextOpId = useCallback(() => {
+    const candidate = Math.max(lastOpIdRef.current + 1, Date.now() * 1000);
+    lastOpIdRef.current = candidate;
+    return candidate;
+  }, []);
+
+  useLayoutEffect(() => {
+    activeScopeRef.current = storageKey;
+    activeUserIdRef.current = user?.id;
+  }, [storageKey, user?.id]);
+
+  const getRevision = useCallback((scope: string) => {
+    return scopeRevisionsRef.current.get(scope) || 0;
+  }, []);
+
+  const bumpRevision = useCallback((scope: string) => {
+    const next = (scopeRevisionsRef.current.get(scope) || 0) + 1;
+    scopeRevisionsRef.current.set(scope, next);
+    return next;
+  }, []);
+
+  const messages = chatState.scopeKey === storageKey ? chatState.messages : [WELCOME_MSG];
+  const isScopeLoaded = chatState.scopeKey === storageKey && chatState.loaded;
+  const isScopeClearing = clearingScopeKey === storageKey;
+
+  const enqueueScopedWrite = useCallback((scope: string, task: () => Promise<void>) => {
+    const previous = saveQueuesRef.current.get(scope) || Promise.resolve();
+    const next = previous.catch(() => undefined).then(task);
+    saveQueuesRef.current.set(scope, next);
+    void next.finally(() => {
+      if (saveQueuesRef.current.get(scope) === next) {
+        saveQueuesRef.current.delete(scope);
+      }
+    });
+    return next;
+  }, []);
+
+  const persistMessagesForScope = useCallback(
+    (
+      targetScopeKey: string,
+      targetPendingDeleteKey: string,
+      targetLocalCleanupKey: string,
+      targetServerRevKey: string,
+      targetProjectId: string | undefined,
+      targetUserId: string | undefined,
+      nextMessages: AIChatMessage[],
+      turnRevision: { current: number },
+      options?: { expectedLocalScopeRevision?: number; writeId?: string }
+    ) => {
+      // Tạo opId bền vững qua các lần khởi động lại trước khi xếp hàng
+      const saveOpId = nextOpId();
+      const writeId =
+        options?.writeId || `w-${saveOpId}-${Math.random().toString(36).slice(2, 8)}`;
+
+      return enqueueScopedWrite(targetScopeKey, async () => {
+        // Nếu là thao tác phục hồi snapshot cũ, bỏ qua nếu cuộc hội thoại đã có lượt mới làm đổi revision cục bộ
+        if (
+          options?.expectedLocalScopeRevision !== undefined &&
+          getRevision(targetScopeKey) !== options.expectedLocalScopeRevision
+        ) {
+          return;
+        }
+
+        // Kiểm tra xem có lệnh xóa nào mới hơn thao tác lưu này không (không xóa marker trước khi ghi snapshot thay thế)
+        let supersededClearMarker: ClearIntentMarker | null = null;
+        try {
+          const rawClearMarker = await AsyncStorage.getItem(targetLocalCleanupKey);
+          const clearMarker = parseClearIntentMarker(rawClearMarker);
+          if (clearMarker) {
+            if (clearMarker.opId > saveOpId) {
+              return;
+            }
+            if (saveOpId > clearMarker.opId) {
+              supersededClearMarker = clearMarker;
+            }
+          }
+        } catch {
+          // Ignore marker read error
+        }
+
+        // Nếu tiền nhiệm cục bộ (PUT trước hoặc DELETE vừa hoàn tất) đã được server xác nhận và snapshot này bao gồm tiền nhiệm đó,
+        // dùng revision đã xác nhận đó (tuyệt đối không dùng revision chỉ quan sát từ GET)
+        let baseRevisionForPut = turnRevision.current;
+        const lastLocalAck = lastLocalWriteAckRef.current.get(targetScopeKey);
+        if (lastLocalAck && lastLocalAck.revision > baseRevisionForPut) {
+          const nextIdSet = new Set(nextMessages.map((m) => m.id));
+          const includesPredecessor = lastLocalAck.messageIds.every((id) => nextIdSet.has(id));
+          if (includesPredecessor) {
+            baseRevisionForPut = lastLocalAck.revision;
+            turnRevision.current = lastLocalAck.revision;
+          }
+        }
+
+        const isServerBacked = Boolean(targetProjectId && targetUserId);
+        const localPayload: StoredChatPayload = {
+          messages: nextMessages,
+          updatedAt: Date.now(),
+          serverRevision: baseRevisionForPut,
+          dirty: isServerBacked,
+          serverTruncated: false,
+          ...(isServerBacked ? { pendingWriteId: writeId } : {}),
+          ...(supersededClearMarker ? { replacedClearId: supersededClearMarker.clearId } : {}),
+        };
+
+        let localWriteSucceeded = false;
+        try {
+          // Ghi snapshot thay thế gắn với clearId và pendingWriteId TRƯỚC khi đánh dấu dọn dẹp cục bộ đã xong
+          await AsyncStorage.setItem(targetScopeKey, JSON.stringify(localPayload));
+          localWriteSucceeded = true;
+        } catch (err) {
+          console.warn('[AIChatPanel] Không thể lưu lịch sử chat vào bộ nhớ cục bộ:', err);
+        }
+
+        // Chỉ cập nhật/gỡ targetLocalCleanupKey SAU KHI snapshot thay thế đã được ghi bền vững
+        if (localWriteSucceeded && supersededClearMarker && supersededClearMarker.localPending) {
+          try {
+            const latestRaw = await AsyncStorage.getItem(targetLocalCleanupKey);
+            const latestMarker = parseClearIntentMarker(latestRaw);
+            if (latestMarker && latestMarker.clearId === supersededClearMarker.clearId) {
+              if (latestMarker.serverPending) {
+                await AsyncStorage.setItem(
+                  targetLocalCleanupKey,
+                  JSON.stringify({ ...latestMarker, localPending: false })
+                ).catch(() => undefined);
+              } else {
+                await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+              }
+            }
+          } catch {
+            // Ignore marker update error
+          }
+        }
+
+        if (!isServerBacked || !targetProjectId || !targetUserId) {
+          return;
+        }
+        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động
+        if (activeUserIdRef.current !== targetUserId) {
+          return;
+        }
+
+        const { payload: boundedMessages, trimmed } = fitMessagesToByteBudget(nextMessages);
+        if (boundedMessages.length === 0 && nextMessages.length > 0) {
+          if (activeScopeRef.current === targetScopeKey) {
+            setServerSyncWarning('Lịch sử vượt quá giới hạn dung lượng máy chủ; bản đầy đủ vẫn được lưu cục bộ.');
+          }
+          return;
+        }
+
+        try {
+          const saveRes = await api.saveAIChatHistory(targetProjectId, boundedMessages, {
+            expectedRevision: baseRevisionForPut,
+            writeId,
+          });
+          const confirmedRevision = Number(saveRes.data?.revision) || baseRevisionForPut + 1;
+          turnRevision.current = confirmedRevision;
+          lastLocalWriteAckRef.current.set(targetScopeKey, {
+            revision: confirmedRevision,
+            messageIds: nextMessages.map((m) => m.id),
+            opId: saveOpId,
+          });
+          await AsyncStorage.setItem(targetServerRevKey, String(confirmedRevision)).catch(() => undefined);
+
+          // Chỉ gỡ pendingDeleteKey / clearMarker nếu lệnh xóa đó xảy ra TRƯỚC thao tác PUT này
+          const pendingDelRaw = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+          const pendingDelMarker = parsePendingDeleteMarker(pendingDelRaw);
+          if (pendingDelMarker && pendingDelMarker.opId < saveOpId) {
+            await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+          }
+          const clearRawAfterPut = await AsyncStorage.getItem(targetLocalCleanupKey).catch(() => null);
+          const clearMarkerAfterPut = parseClearIntentMarker(clearRawAfterPut);
+          if (clearMarkerAfterPut && clearMarkerAfterPut.opId < saveOpId) {
+            await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+          }
+
+          // Nếu không có lệnh xóa mới hơn diễn ra trong lúc PUT đang bay, cập nhật snapshot đã xác nhận
+          if (!clearMarkerAfterPut || clearMarkerAfterPut.opId < saveOpId) {
+            await AsyncStorage.setItem(
+              targetScopeKey,
+              JSON.stringify({
+                messages: nextMessages,
+                updatedAt: saveRes.data?.updatedAt || localPayload.updatedAt,
+                serverRevision: confirmedRevision,
+                dirty: false,
+                serverTruncated: trimmed,
+                ...(supersededClearMarker ? { replacedClearId: supersededClearMarker.clearId } : {}),
+              } satisfies StoredChatPayload)
+            ).catch(() => undefined);
+
+            if (activeScopeRef.current === targetScopeKey) {
+              setChatState((prev) =>
+                prev.scopeKey === targetScopeKey
+                  ? { ...prev, baseRevision: confirmedRevision }
+                  : prev
+              );
+              setPendingDeleteFailed(false);
+              setServerSyncWarning(
+                trimmed
+                  ? 'Bản lưu trên máy chủ đã rút gọn do giới hạn dung lượng; bản đầy đủ vẫn được giữ trên thiết bị này.'
+                  : null
+              );
+            }
+          }
+        } catch (err) {
+          // Xung đột phiên bản (409) hoặc lỗi mạng: giữ bản đầy đủ ở cục bộ (dirty: true, pendingWriteId) để đối chiếu/replay
+          if (activeScopeRef.current === targetScopeKey) {
+            if (err instanceof ApiError && err.status === 409) {
+              setServerSyncWarning(
+                'Xung đột phiên bản với máy chủ; đang giữ tin nhắn cục bộ để đối chiếu.'
+              );
+            } else {
+              setServerSyncWarning(
+                'Chưa đồng bộ được lịch sử mới nhất lên máy chủ; dữ liệu vẫn được lưu cục bộ.'
+              );
+            }
+          }
+        }
+      });
+    },
+    [enqueueScopedWrite, getRevision, nextOpId]
+  );
+
+  // Thực thi DELETE bên trong một tác vụ đã được xếp hàng theo scope
+  const executeServerDeleteInQueue = useCallback(
+    async (
+      targetProjectId: string | undefined,
+      targetUserId: string | undefined,
+      targetPendingDeleteKey: string,
+      targetLocalCleanupKey: string,
+      targetServerRevKey: string,
+      targetScopeKey: string,
+      expectedClearOpId?: number
+    ): Promise<boolean> => {
+      if (!targetProjectId || !targetUserId) {
+        await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(false);
+        }
+        return true;
+      }
+
+      const rawClear = await AsyncStorage.getItem(targetLocalCleanupKey).catch(() => null);
+      const clearMarker = parseClearIntentMarker(rawClear);
+      const rawPendingDel = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+      const pendingDelMarker = parsePendingDeleteMarker(rawPendingDel);
+
+      const hasPendingWork = Boolean(pendingDelMarker) || Boolean(clearMarker?.serverPending);
+      if (!hasPendingWork) {
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(false);
+        }
+        return true;
+      }
+
+      // Không gửi DELETE bằng thông tin xác thực của tài khoản khác
+      if (activeUserIdRef.current !== targetUserId) {
+        return false;
+      }
+
+      const targetOpId =
+        expectedClearOpId ?? clearMarker?.opId ?? pendingDelMarker?.opId ?? 0;
+      const clearId = clearMarker?.clearId ?? pendingDelMarker?.clearId;
+      const expectedRevision = clearMarker?.baseRevision ?? pendingDelMarker?.baseRevision;
+
+      // Chỉ tự động thử lại DELETE khi marker có baseRevision xác định;
+      // với marker cũ chỉ có timestamp (không có baseRevision), dừng tự động xóa để tải & hiển thị lịch sử hiện tại trước khi người dùng xác nhận xóa lại.
+      if (typeof expectedRevision !== 'number') {
+        if (pendingDelMarker && pendingDelMarker.opId <= targetOpId) {
+          await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+        }
+        if (clearMarker && clearMarker.opId <= targetOpId) {
+          if (clearMarker.localPending) {
+            await AsyncStorage.setItem(
+              targetLocalCleanupKey,
+              JSON.stringify({ ...clearMarker, serverPending: false })
+            ).catch(() => undefined);
+          } else {
+            await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+          }
+        }
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(false);
+          setServerSyncWarning(
+            'Đã hủy lệnh xóa cũ chưa có phiên bản gốc; vui lòng kiểm tra lịch sử hiện tại và nhấn xóa lại nếu cần.'
+          );
+        }
+        return true;
+      }
+
+      try {
+        const clearRes = await api.clearAIChatHistory(targetProjectId, {
+          clearId,
+          expectedRevision,
+        });
+        const confirmedRev = Number(clearRes.data?.revision) || 0;
+        if (confirmedRev > 0) {
+          lastLocalWriteAckRef.current.set(targetScopeKey, {
+            revision: confirmedRev,
+            messageIds: [],
+            opId: targetOpId,
+          });
+          await AsyncStorage.setItem(targetServerRevKey, String(confirmedRev)).catch(() => undefined);
+        }
+
+        // Chỉ gỡ pendingDeleteKey nếu không thuộc lệnh xóa mới hơn
+        const latestPendingRaw = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+        const latestPending = parsePendingDeleteMarker(latestPendingRaw);
+        if (latestPending && latestPending.opId <= targetOpId) {
+          await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+        }
+
+        // Xác nhận serverPending trong bản ghi kết hợp clearRecord mà không đụng tới lệnh xóa mới hơn
+        const latestClearRaw = await AsyncStorage.getItem(targetLocalCleanupKey).catch(() => null);
+        const latestClear = parseClearIntentMarker(latestClearRaw);
+        if (latestClear && latestClear.opId <= targetOpId) {
+          if (latestClear.localPending) {
+            await AsyncStorage.setItem(
+              targetLocalCleanupKey,
+              JSON.stringify({ ...latestClear, serverPending: false })
+            ).catch(() => undefined);
+          } else {
+            await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+          }
+        }
+
+        if (activeScopeRef.current === targetScopeKey) {
+          if (confirmedRev > 0) {
+            setChatState((prev) =>
+              prev.scopeKey === targetScopeKey
+                ? { ...prev, baseRevision: confirmedRev }
+                : prev
+            );
+          }
+          setPendingDeleteFailed(false);
+          setServerSyncWarning(null);
+        }
+        return true;
+      } catch (err) {
+        if (err instanceof ApiError && err.status === 409) {
+          // Máy chủ đã có revision mới hơn -> không ghi đè, gỡ pending delete cũ và báo xung đột
+          const latestPendingRaw = await AsyncStorage.getItem(targetPendingDeleteKey).catch(() => null);
+          const latestPending = parsePendingDeleteMarker(latestPendingRaw);
+          if (latestPending && latestPending.opId <= targetOpId) {
+            await AsyncStorage.removeItem(targetPendingDeleteKey).catch(() => undefined);
+          }
+          const latestClearRaw = await AsyncStorage.getItem(targetLocalCleanupKey).catch(() => null);
+          const latestClear = parseClearIntentMarker(latestClearRaw);
+          if (latestClear && latestClear.opId <= targetOpId) {
+            if (latestClear.localPending) {
+              await AsyncStorage.setItem(
+                targetLocalCleanupKey,
+                JSON.stringify({ ...latestClear, serverPending: false })
+              ).catch(() => undefined);
+            } else {
+              await AsyncStorage.removeItem(targetLocalCleanupKey).catch(() => undefined);
+            }
+          }
+          if (activeScopeRef.current === targetScopeKey) {
+            setPendingDeleteFailed(false);
+            setServerSyncWarning('Lịch sử trên máy chủ đã có cập nhật mới hơn lệnh xóa trước đó.');
+          }
+          return true;
+        }
+        if (activeScopeRef.current === targetScopeKey) {
+          setPendingDeleteFailed(true);
+        }
+        return false;
+      }
+    },
+    []
+  );
+
+  const retryServerDelete = useCallback(
+    async (
+      targetProjectId: string | undefined,
+      targetUserId: string | undefined,
+      targetPendingDeleteKey: string,
+      targetLocalCleanupKey: string,
+      targetServerRevKey: string,
+      targetScopeKey: string,
+      expectedClearOpId?: number
+    ): Promise<boolean> => {
+      let cleared = false;
+      await enqueueScopedWrite(targetScopeKey, async () => {
+        cleared = await executeServerDeleteInQueue(
+          targetProjectId,
+          targetUserId,
+          targetPendingDeleteKey,
+          targetLocalCleanupKey,
+          targetServerRevKey,
+          targetScopeKey,
+          expectedClearOpId
+        );
+      });
+      return cleared;
+    },
+    [enqueueScopedWrite, executeServerDeleteInQueue]
+  );
+
+  // Tải & làm mới lịch sử trò chuyện khi đổi scope hoặc khi panel chuyển sang hiển thị (visible)
+  useEffect(() => {
+    const scopeChanged = lastLoadedScopeRef.current !== storageKey;
+    const becameVisible = visible && !prevVisibleRef.current;
+    prevVisibleRef.current = visible;
+
+    if (!scopeChanged && !becameVisible) {
+      return;
+    }
+    lastLoadedScopeRef.current = storageKey;
+
+    let isMounted = true;
+    const targetScope = storageKey;
+    const targetPendingDelete = pendingDeleteKey;
+    const targetLocalCleanup = localCleanupKey;
+    const targetServerRev = serverRevKey;
+    const targetProjectId = projectId;
+    const targetUserId = user?.id;
+    const isServerBacked = Boolean(targetProjectId && targetUserId);
+
+    if (scopeChanged) {
+      // Vô hiệu hóa các phản hồi AI cũ của scope trước khi chuyển dự án / tác giả
+      scopeGenerationRef.current += 1;
+      setIsLoading(false);
+      setPendingDeleteFailed(false);
+      setServerSyncWarning(null);
+      setChatState((prev) =>
+        prev.scopeKey === targetScope
+          ? prev
+          : { scopeKey: targetScope, messages: [WELCOME_MSG], loaded: false, baseRevision: 0 }
+      );
+    }
+
+    const startRevision = getRevision(targetScope);
+
+    async function loadHistory() {
+      // Chờ các thao tác ghi/xóa đang chờ của chính scope này hoàn tất trước khi đọc
+      const pendingWrite = saveQueuesRef.current.get(targetScope);
+      if (pendingWrite) {
+        await pendingWrite.catch(() => undefined);
+      }
+      if (!isMounted || activeScopeRef.current !== targetScope) return;
+
+      // Đọc serverRevision quan sát gần nhất (độc lập với snapshot cục bộ)
+      let lastObservedServerRev = 0;
+      try {
+        const rawRev = await AsyncStorage.getItem(targetServerRev);
+        lastObservedServerRev = Number(rawRev) || 0;
+      } catch {
+        // Ignore read error
+      }
+
+      // Xử lý bản ghi dọn dẹp bền vững: chỉ khôi phục snapshot thay thế nếu khớp clearId, ngược lại tiếp tục dọn bản cũ
+      let localCleanupPending = false;
+      let clearMarker: ClearIntentMarker | null = null;
+      try {
+        const rawCleanup = await AsyncStorage.getItem(targetLocalCleanup);
+        clearMarker = parseClearIntentMarker(rawCleanup);
+        if (clearMarker) {
+          // Đảm bảo mọi lệnh lưu sau khi khởi động lại đều có opId lớn hơn lệnh xóa đã lưu trước đó
+          lastOpIdRef.current = Math.max(lastOpIdRef.current, clearMarker.opId);
+        }
+        if (clearMarker?.localPending) {
+          // Tuần tự hóa dọn dẹp phục hồi trong hàng đợi của chính scope này để không xóa nhầm snapshot mới hơn
+          await enqueueScopedWrite(targetScope, async () => {
+            if (
+              !isMounted ||
+              activeScopeRef.current !== targetScope ||
+              getRevision(targetScope) !== startRevision
+            ) {
+              return;
+            }
+
+            let latestCleanupRaw: string | null = null;
+            try {
+              latestCleanupRaw = await AsyncStorage.getItem(targetLocalCleanup);
+            } catch {
+              localCleanupPending = true;
+              return;
+            }
+
+            const latestMarker = parseClearIntentMarker(latestCleanupRaw);
+            clearMarker = latestMarker;
+            if (!latestMarker?.localPending) {
+              return;
+            }
+
+            let existingRaw: string | null = null;
+            let existingReadFailed = false;
+            try {
+              existingRaw = await AsyncStorage.getItem(targetScope);
+            } catch {
+              // Phân biệt lỗi đọc AsyncStorage với trường hợp key không tồn tại: giữ cleanup pending khi đọc thất bại
+              existingReadFailed = true;
+              localCleanupPending = true;
+            }
+
+            if (existingReadFailed) {
+              return;
+            }
+
+            if (
+              !isMounted ||
+              activeScopeRef.current !== targetScope ||
+              getRevision(targetScope) !== startRevision
+            ) {
+              return;
+            }
+
+            const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
+            if (existingSnap && existingSnap.replacedClearId === latestMarker.clearId) {
+              // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> giữ nguyên snapshot và hoàn tất cờ localPending
+              if (latestMarker.serverPending) {
+                clearMarker = { ...latestMarker, localPending: false };
+                await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
+              } else {
+                await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
+                clearMarker = null;
+              }
+            } else {
+              localCleanupPending = true;
+              try {
+                await AsyncStorage.removeItem(targetScope);
+                localCleanupPending = false;
+                if (latestMarker.serverPending) {
+                  clearMarker = { ...latestMarker, localPending: false };
+                  await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
+                } else {
+                  await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
+                  clearMarker = null;
+                }
+              } catch {
+                // Giữ localCleanupPending = true để không khôi phục bản đã đánh dấu xóa
+              }
+            }
+          });
+        }
+      } catch {
+        // Ignore storage read error
+      }
+
+      if (!isMounted || activeScopeRef.current !== targetScope) return;
+
+      let localPayload: StoredChatPayload | null = null;
+      if (!localCleanupPending) {
+        try {
+          const raw = await AsyncStorage.getItem(targetScope);
+          if (raw) {
+            localPayload = parseStoredChatPayload(raw);
+          }
+        } catch {
+          // Ignore parse error
+        }
+      }
+
+      // Luôn dùng serverRevision đi kèm chính snapshot hiện có (cả bản sạch lẫn bản dirty);
+      // chỉ fallback sang lastObservedServerRev khi không có snapshot cục bộ (lịch sử trống đã xác nhận).
+      const isDirtyLocal = Boolean(localPayload?.dirty);
+      const snapshotBaseRev =
+        localPayload !== null ? localPayload.serverRevision || 0 : lastObservedServerRev;
+      const hasLocalUserMessages = Boolean(
+        localPayload?.messages.some((m) => m.role === 'user')
+      );
+
+      if (isServerBacked) {
+        const rawPendingDel = await AsyncStorage.getItem(targetPendingDelete).catch(() => null);
+        const pendingDelMarker = parsePendingDeleteMarker(rawPendingDel);
+        if (pendingDelMarker) {
+          lastOpIdRef.current = Math.max(lastOpIdRef.current, pendingDelMarker.opId);
+        }
+        const hasPendingDelete = Boolean(pendingDelMarker) || Boolean(clearMarker?.serverPending);
+        if (hasPendingDelete) {
+          if (hasLocalUserMessages && localPayload) {
+            // Chỉ xếp hàng lưu phục hồi khi revision cục bộ chưa thay đổi bởi lượt mới
+            if (getRevision(targetScope) === startRevision) {
+              void persistMessagesForScope(
+                targetScope,
+                targetPendingDelete,
+                targetLocalCleanup,
+                targetServerRev,
+                targetProjectId,
+                targetUserId,
+                localPayload.messages,
+                { current: snapshotBaseRev },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
+              );
+            }
+          } else {
+            const clearOpId = clearMarker?.opId ?? pendingDelMarker?.opId ?? 0;
+            const cleared = await retryServerDelete(
+              targetProjectId,
+              targetUserId,
+              targetPendingDelete,
+              targetLocalCleanup,
+              targetServerRev,
+              targetScope,
+              clearOpId
+            );
+            if (!isMounted || activeScopeRef.current !== targetScope) return;
+            const revAfterRetry =
+              Number(await AsyncStorage.getItem(targetServerRev).catch(() => null)) ||
+              lastObservedServerRev;
+            if (!cleared) {
+              if (getRevision(targetScope) === startRevision) {
+                setChatState({
+                  scopeKey: targetScope,
+                  messages: [{ ...WELCOME_MSG, timestamp: Date.now() }],
+                  loaded: true,
+                  baseRevision: revAfterRetry,
+                });
+              }
+              return;
+            }
+            lastObservedServerRev = revAfterRetry;
+          }
+        }
+      }
+
+      if (!isMounted || activeScopeRef.current !== targetScope) return;
+      // Chỉ đánh dấu loaded trước GET nếu là hội thoại local-only HOẶC đã có bản cache cục bộ;
+      // với hội thoại đã đăng nhập có cache trống, chờ GET ban đầu hoàn tất để biết server revision.
+      if (getRevision(targetScope) === startRevision && (!isServerBacked || localPayload !== null)) {
+        setChatState({
+          scopeKey: targetScope,
+          messages: localPayload?.messages || [WELCOME_MSG],
+          loaded: true,
+          baseRevision: snapshotBaseRev,
+        });
+      }
+
+      if (isServerBacked && activeUserIdRef.current === targetUserId) {
+        try {
+          const res = await api.getAIChatHistory(targetProjectId!);
+          const isStillCurrent = () =>
+            isMounted &&
+            activeScopeRef.current === targetScope &&
+            activeUserIdRef.current === targetUserId &&
+            getRevision(targetScope) === startRevision;
+
+          if (!isStillCurrent()) return;
+
+          const remoteMsgs =
+            res.success && Array.isArray(res.data?.messages) ? res.data.messages : [];
+          const remoteUpdatedAt = Number(res.data?.updatedAt) || 0;
+          const remoteRevision = Number(res.data?.revision) || 0;
+          const remoteDeletedAt = res.data?.deletedAt || null;
+          const remoteLastWriteId = res.data?.lastWriteId || null;
+          const localServerRevision = snapshotBaseRev;
+          const hasUnackedLocalChanges = isDirtyLocal;
+          const localHasFullOfTruncatedServer = Boolean(localPayload?.serverTruncated);
+          const pendingWriteAlreadyAcked = Boolean(
+            hasUnackedLocalChanges &&
+              localPayload?.pendingWriteId &&
+              remoteLastWriteId &&
+              remoteLastWriteId === localPayload.pendingWriteId
+          );
+
+          if (remoteMsgs.length > 0) {
+            if (!hasUnackedLocalChanges || pendingWriteAlreadyAcked) {
+              await enqueueScopedWrite(targetScope, async () => {
+                if (!isStillCurrent()) return;
+                if (remoteRevision > 0) {
+                  await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+                }
+                if (!isStillCurrent()) return;
+
+                if (pendingWriteAlreadyAcked && localPayload) {
+                  // Server đã xác nhận chính thao tác ghi pendingWriteId này -> khôi phục xác nhận và nâng base revision
+                  await AsyncStorage.setItem(
+                    targetScope,
+                    JSON.stringify({
+                      messages: localPayload.messages,
+                      updatedAt: remoteUpdatedAt || localPayload.updatedAt,
+                      serverRevision: remoteRevision,
+                      dirty: false,
+                      serverTruncated: localPayload.messages.length > remoteMsgs.length,
+                      ...(localPayload.replacedClearId
+                        ? { replacedClearId: localPayload.replacedClearId }
+                        : {}),
+                    } satisfies StoredChatPayload)
+                  ).catch(() => undefined);
+                  if (!isStillCurrent()) return;
+                  setChatState({
+                    scopeKey: targetScope,
+                    messages: localPayload.messages,
+                    loaded: true,
+                    baseRevision: remoteRevision,
+                  });
+                  setServerSyncWarning(null);
+                  return;
+                }
+
+                // Nếu bản server ở cùng revision đã xác nhận và đang là bản rút gọn, giữ nguyên bản đầy đủ cục bộ
+                if (localHasFullOfTruncatedServer && remoteRevision === localServerRevision) {
+                  setChatState({
+                    scopeKey: targetScope,
+                    messages: localPayload!.messages,
+                    loaded: true,
+                    baseRevision: remoteRevision,
+                  });
+                  return;
+                }
+
+                if (!hasLocalUserMessages || remoteRevision >= localServerRevision) {
+                  await AsyncStorage.setItem(
+                    targetScope,
+                    JSON.stringify({
+                      messages: remoteMsgs,
+                      updatedAt: remoteUpdatedAt || Date.now(),
+                      serverRevision: remoteRevision,
+                      dirty: false,
+                      serverTruncated: false,
+                    } satisfies StoredChatPayload)
+                  ).catch(() => undefined);
+                  if (!isStillCurrent()) return;
+                  setChatState({
+                    scopeKey: targetScope,
+                    messages: remoteMsgs,
+                    loaded: true,
+                    baseRevision: remoteRevision,
+                  });
+                }
+              });
+            } else if (localPayload && remoteRevision <= localServerRevision) {
+              // Bản cục bộ có thay đổi chưa đồng bộ và máy chủ chưa có revision mới hơn -> đẩy lên máy chủ
+              if (remoteRevision > 0) {
+                await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+              }
+              if (!isStillCurrent()) return;
+              setChatState({
+                scopeKey: targetScope,
+                messages: localPayload.messages,
+                loaded: true,
+                baseRevision: localServerRevision,
+              });
+              void persistMessagesForScope(
+                targetScope,
+                targetPendingDelete,
+                targetLocalCleanup,
+                targetServerRev,
+                targetProjectId,
+                targetUserId,
+                localPayload.messages,
+                { current: localServerRevision },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
+              );
+            } else {
+              // Xung đột từ một thao tác ghi khác trên máy chủ -> giữ nguyên tin chưa đồng bộ ở cục bộ và cảnh báo
+              if (remoteRevision > 0) {
+                await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+              }
+              if (!isStillCurrent()) return;
+              setChatState({
+                scopeKey: targetScope,
+                messages: localPayload?.messages || [WELCOME_MSG],
+                loaded: true,
+                baseRevision: localServerRevision,
+              });
+              setServerSyncWarning('Phát hiện thay đổi chưa đồng bộ với máy chủ; đang giữ bản trên thiết bị này.');
+            }
+          } else {
+            const serverConfirmedDeletion = Boolean(remoteDeletedAt) || remoteRevision > 0;
+            if (serverConfirmedDeletion) {
+              if (!hasUnackedLocalChanges) {
+                // Xếp hàng xóa cache cục bộ và giữ lại remoteRevision cho các lần lưu sau
+                await enqueueScopedWrite(targetScope, async () => {
+                  if (!isStillCurrent()) return;
+                  await AsyncStorage.removeItem(targetScope).catch(() => undefined);
+                  if (remoteRevision > 0) {
+                    await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+                  }
+                  if (!isStillCurrent()) return;
+                  setChatState({
+                    scopeKey: targetScope,
+                    messages: [WELCOME_MSG],
+                    loaded: true,
+                    baseRevision: remoteRevision,
+                  });
+                });
+              } else if (localPayload && remoteRevision <= localServerRevision) {
+                if (remoteRevision > 0) {
+                  await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+                }
+                if (!isStillCurrent()) return;
+                setChatState({
+                  scopeKey: targetScope,
+                  messages: localPayload.messages,
+                  loaded: true,
+                  baseRevision: localServerRevision,
+                });
+                void persistMessagesForScope(
+                  targetScope,
+                  targetPendingDelete,
+                  targetLocalCleanup,
+                  targetServerRev,
+                  targetProjectId,
+                  targetUserId,
+                  localPayload.messages,
+                  { current: localServerRevision },
+                  {
+                    expectedLocalScopeRevision: startRevision,
+                    writeId: localPayload.pendingWriteId,
+                  }
+                );
+              } else {
+                if (remoteRevision > 0) {
+                  await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
+                }
+                if (!isStillCurrent()) return;
+                setChatState({
+                  scopeKey: targetScope,
+                  messages: localPayload?.messages || [WELCOME_MSG],
+                  loaded: true,
+                  baseRevision: localServerRevision,
+                });
+                setServerSyncWarning('Lịch sử đã bị xóa ở nơi khác nhưng thiết bị này còn tin nhắn chưa đồng bộ.');
+              }
+            } else if (localPayload && hasLocalUserMessages) {
+              // Hội thoại chưa từng đồng bộ lên máy chủ (revision === 0 && !deletedAt) -> tải lên máy chủ
+              setChatState({
+                scopeKey: targetScope,
+                messages: localPayload.messages,
+                loaded: true,
+                baseRevision: 0,
+              });
+              void persistMessagesForScope(
+                targetScope,
+                targetPendingDelete,
+                targetLocalCleanup,
+                targetServerRev,
+                targetProjectId,
+                targetUserId,
+                localPayload.messages,
+                { current: 0 },
+                {
+                  expectedLocalScopeRevision: startRevision,
+                  writeId: localPayload.pendingWriteId,
+                }
+              );
+            } else {
+              // Máy chủ chưa có lịch sử và cục bộ trống -> đánh dấu đã tải xong với revision 0
+              setChatState({
+                scopeKey: targetScope,
+                messages: [WELCOME_MSG],
+                loaded: true,
+                baseRevision: 0,
+              });
+            }
+          }
+        } catch {
+          // Lỗi mạng / lỗi server: vẫn cho phép dùng bản cục bộ hoặc soạn nháp offline
+          if (
+            isMounted &&
+            activeScopeRef.current === targetScope &&
+            activeUserIdRef.current === targetUserId &&
+            getRevision(targetScope) === startRevision
+          ) {
+            setChatState({
+              scopeKey: targetScope,
+              messages: localPayload?.messages || [WELCOME_MSG],
+              loaded: true,
+              baseRevision: snapshotBaseRev,
+            });
+          }
+        }
+      }
+    }
+
+    void loadHistory();
+    return () => {
+      isMounted = false;
+    };
+  }, [
+    enqueueScopedWrite,
+    getRevision,
+    localCleanupKey,
+    pendingDeleteKey,
+    persistMessagesForScope,
+    projectId,
+    retryServerDelete,
+    serverRevKey,
+    storageKey,
+    user?.id,
+    visible,
+  ]);
 
   // Lắng nghe sự kiện bàn phím để nâng toàn bộ khung chat lên trên bàn phím
   useEffect(() => {
@@ -97,7 +1191,17 @@ export default function AIChatPanel({
     setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
   }, []);
 
-  const sendMessagesToAI = async (currentHistory: AIChatMessage[]) => {
+  const sendMessagesToAI = async (
+    currentHistory: AIChatMessage[],
+    capturedScope: string,
+    capturedPendingDelete: string,
+    capturedLocalCleanup: string,
+    capturedServerRev: string,
+    capturedProjectId: string | undefined,
+    capturedUserId: string | undefined,
+    capturedGen: number,
+    turnRevision: { current: number }
+  ) => {
     setIsLoading(true);
     scrollToBottom();
 
@@ -111,10 +1215,19 @@ export default function AIChatPanel({
       const res = await api.chatWithAI({
         messages: apiMessages,
         projectContext: {
+          projectId: capturedProjectId,
           projectTitle,
           nodes: existingNodes.slice(0, 30),
         },
       });
+
+      // Nếu cuộc hội thoại đã bị xóa hoặc chuyển sang dự án/tác giả khác trong lúc chờ AI, bỏ qua kết quả cũ
+      if (
+        scopeGenerationRef.current !== capturedGen ||
+        activeScopeRef.current !== capturedScope
+      ) {
+        return;
+      }
 
       if (res.success && res.data) {
         const aiMsg: AIChatMessage = {
@@ -129,12 +1242,35 @@ export default function AIChatPanel({
               : [],
           timestamp: Date.now(),
         };
-        setMessages((prev) => [...prev, aiMsg]);
+        const nextHistory = [...currentHistory, aiMsg];
+        bumpRevision(capturedScope);
+        setChatState((prev) => ({
+          scopeKey: capturedScope,
+          messages: nextHistory,
+          loaded: true,
+          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
+        }));
+        void persistMessagesForScope(
+          capturedScope,
+          capturedPendingDelete,
+          capturedLocalCleanup,
+          capturedServerRev,
+          capturedProjectId,
+          capturedUserId,
+          nextHistory,
+          turnRevision
+        );
         scrollToBottom();
       } else {
         throw new Error(res.message || 'AI không phản hồi');
       }
     } catch (err: any) {
+      if (
+        scopeGenerationRef.current !== capturedGen ||
+        activeScopeRef.current !== capturedScope
+      ) {
+        return;
+      }
       const errMsg: AIChatMessage = {
         id: `e-${Date.now()}`,
         role: 'system',
@@ -142,16 +1278,49 @@ export default function AIChatPanel({
         timestamp: Date.now(),
         canRetry: true,
       };
-      setMessages((prev) => [...prev, errMsg]);
+      const nextHistory = [...currentHistory, errMsg];
+      bumpRevision(capturedScope);
+      setChatState((prev) => ({
+        scopeKey: capturedScope,
+        messages: nextHistory,
+        loaded: true,
+        baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
+      }));
+      void persistMessagesForScope(
+        capturedScope,
+        capturedPendingDelete,
+        capturedLocalCleanup,
+        capturedServerRev,
+        capturedProjectId,
+        capturedUserId,
+        nextHistory,
+        turnRevision
+      );
       scrollToBottom();
     } finally {
-      setIsLoading(false);
+      if (
+        scopeGenerationRef.current === capturedGen &&
+        activeScopeRef.current === capturedScope
+      ) {
+        setIsLoading(false);
+      }
     }
   };
 
   const handleSend = async () => {
     const text = inputText.trim();
-    if (!text || isLoading) return;
+    if (!text || isLoading || !isScopeLoaded || isScopeClearing || clearingScopesRef.current.has(storageKey)) return;
+
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const capturedGen = scopeGenerationRef.current;
+    const turnRevision = {
+      current: chatState.scopeKey === capturedScope ? chatState.baseRevision : 0,
+    };
 
     Keyboard.dismiss();
     setInputText('');
@@ -164,16 +1333,238 @@ export default function AIChatPanel({
     };
 
     const updatedMessages = [...messages, userMsg];
-    setMessages(updatedMessages);
-    await sendMessagesToAI(updatedMessages);
+    bumpRevision(capturedScope);
+    setChatState({
+      scopeKey: capturedScope,
+      messages: updatedMessages,
+      loaded: true,
+      baseRevision: turnRevision.current,
+    });
+    void persistMessagesForScope(
+      capturedScope,
+      capturedPendingDelete,
+      capturedLocalCleanup,
+      capturedServerRev,
+      capturedProjectId,
+      capturedUserId,
+      updatedMessages,
+      turnRevision
+    );
+    await sendMessagesToAI(
+      updatedMessages,
+      capturedScope,
+      capturedPendingDelete,
+      capturedLocalCleanup,
+      capturedServerRev,
+      capturedProjectId,
+      capturedUserId,
+      capturedGen,
+      turnRevision
+    );
   };
 
   const handleRetry = async () => {
-    if (isLoading) return;
+    if (isLoading || !isScopeLoaded || isScopeClearing || clearingScopesRef.current.has(storageKey)) return;
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const capturedGen = scopeGenerationRef.current;
+    const turnRevision = {
+      current: chatState.scopeKey === capturedScope ? chatState.baseRevision : 0,
+    };
+
     // Bỏ qua các tin nhắn lỗi hệ thống gần nhất để gửi lại
     const cleanedMessages = messages.filter((m) => m.role !== 'system');
-    setMessages(cleanedMessages);
-    await sendMessagesToAI(cleanedMessages);
+    bumpRevision(capturedScope);
+    setChatState({
+      scopeKey: capturedScope,
+      messages: cleanedMessages,
+      loaded: true,
+      baseRevision: turnRevision.current,
+    });
+    void persistMessagesForScope(
+      capturedScope,
+      capturedPendingDelete,
+      capturedLocalCleanup,
+      capturedServerRev,
+      capturedProjectId,
+      capturedUserId,
+      cleanedMessages,
+      turnRevision
+    );
+    await sendMessagesToAI(
+      cleanedMessages,
+      capturedScope,
+      capturedPendingDelete,
+      capturedLocalCleanup,
+      capturedServerRev,
+      capturedProjectId,
+      capturedUserId,
+      capturedGen,
+      turnRevision
+    );
+  };
+
+  const handleClearChat = () => {
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const capturedBaseRevision =
+      chatState.scopeKey === capturedScope ? chatState.baseRevision : 0;
+
+    const doClear = async () => {
+      if (clearingScopesRef.current.has(capturedScope)) {
+        return;
+      }
+
+      // Khóa gửi tin và thử lại trước khi await ghi clearRecord để tránh có lượt mới chen vào trước khi clear được xếp hàng
+      clearingScopesRef.current.add(capturedScope);
+      if (activeScopeRef.current === capturedScope) {
+        setClearingScopeKey(capturedScope);
+      }
+
+      const releaseClearingGuard = () => {
+        clearingScopesRef.current.delete(capturedScope);
+        setClearingScopeKey((prev) => (prev === capturedScope ? null : prev));
+      };
+
+      const clearOpId = nextOpId();
+      const createdAt = Date.now();
+      const clearId = `clear-${clearOpId}-${Math.random().toString(36).slice(2, 8)}`;
+      const needsServerDelete = Boolean(capturedProjectId && capturedUserId);
+      const initialClearRecord: ClearIntentMarker = {
+        clearId,
+        opId: clearOpId,
+        createdAt,
+        localPending: true,
+        serverPending: needsServerDelete,
+        baseRevision: capturedBaseRevision,
+      };
+
+      // Dùng clearRecord duy nhất làm điểm commit bền vững: nếu ghi thất bại thì khôi phục khả năng gửi/thử lại và dừng hẳn
+      try {
+        await AsyncStorage.setItem(capturedLocalCleanup, JSON.stringify(initialClearRecord));
+      } catch {
+        releaseClearingGuard();
+        const msg = 'Không thể lưu trạng thái xóa lịch sử trò chuyện. Vui lòng thử lại.';
+        if (Platform.OS === 'web') {
+          window.alert(msg);
+        } else {
+          Alert.alert('Không thể xóa lịch sử', msg);
+        }
+        return;
+      }
+
+      bumpRevision(capturedScope);
+      // Chỉ vô hiệu hóa generation và đặt lại trạng thái hiển thị/loading khi cuộc hội thoại này vẫn đang mở
+      if (activeScopeRef.current === capturedScope) {
+        scopeGenerationRef.current += 1;
+        setIsLoading(false);
+        setServerSyncWarning(null);
+        const resetList = [{ ...WELCOME_MSG, timestamp: Date.now() }];
+        setChatState((prev) => ({
+          scopeKey: capturedScope,
+          messages: resetList,
+          loaded: true,
+          baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : capturedBaseRevision,
+        }));
+      }
+
+      // Xếp hàng tác vụ xóa TRƯỚC khi mở lại khả năng gửi tin để mọi lượt mới luôn chạy sau lệnh xóa này
+      const queuedClearPromise = enqueueScopedWrite(capturedScope, async () => {
+        // Bỏ qua nếu đã có thao tác xóa/lưu mới hơn sau clearOpId này
+        const currentRaw = await AsyncStorage.getItem(capturedLocalCleanup).catch(() => null);
+        const currentMarker = parseClearIntentMarker(currentRaw);
+        if (currentMarker && currentMarker.opId > clearOpId) {
+          return;
+        }
+
+        // Chốt baseRevision khi tác vụ xóa bắt đầu chạy trong hàng đợi:
+        // chỉ nâng theo xác nhận từ thao tác ghi cục bộ liền trước (opId < clearOpId), không dùng revision từ GET.
+        const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
+        const resolvedClearBaseRev =
+          lastLocalAck &&
+          lastLocalAck.opId < clearOpId &&
+          lastLocalAck.revision > capturedBaseRevision
+            ? lastLocalAck.revision
+            : capturedBaseRevision;
+        const resolvedClearRecord: ClearIntentMarker = {
+          ...initialClearRecord,
+          baseRevision: resolvedClearBaseRev,
+        };
+
+        if (needsServerDelete) {
+          await AsyncStorage.setItem(
+            capturedLocalCleanup,
+            JSON.stringify(resolvedClearRecord)
+          ).catch(() => undefined);
+          await AsyncStorage.setItem(
+            capturedPendingDelete,
+            JSON.stringify({
+              opId: clearOpId,
+              createdAt: resolvedClearRecord.createdAt,
+              clearId,
+              baseRevision: resolvedClearBaseRev,
+            } satisfies PendingDeleteMarker)
+          ).catch(() => undefined);
+        }
+
+        let localCleared = false;
+        try {
+          await AsyncStorage.removeItem(capturedScope);
+          localCleared = true;
+        } catch {
+          // Giữ capturedLocalCleanup để lần tải sau tiếp tục dọn dẹp mà không khôi phục bản cũ
+          if (activeScopeRef.current === capturedScope) {
+            setServerSyncWarning('Chưa thể xóa hoàn toàn bộ nhớ cục bộ; hệ thống sẽ tự dọn lại khi tải lại.');
+          }
+        }
+
+        if (needsServerDelete) {
+          if (localCleared) {
+            await AsyncStorage.setItem(
+              capturedLocalCleanup,
+              JSON.stringify({ ...resolvedClearRecord, localPending: false, serverPending: true })
+            ).catch(() => undefined);
+          }
+          await executeServerDeleteInQueue(
+            capturedProjectId,
+            capturedUserId,
+            capturedPendingDelete,
+            capturedLocalCleanup,
+            capturedServerRev,
+            capturedScope,
+            clearOpId
+          );
+        } else if (localCleared) {
+          await AsyncStorage.removeItem(capturedLocalCleanup).catch(() => undefined);
+        }
+      });
+
+      releaseClearingGuard();
+      await queuedClearPromise;
+    };
+
+    if (Platform.OS === 'web') {
+      if (window.confirm('Bạn có muốn xóa lịch sử trò chuyện AI của dự án này không?')) {
+        void doClear();
+      }
+    } else {
+      Alert.alert(
+        'Làm mới trò chuyện',
+        'Bạn có muốn xóa lịch sử trò chuyện AI của dự án này không?',
+        [
+          { text: 'Hủy', style: 'cancel' },
+          { text: 'Xóa', style: 'destructive', onPress: () => void doClear() },
+        ]
+      );
+    }
   };
 
   const handleCopyMessage = async (message: AIChatMessage) => {
@@ -211,13 +1602,84 @@ export default function AIChatPanel({
           <Text style={styles.headerIcon}>✦</Text>
           <View>
             <Text style={styles.headerTitle}>Trợ lý AI Sáng tác</Text>
-            <Text style={styles.headerSub}>Powered by Gemini</Text>
+            <Text style={styles.headerSub} numberOfLines={1}>
+              {projectTitle ? `${projectTitle} · Đã lưu tự động` : 'Powered by Gemini'}
+            </Text>
           </View>
         </View>
-        <Pressable style={styles.closeBtn} onPress={onClose}>
-          <Text style={styles.closeBtnText}>✕</Text>
-        </Pressable>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+          {messages.length > 1 && (
+            <Pressable
+              style={styles.closeBtn}
+              onPress={handleClearChat}
+              accessibilityRole="button"
+              accessibilityLabel="Xóa lịch sử trò chuyện">
+              <Text style={styles.closeBtnText}>🗑️</Text>
+            </Pressable>
+          )}
+          <Pressable style={styles.closeBtn} onPress={onClose}>
+            <Text style={styles.closeBtnText}>✕</Text>
+          </Pressable>
+        </View>
       </View>
+
+      {pendingDeleteFailed && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            backgroundColor: '#2a1814',
+            borderBottomWidth: 1,
+            borderBottomColor: '#5c2d23',
+            gap: 8,
+          }}>
+          <Text style={{ flex: 1, color: '#f3b6a6', fontSize: 12 }}>
+            ⚠️ Chưa xóa được lịch sử trên máy chủ.
+          </Text>
+          <Pressable
+            style={{
+              paddingHorizontal: 10,
+              paddingVertical: 4,
+              borderRadius: 6,
+              borderWidth: 1,
+              borderColor: '#e5a93c',
+            }}
+            onPress={() => {
+              void retryServerDelete(
+                projectId,
+                user?.id,
+                pendingDeleteKey,
+                localCleanupKey,
+                serverRevKey,
+                storageKey
+              );
+            }}>
+            <Text style={{ color: '#e5a93c', fontSize: 12, fontWeight: '600' }}>Thử lại</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {serverSyncWarning && !pendingDeleteFailed && (
+        <View
+          style={{
+            flexDirection: 'row',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            paddingHorizontal: 14,
+            paddingVertical: 8,
+            backgroundColor: '#262015',
+            borderBottomWidth: 1,
+            borderBottomColor: '#544225',
+            gap: 8,
+          }}>
+          <Text style={{ flex: 1, color: '#ecd2a0', fontSize: 12 }}>
+            ⚠️ {serverSyncWarning}
+          </Text>
+        </View>
+      )}
 
       {/* Messages */}
       <ScrollView
@@ -235,7 +1697,7 @@ export default function AIChatPanel({
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
             copied={copiedMessageId === msg.id}
-            isLoading={isLoading}
+            isLoading={isLoading || isScopeClearing}
           />
         ))}
         {isLoading && (
@@ -253,17 +1715,28 @@ export default function AIChatPanel({
             style={styles.textInput}
             value={inputText}
             onChangeText={setInputText}
-            placeholder="Mô tả thực thể muốn tạo..."
+            placeholder={
+              isScopeClearing
+                ? 'Đang xóa lịch sử trò chuyện...'
+                : isScopeLoaded
+                  ? 'Mô tả thực thể muốn tạo...'
+                  : 'Đang tải lịch sử trò chuyện...'
+            }
             placeholderTextColor="#6e6150"
             multiline
             maxLength={500}
+            editable={isScopeLoaded && !isScopeClearing}
             onSubmitEditing={handleSend}
             blurOnSubmit={false}
           />
           <Pressable
-            style={[styles.sendBtn, (!inputText.trim() || isLoading) && styles.sendBtnDisabled]}
+            style={[
+              styles.sendBtn,
+              (!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing) &&
+                styles.sendBtnDisabled,
+            ]}
             onPress={handleSend}
-            disabled={!inputText.trim() || isLoading}>
+            disabled={!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing}>
             <Text style={styles.sendBtnText}>↑</Text>
           </Pressable>
         </View>

@@ -460,6 +460,12 @@ async function updateNode(req, res, next) {
       updates[field] = body[field] !== null ? String(body[field]).trim() : '';
     }
   }
+  if (body.autoCreatedStub !== undefined) {
+    if (typeof body.autoCreatedStub !== 'boolean') {
+      return res.status(400).json({ success: false, message: 'autoCreatedStub phải là giá trị boolean' });
+    }
+    updates.autoCreatedStub = body.autoCreatedStub;
+  }
   if (body.charactersInvolved !== undefined && body.characters === undefined) {
     updates.characters = '';
   }
@@ -582,6 +588,7 @@ async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
     name,
     type,
     ...defaults,
+    autoCreatedStub: true,
     createdAt: Date.now(),
     updatedAt: Date.now(),
     x: 100 + Math.random() * 400,
@@ -622,26 +629,42 @@ async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
  * - Sự kiện gán Nơi diễn ra (Location)
  * - Địa điểm gán Thế lực cai quản (Faction)
  */
+const PLACEHOLDER_RELATION_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
+
+function cleanRelationalValue(val) {
+  if (val === null || val === undefined) return '';
+  const trimmed = String(val).trim();
+  if (!trimmed || PLACEHOLDER_RELATION_PATTERN.test(trimmed)) return '';
+  return trimmed;
+}
+
 async function syncNodeRelationships(nodeId, projectId, nodeData) {
   if (!nodeId || !projectId || !nodeData) return;
 
   try {
     const nodeType = nodeData.type;
+    const nodeName = String(nodeData.name || 'thực thể').trim();
 
     // 1. NHÂN VẬT (Character)
     if (nodeType === 'character') {
       // Vật dụng -> Item
-      if (nodeData.weapon && String(nodeData.weapon).trim()) {
-        const weapon = String(nodeData.weapon).trim();
+      const weapon = cleanRelationalValue(nodeData.weapon);
+      if (weapon) {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode)
           WHERE item.name <> $weapon AND item.id <> $weapon
           DELETE r
         `, { nodeId, weapon });
+        const itemId = await findOrCreateProjectEntity(projectId, weapon, 'item', {
+          role: 'Quý hiếm',
+          rarity: 'Quý hiếm',
+          element: 'Kim',
+          desc: `Vật phẩm gắn liền với ${nodeName}`,
+          status: 'Nguyên vẹn',
+        });
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p)
-          WHERE item.name = $weapon OR item.id = $weapon
+          MATCH (c:StoryNode { id: $nodeId })
+          MATCH (item:StoryNode { id: $itemId })
           MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
           ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
                         r.label = 'Vật dụng',
@@ -650,7 +673,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Vật dụng',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, weapon });
+        `, { nodeId, itemId });
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(:StoryNode)
@@ -659,17 +682,25 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Nơi sinh -> Location
-      if (nodeData.birthplace && String(nodeData.birthplace).trim()) {
-        const birthplace = String(nodeData.birthplace).trim();
+      const birthplace = cleanRelationalValue(nodeData.birthplace);
+      if (birthplace) {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc:StoryNode)
           WHERE loc.name <> $birthplace AND loc.id <> $birthplace
           DELETE r
         `, { nodeId, birthplace });
+        const locId = await findOrCreateProjectEntity(projectId, birthplace, 'location', {
+          role: 'ĐỊA DANH',
+          region: 'Miền Đông',
+          dangerLevel: 'An toàn',
+          climate: 'Ôn hòa',
+          terrain: 'Đồng bằng',
+          desc: `Nơi sinh của ${nodeName}`,
+          status: 'Hoạt động',
+        });
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
-          WHERE loc.name = $birthplace OR loc.id = $birthplace
+          MATCH (c:StoryNode { id: $nodeId })
+          MATCH (loc:StoryNode { id: $locId })
           MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
           ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
                         r.label = 'Nơi sinh',
@@ -678,7 +709,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Nơi sinh',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, birthplace });
+        `, { nodeId, locId });
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(:StoryNode)
@@ -687,17 +718,24 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Tổ chức -> Faction
-      if (nodeData.sect && String(nodeData.sect).trim()) {
-        const sect = String(nodeData.sect).trim();
+      const sect = cleanRelationalValue(nodeData.sect);
+      if (sect) {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac:StoryNode)
           WHERE fac.name <> $sect AND fac.id <> $sect
           DELETE r
         `, { nodeId, sect });
+        const facId = await findOrCreateProjectEntity(projectId, sect, 'faction', {
+          role: 'TỔ CHỨC',
+          subType: 'Trung lập',
+          alignment: 'TRUNG LẬP',
+          motto: '',
+          desc: `Tổ chức có thành viên ${nodeName}`,
+          status: 'Đang hoạt động',
+        });
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
-          WHERE fac.name = $sect OR fac.id = $sect
+          MATCH (c:StoryNode { id: $nodeId })
+          MATCH (fac:StoryNode { id: $facId })
           MERGE (c)-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
           ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-sect',
                         r.label = 'Tổ chức',
@@ -706,7 +744,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Tổ chức',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, sect });
+        `, { nodeId, facId });
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(:StoryNode)
@@ -715,18 +753,22 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Biến cố tử nạn / hồi sinh -> Event
-      if (nodeData.statusEvent && String(nodeData.statusEvent).trim() && (nodeData.status === 'Đã chết' || nodeData.status === 'Hồi sinh')) {
-        const statusEvent = String(nodeData.statusEvent).trim();
+      const statusEvent = cleanRelationalValue(nodeData.statusEvent);
+      if (statusEvent && (nodeData.status === 'Đã chết' || nodeData.status === 'Hồi sinh')) {
         const evLabel = nodeData.status === 'Đã chết' ? 'Tử nạn tại' : 'Hồi sinh tại';
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev:StoryNode)
           WHERE ev.name <> $statusEvent AND ev.id <> $statusEvent
           DELETE r
         `, { nodeId, statusEvent });
+        const evId = await findOrCreateProjectEntity(projectId, statusEvent, 'event', {
+          role: 'BIẾN CỐ',
+          desc: `Sự kiện liên quan đến trạng thái của ${nodeName}`,
+          status: 'Đã diễn ra',
+        });
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p)
-          WHERE ev.name = $statusEvent OR ev.id = $statusEvent
+          MATCH (c:StoryNode { id: $nodeId })
+          MATCH (ev:StoryNode { id: $evId })
           MERGE (c)-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev)
           ON CREATE SET r.id = 'link-' + c.id + '-' + ev.id + '-event',
                         r.label = $evLabel,
@@ -735,7 +777,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = $evLabel,
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, statusEvent, evLabel });
+        `, { nodeId, evId, evLabel });
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(:StoryNode)
@@ -747,17 +789,22 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
     // 2. VẬT PHẨM (Item)
     if (nodeType === 'item') {
       // Người sở hữu -> Character
-      if (nodeData.holderOrLocation && String(nodeData.holderOrLocation).trim()) {
-        const holder = String(nodeData.holderOrLocation).trim();
+      const holder = cleanRelationalValue(nodeData.holderOrLocation);
+      if (holder) {
         await runQuery(`
           MATCH (c:StoryNode)-[r:RELATES_TO { category: 'OWNS' }]->(item:StoryNode { id: $nodeId })
           WHERE c.name <> $holder AND c.id <> $holder
           DELETE r
         `, { nodeId, holder });
+        const charId = await findOrCreateProjectEntity(projectId, holder, 'character', {
+          role: 'TRUNG LẬP',
+          gender: 'Nam',
+          desc: `Người sở hữu ${nodeName}`,
+          status: 'Còn sống',
+        });
         await runQuery(`
-          MATCH (item:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p)
-          WHERE c.name = $holder OR c.id = $holder
+          MATCH (item:StoryNode { id: $nodeId })
+          MATCH (c:StoryNode { id: $charId })
           MERGE (c)-[r:RELATES_TO { category: 'OWNS' }]->(item)
           ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-holder',
                         r.label = 'Sở hữu',
@@ -766,7 +813,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Sở hữu',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, holder });
+        `, { nodeId, charId });
       } else {
         await runQuery(`
           MATCH (:StoryNode)-[r:RELATES_TO { category: 'OWNS' }]->(item:StoryNode { id: $nodeId })
@@ -775,17 +822,25 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Nguồn gốc -> Location
-      if (nodeData.origin && String(nodeData.origin).trim()) {
-        const origin = String(nodeData.origin).trim();
+      const origin = cleanRelationalValue(nodeData.origin);
+      if (origin) {
         await runQuery(`
           MATCH (item:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'ORIGIN' }]->(loc:StoryNode)
           WHERE loc.name <> $origin AND loc.id <> $origin
           DELETE r
         `, { nodeId, origin });
+        const locId = await findOrCreateProjectEntity(projectId, origin, 'location', {
+          role: 'ĐỊA DANH',
+          region: 'Miền Đông',
+          dangerLevel: 'Bình thường',
+          climate: 'Ôn hòa',
+          terrain: 'Núi rừng',
+          desc: `Nguồn gốc xuất xứ của ${nodeName}`,
+          status: 'Hoạt động',
+        });
         await runQuery(`
-          MATCH (item:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
-          WHERE loc.name = $origin OR loc.id = $origin
+          MATCH (item:StoryNode { id: $nodeId })
+          MATCH (loc:StoryNode { id: $locId })
           MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
           ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
                         r.label = 'Nguồn gốc',
@@ -794,7 +849,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Nguồn gốc',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, origin });
+        `, { nodeId, locId });
       } else {
         await runQuery(`
           MATCH (item:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'ORIGIN' }]->(:StoryNode)
@@ -806,17 +861,22 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
     // 3. TỔ CHỨC (Faction)
     if (nodeType === 'faction') {
       // Người đại diện / Thủ lĩnh -> Character
-      if (nodeData.leader && String(nodeData.leader).trim()) {
-        const leader = String(nodeData.leader).trim();
+      const leader = cleanRelationalValue(nodeData.leader);
+      if (leader) {
         await runQuery(`
           MATCH (c:StoryNode)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac:StoryNode { id: $nodeId })
           WHERE c.name <> $leader AND c.id <> $leader
           DELETE r
         `, { nodeId, leader });
+        const charId = await findOrCreateProjectEntity(projectId, leader, 'character', {
+          role: 'TRUNG LẬP',
+          gender: 'Nam',
+          desc: `Người đại diện / Thủ lĩnh của ${nodeName}`,
+          status: 'Còn sống',
+        });
         await runQuery(`
-          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p)
-          WHERE c.name = $leader OR c.id = $leader
+          MATCH (fac:StoryNode { id: $nodeId })
+          MATCH (c:StoryNode { id: $charId })
           MERGE (c)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac)
           ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-leader',
                         r.label = 'Người đại diện / Thủ lĩnh',
@@ -825,7 +885,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Người đại diện / Thủ lĩnh',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, leader });
+        `, { nodeId, charId });
       } else {
         await runQuery(`
           MATCH (:StoryNode)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac:StoryNode { id: $nodeId })
@@ -834,17 +894,25 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Căn cứ -> Location
-      if (nodeData.headquarters && String(nodeData.headquarters).trim()) {
-        const headquarters = String(nodeData.headquarters).trim();
+      const headquarters = cleanRelationalValue(nodeData.headquarters);
+      if (headquarters) {
         await runQuery(`
           MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'HEADQUARTERS' }]->(loc:StoryNode)
           WHERE loc.name <> $headquarters AND loc.id <> $headquarters
           DELETE r
         `, { nodeId, headquarters });
+        const locId = await findOrCreateProjectEntity(projectId, headquarters, 'location', {
+          role: 'ĐỊA DANH',
+          region: 'Miền Đông',
+          dangerLevel: 'An toàn',
+          climate: 'Ôn hòa',
+          terrain: 'Thành thị',
+          desc: `Căn cứ địa của ${nodeName}`,
+          status: 'Hoạt động',
+        });
         await runQuery(`
-          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (loc:StoryNode { type: 'location' })-[:BELONGS_TO]->(p)
-          WHERE loc.name = $headquarters OR loc.id = $headquarters
+          MATCH (fac:StoryNode { id: $nodeId })
+          MATCH (loc:StoryNode { id: $locId })
           MERGE (fac)-[r:RELATES_TO { category: 'HEADQUARTERS' }]->(loc)
           ON CREATE SET r.id = 'link-' + fac.id + '-' + loc.id + '-hq',
                         r.label = 'Căn cứ địa',
@@ -853,7 +921,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Căn cứ địa',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, headquarters });
+        `, { nodeId, locId });
       } else {
         await runQuery(`
           MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'HEADQUARTERS' }]->(:StoryNode)
@@ -862,21 +930,24 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Sự kiện thay đổi trạng thái -> Event
+      const facStatusEvent = cleanRelationalValue(nodeData.statusEvent);
       if (
-        nodeData.statusEvent &&
-        String(nodeData.statusEvent).trim() &&
+        facStatusEvent &&
         ['Tạm ngừng', 'Suy tàn'].includes(nodeData.status)
       ) {
-        const statusEvent = String(nodeData.statusEvent).trim();
         await runQuery(`
           MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev:StoryNode)
           WHERE ev.name <> $statusEvent AND ev.id <> $statusEvent
           DELETE r
-        `, { nodeId, statusEvent });
+        `, { nodeId, statusEvent: facStatusEvent });
+        const evId = await findOrCreateProjectEntity(projectId, facStatusEvent, 'event', {
+          role: 'BIẾN CỐ',
+          desc: `Sự kiện làm thay đổi trạng thái của ${nodeName}`,
+          status: 'Đã diễn ra',
+        });
         await runQuery(`
-          MATCH (fac:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (ev:StoryNode { type: 'event' })-[:BELONGS_TO]->(p)
-          WHERE ev.name = $statusEvent OR ev.id = $statusEvent
+          MATCH (fac:StoryNode { id: $nodeId })
+          MATCH (ev:StoryNode { id: $evId })
           MERGE (fac)-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(ev)
           ON CREATE SET r.id = 'link-' + fac.id + '-' + ev.id + '-event',
                         r.label = 'Trạng thái thay đổi do',
@@ -885,7 +956,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Trạng thái thay đổi do',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, statusEvent });
+        `, { nodeId, evId });
       } else {
         await runQuery(`
           MATCH (fac:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'STATUS_EVENT' }]->(:StoryNode)
@@ -897,17 +968,23 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
     // 4. ĐỊA ĐIỂM (Location)
     if (nodeType === 'location') {
       // Thế lực cai quản -> Faction
-      if (nodeData.ruler && String(nodeData.ruler).trim()) {
-        const ruler = String(nodeData.ruler).trim();
+      const ruler = cleanRelationalValue(nodeData.ruler);
+      if (ruler) {
         await runQuery(`
           MATCH (fac:StoryNode)-[r:RELATES_TO { category: 'RULER_OF' }]->(loc:StoryNode { id: $nodeId })
           WHERE fac.name <> $ruler AND fac.id <> $ruler
           DELETE r
         `, { nodeId, ruler });
+        const facId = await findOrCreateProjectEntity(projectId, ruler, 'faction', {
+          role: 'TỔ CHỨC',
+          subType: 'Trung lập',
+          alignment: 'TRUNG LẬP',
+          desc: `Thế lực cai quản ${nodeName}`,
+          status: 'Đang hoạt động',
+        });
         await runQuery(`
-          MATCH (loc:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
-          MATCH (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p)
-          WHERE fac.name = $ruler OR fac.id = $ruler
+          MATCH (loc:StoryNode { id: $nodeId })
+          MATCH (fac:StoryNode { id: $facId })
           MERGE (fac)-[r:RELATES_TO { category: 'RULER_OF' }]->(loc)
           ON CREATE SET r.id = 'link-' + fac.id + '-' + loc.id + '-ruler',
                         r.label = 'Cai quản',
@@ -916,7 +993,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Cai quản',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, ruler });
+        `, { nodeId, facId });
       } else {
         await runQuery(`
           MATCH (:StoryNode)-[r:RELATES_TO { category: 'RULER_OF' }]->(loc:StoryNode { id: $nodeId })
@@ -928,8 +1005,8 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
     // 5. BIẾN CỐ / SỰ KIỆN (Event)
     if (nodeType === 'event') {
       // 5.1 Nơi diễn ra -> Location
-      if (nodeData.location && String(nodeData.location).trim()) {
-        const location = String(nodeData.location).trim();
+      const location = cleanRelationalValue(nodeData.location);
+      if (location) {
         // Xóa các link EVENT_LOCATION cũ không còn khớp
         await runQuery(`
           MATCH (ev:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc:StoryNode)
@@ -1023,14 +1100,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode { id: $nodeId })
-        WHERE coalesce(c.weapon, '') <> item.name AND coalesce(c.weapon, '') <> item.id
+        WHERE toLower(coalesce(c.weapon, '')) <> toLower(item.name)
+          AND coalesce(c.weapon, '') <> item.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (item:StoryNode { id: $nodeId })
-        WHERE (c.weapon = item.name OR c.weapon = item.id) AND c.weapon IS NOT NULL AND c.weapon <> ''
+        WHERE (toLower(c.weapon) = toLower(item.name) OR c.weapon = item.id)
+          AND c.weapon IS NOT NULL AND c.weapon <> ''
         MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
         ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
                       r.label = 'Vật dụng',
@@ -1043,14 +1122,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(c.birthplace, '') <> loc.name AND coalesce(c.birthplace, '') <> loc.id
+        WHERE toLower(coalesce(c.birthplace, '')) <> toLower(loc.name)
+          AND coalesce(c.birthplace, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (c.birthplace = loc.name OR c.birthplace = loc.id) AND c.birthplace IS NOT NULL AND c.birthplace <> ''
+        WHERE (toLower(c.birthplace) = toLower(loc.name) OR c.birthplace = loc.id)
+          AND c.birthplace IS NOT NULL AND c.birthplace <> ''
         MERGE (c)-[r:RELATES_TO { category: 'BIRTHPLACE' }]->(loc)
         ON CREATE SET r.id = 'link-' + c.id + '-' + loc.id + '-birthplace',
                       r.label = 'Nơi sinh',
@@ -1063,14 +1144,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       await runQuery(`
         MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc:StoryNode { id: $nodeId })
-        WHERE coalesce(item.origin, '') <> loc.name AND coalesce(item.origin, '') <> loc.id
+        WHERE toLower(coalesce(item.origin, '')) <> toLower(loc.name)
+          AND coalesce(item.origin, '') <> loc.id
         DELETE r
       `, { nodeId, projectId });
 
       await runQuery(`
         MATCH (item:StoryNode { type: 'item' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (loc:StoryNode { id: $nodeId })
-        WHERE (item.origin = loc.name OR item.origin = loc.id) AND item.origin IS NOT NULL AND item.origin <> ''
+        WHERE (toLower(item.origin) = toLower(loc.name) OR item.origin = loc.id)
+          AND item.origin IS NOT NULL AND item.origin <> ''
         MERGE (item)-[r:RELATES_TO { category: 'ORIGIN' }]->(loc)
         ON CREATE SET r.id = 'link-' + item.id + '-' + loc.id + '-origin',
                       r.label = 'Nguồn gốc',

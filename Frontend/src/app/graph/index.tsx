@@ -486,11 +486,16 @@ const handleCreateNodesFromAI = async (
   const remainingNodes = [...nodeDataList];
 
   try {
+    const initialProject = await projectStore.getProject(currentProject.id);
+    const initialNodeIds = new Set((initialProject.nodes || []).map((n) => n.id));
+
     for (let index = 0; index < remainingNodes.length; index += 1) {
       const nodeData = remainingNodes[index];
-      const stableKey = `${nodeData.type || 'unknown'}:${(nodeData.name || '').trim()}:${(nodeData.desc || '').trim()}`;
+      const normalizedType = nodeData.type || 'character';
+      const normalizedName = (nodeData.name || '').trim();
+      const stableKey = `${normalizedType}:${normalizedName.toLocaleLowerCase('vi')}:${(nodeData.desc || '').trim()}`;
       const alreadyCreated = createdNodes.some((createdNode) => {
-        const createdKey = `${createdNode.type}:${(createdNode.name || '').trim()}:${(createdNode.desc || '').trim()}`;
+        const createdKey = `${createdNode.type}:${(createdNode.name || '').trim().toLocaleLowerCase('vi')}:${(createdNode.desc || '').trim()}`;
         return createdKey === stableKey;
       });
 
@@ -498,8 +503,28 @@ const handleCreateNodesFromAI = async (
         continue;
       }
 
-      const createdNode = await projectStore.createNode(currentProject.id, nodeData);
-      createdNodes.push(createdNode);
+      // Chỉ cập nhật (làm giàu) node stub được tự động tạo trước đó trong batch hoặc được đánh dấu autoCreatedStub;
+      // tuyệt đối không ghi đè node do tác giả tự tạo sẵn.
+      const latestProject = await projectStore.getProject(currentProject.id);
+      const existingStubMatch = normalizedName
+        ? (latestProject.nodes || []).find(
+            (n) =>
+              n.type === normalizedType &&
+              n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi') &&
+              (n.autoCreatedStub === true || !initialNodeIds.has(n.id))
+          )
+        : undefined;
+
+      const savedNode = existingStubMatch
+        ? await projectStore.updateNode(currentProject.id, existingStubMatch.id, {
+            ...nodeData,
+            autoCreatedStub: false,
+          })
+        : await projectStore.createNode(currentProject.id, {
+            ...nodeData,
+            autoCreatedStub: false,
+          });
+      createdNodes.push(savedNode);
     }
 
     await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);
@@ -1117,7 +1142,9 @@ return (
                                     subtitle: e.chapter || 'Biến cố',
                                     icon: '⚡',
                                   }))}
-                                  placeholder="-- Chọn sự kiện --"
+                                  placeholder="-- Chọn hoặc bỏ trống --"
+                                  allowCustom={true}
+                                  customPlaceholder="Nhập tên sự kiện mới để tự tạo node..."
                                 />
                               </View>
                             )}
@@ -1144,7 +1171,9 @@ return (
                                   subtitle: loc.region || loc.role || 'Địa danh',
                                   icon: '📍',
                                 }))}
-                                placeholder="-- Chọn địa điểm --"
+                                placeholder="-- Chọn địa điểm hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1171,7 +1200,9 @@ return (
                                   subtitle: it.rarity || it.role || 'Vật phẩm',
                                   icon: '🗡️',
                                 }))}
-                                placeholder="-- Chọn vật phẩm --"
+                                placeholder="-- Chọn vật phẩm hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên vật phẩm mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1189,7 +1220,9 @@ return (
                                   subtitle: fac.alignment || fac.role || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
-                                placeholder="-- Chọn tổ chức --"
+                                placeholder="-- Chọn tổ chức hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên tổ chức mới để tự tạo node..."
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1233,7 +1266,9 @@ return (
                                   subtitle: loc.region || 'Địa danh',
                                   icon: '📍',
                                 }))}
-                                placeholder="-- Chọn nguồn gốc (Địa danh) --"
+                                placeholder="-- Chọn nguồn gốc hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên địa danh mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1249,7 +1284,9 @@ return (
                                 subtitle: c.role || 'Nhân vật',
                                 icon: '👤',
                               }))}
-                              placeholder="-- Chọn người sở hữu --"
+                              placeholder="-- Chọn người sở hữu hoặc bỏ trống --"
+                              allowCustom={true}
+                              customPlaceholder="Nhập tên nhân vật mới để tự tạo node..."
                             />
                           </View>
                         </View>
@@ -1303,7 +1340,9 @@ return (
                                   subtitle: fac.alignment || 'Tổ chức',
                                   icon: '🏛️',
                                 }))}
-                                placeholder="-- Chọn thế lực cai quản --"
+                                placeholder="-- Chọn thế lực hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên thế lực mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1350,7 +1389,9 @@ return (
                                     subtitle: e.chapter || 'Biến cố',
                                     icon: '⚡',
                                   }))}
-                                  placeholder="-- Chọn sự kiện --"
+                                  placeholder="-- Chọn hoặc bỏ trống --"
+                                  allowCustom={true}
+                                  customPlaceholder="Nhập tên sự kiện mới để tự tạo node..."
                                 />
                               </View>
                             )}
@@ -1369,7 +1410,9 @@ return (
                                   subtitle: c.role || 'Nhân vật',
                                   icon: '👤',
                                 }))}
-                                placeholder="-- Chọn thủ lĩnh --"
+                                placeholder="-- Chọn thủ lĩnh hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên thủ lĩnh mới để tự tạo node..."
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
@@ -1383,7 +1426,9 @@ return (
                                   subtitle: l.region || 'Địa danh',
                                   icon: '📍',
                                 }))}
-                                placeholder="-- Chọn căn cứ --"
+                                placeholder="-- Chọn căn cứ hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên căn cứ mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1432,7 +1477,9 @@ return (
                                   subtitle: loc.region || 'Địa danh',
                                   icon: '📍',
                                 }))}
-                                placeholder="-- Chọn nơi diễn ra --"
+                                placeholder="-- Chọn nơi diễn ra hoặc bỏ trống --"
+                                allowCustom={true}
+                                customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
                               />
                             </View>
                           </View>
@@ -1804,6 +1851,7 @@ return (
                 onClose={() => setAiChatOpen(false)}
                 onCreateNode={handleCreateNodeFromAI}
                 onCreateNodes={handleCreateNodesFromAI}
+                projectId={currentProject.id}
                 projectTitle={currentProject.title}
                 existingNodes={nodes}
               />
