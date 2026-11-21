@@ -243,6 +243,7 @@ export default function AIChatPanel({
   });
   const [pendingDeleteFailed, setPendingDeleteFailed] = useState(false);
   const [serverSyncWarning, setServerSyncWarning] = useState<string | null>(null);
+  const [clearingScopeKey, setClearingScopeKey] = useState<string | null>(null);
   const [inputText, setInputText] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
@@ -259,6 +260,7 @@ export default function AIChatPanel({
   const prevVisibleRef = useRef<boolean>(visible);
   const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
   const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const clearingScopesRef = useRef<Set<string>>(new Set());
   // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET) kèm opId
   const lastLocalWriteAckRef = useRef<
     Map<string, { revision: number; messageIds: string[]; opId: number }>
@@ -287,6 +289,7 @@ export default function AIChatPanel({
 
   const messages = chatState.scopeKey === storageKey ? chatState.messages : [WELCOME_MSG];
   const isScopeLoaded = chatState.scopeKey === storageKey && chatState.loaded;
+  const isScopeClearing = clearingScopeKey === storageKey;
 
   const enqueueScopedWrite = useCallback((scope: string, task: () => Promise<void>) => {
     const previous = saveQueuesRef.current.get(scope) || Promise.resolve();
@@ -725,22 +728,57 @@ export default function AIChatPanel({
           lastOpIdRef.current = Math.max(lastOpIdRef.current, clearMarker.opId);
         }
         if (clearMarker?.localPending) {
-          let existingRaw: string | null = null;
-          let existingReadFailed = false;
-          try {
-            existingRaw = await AsyncStorage.getItem(targetScope);
-          } catch {
-            // Phân biệt lỗi đọc AsyncStorage với trường hợp key không tồn tại: giữ cleanup pending khi đọc thất bại
-            existingReadFailed = true;
-            localCleanupPending = true;
-          }
+          // Tuần tự hóa dọn dẹp phục hồi trong hàng đợi của chính scope này để không xóa nhầm snapshot mới hơn
+          await enqueueScopedWrite(targetScope, async () => {
+            if (
+              !isMounted ||
+              activeScopeRef.current !== targetScope ||
+              getRevision(targetScope) !== startRevision
+            ) {
+              return;
+            }
 
-          if (!existingReadFailed) {
+            let latestCleanupRaw: string | null = null;
+            try {
+              latestCleanupRaw = await AsyncStorage.getItem(targetLocalCleanup);
+            } catch {
+              localCleanupPending = true;
+              return;
+            }
+
+            const latestMarker = parseClearIntentMarker(latestCleanupRaw);
+            clearMarker = latestMarker;
+            if (!latestMarker?.localPending) {
+              return;
+            }
+
+            let existingRaw: string | null = null;
+            let existingReadFailed = false;
+            try {
+              existingRaw = await AsyncStorage.getItem(targetScope);
+            } catch {
+              // Phân biệt lỗi đọc AsyncStorage với trường hợp key không tồn tại: giữ cleanup pending khi đọc thất bại
+              existingReadFailed = true;
+              localCleanupPending = true;
+            }
+
+            if (existingReadFailed) {
+              return;
+            }
+
+            if (
+              !isMounted ||
+              activeScopeRef.current !== targetScope ||
+              getRevision(targetScope) !== startRevision
+            ) {
+              return;
+            }
+
             const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
-            if (existingSnap && existingSnap.replacedClearId === clearMarker.clearId) {
-              // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> chỉ hoàn tất cờ localPending
-              if (clearMarker.serverPending) {
-                clearMarker = { ...clearMarker, localPending: false };
+            if (existingSnap && existingSnap.replacedClearId === latestMarker.clearId) {
+              // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> giữ nguyên snapshot và hoàn tất cờ localPending
+              if (latestMarker.serverPending) {
+                clearMarker = { ...latestMarker, localPending: false };
                 await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
               } else {
                 await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
@@ -751,8 +789,8 @@ export default function AIChatPanel({
               try {
                 await AsyncStorage.removeItem(targetScope);
                 localCleanupPending = false;
-                if (clearMarker.serverPending) {
-                  clearMarker = { ...clearMarker, localPending: false };
+                if (latestMarker.serverPending) {
+                  clearMarker = { ...latestMarker, localPending: false };
                   await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
                 } else {
                   await AsyncStorage.removeItem(targetLocalCleanup).catch(() => undefined);
@@ -762,7 +800,7 @@ export default function AIChatPanel({
                 // Giữ localCleanupPending = true để không khôi phục bản đã đánh dấu xóa
               }
             }
-          }
+          });
         }
       } catch {
         // Ignore storage read error
@@ -1271,7 +1309,7 @@ export default function AIChatPanel({
 
   const handleSend = async () => {
     const text = inputText.trim();
-    if (!text || isLoading || !isScopeLoaded) return;
+    if (!text || isLoading || !isScopeLoaded || isScopeClearing || clearingScopesRef.current.has(storageKey)) return;
 
     const capturedScope = storageKey;
     const capturedPendingDelete = pendingDeleteKey;
@@ -1326,7 +1364,7 @@ export default function AIChatPanel({
   };
 
   const handleRetry = async () => {
-    if (isLoading || !isScopeLoaded) return;
+    if (isLoading || !isScopeLoaded || isScopeClearing || clearingScopesRef.current.has(storageKey)) return;
     const capturedScope = storageKey;
     const capturedPendingDelete = pendingDeleteKey;
     const capturedLocalCleanup = localCleanupKey;
@@ -1381,6 +1419,21 @@ export default function AIChatPanel({
       chatState.scopeKey === capturedScope ? chatState.baseRevision : 0;
 
     const doClear = async () => {
+      if (clearingScopesRef.current.has(capturedScope)) {
+        return;
+      }
+
+      // Khóa gửi tin và thử lại trước khi await ghi clearRecord để tránh có lượt mới chen vào trước khi clear được xếp hàng
+      clearingScopesRef.current.add(capturedScope);
+      if (activeScopeRef.current === capturedScope) {
+        setClearingScopeKey(capturedScope);
+      }
+
+      const releaseClearingGuard = () => {
+        clearingScopesRef.current.delete(capturedScope);
+        setClearingScopeKey((prev) => (prev === capturedScope ? null : prev));
+      };
+
       const clearOpId = nextOpId();
       const createdAt = Date.now();
       const clearId = `clear-${clearOpId}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1394,10 +1447,11 @@ export default function AIChatPanel({
         baseRevision: capturedBaseRevision,
       };
 
-      // Dùng clearRecord duy nhất làm điểm commit bền vững: nếu ghi thất bại thì dừng hẳn trước khi dọn dẹp
+      // Dùng clearRecord duy nhất làm điểm commit bền vững: nếu ghi thất bại thì khôi phục khả năng gửi/thử lại và dừng hẳn
       try {
         await AsyncStorage.setItem(capturedLocalCleanup, JSON.stringify(initialClearRecord));
       } catch {
+        releaseClearingGuard();
         const msg = 'Không thể lưu trạng thái xóa lịch sử trò chuyện. Vui lòng thử lại.';
         if (Platform.OS === 'web') {
           window.alert(msg);
@@ -1422,7 +1476,8 @@ export default function AIChatPanel({
         }));
       }
 
-      await enqueueScopedWrite(capturedScope, async () => {
+      // Xếp hàng tác vụ xóa TRƯỚC khi mở lại khả năng gửi tin để mọi lượt mới luôn chạy sau lệnh xóa này
+      const queuedClearPromise = enqueueScopedWrite(capturedScope, async () => {
         // Bỏ qua nếu đã có thao tác xóa/lưu mới hơn sau clearOpId này
         const currentRaw = await AsyncStorage.getItem(capturedLocalCleanup).catch(() => null);
         const currentMarker = parseClearIntentMarker(currentRaw);
@@ -1491,6 +1546,9 @@ export default function AIChatPanel({
           await AsyncStorage.removeItem(capturedLocalCleanup).catch(() => undefined);
         }
       });
+
+      releaseClearingGuard();
+      await queuedClearPromise;
     };
 
     if (Platform.OS === 'web') {
@@ -1639,7 +1697,7 @@ export default function AIChatPanel({
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
             copied={copiedMessageId === msg.id}
-            isLoading={isLoading}
+            isLoading={isLoading || isScopeClearing}
           />
         ))}
         {isLoading && (
@@ -1657,21 +1715,28 @@ export default function AIChatPanel({
             style={styles.textInput}
             value={inputText}
             onChangeText={setInputText}
-            placeholder={isScopeLoaded ? 'Mô tả thực thể muốn tạo...' : 'Đang tải lịch sử trò chuyện...'}
+            placeholder={
+              isScopeClearing
+                ? 'Đang xóa lịch sử trò chuyện...'
+                : isScopeLoaded
+                  ? 'Mô tả thực thể muốn tạo...'
+                  : 'Đang tải lịch sử trò chuyện...'
+            }
             placeholderTextColor="#6e6150"
             multiline
             maxLength={500}
-            editable={isScopeLoaded}
+            editable={isScopeLoaded && !isScopeClearing}
             onSubmitEditing={handleSend}
             blurOnSubmit={false}
           />
           <Pressable
             style={[
               styles.sendBtn,
-              (!inputText.trim() || isLoading || !isScopeLoaded) && styles.sendBtnDisabled,
+              (!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing) &&
+                styles.sendBtnDisabled,
             ]}
             onPress={handleSend}
-            disabled={!inputText.trim() || isLoading || !isScopeLoaded}>
+            disabled={!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing}>
             <Text style={styles.sendBtnText}>↑</Text>
           </Pressable>
         </View>
