@@ -1503,9 +1503,10 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       "severity": "error",
       "category": "Nhân vật đã chết",
       "title": "<Tiêu đề ngắn gọn của lỗi>",
-      "quote": "<Trích dẫn ngắn đoạn văn chứa lỗi trong chương>",
+      "quote": "<Trích dẫn CHÍNH XÁC nguyên văn câu/đoạn ngắn chứa lỗi từ chương gốc để hệ thống có thể thay thế 1-1>",
       "explanation": "<Giải thích rõ vì sao lỗi khi đối chiếu với đồ thị hiện có>",
-      "suggestion": "<Gợi ý cách sửa cụ thể cho tác giả>",
+      "suggestion": "<Gợi ý hướng xử lý ngắn gọn cho tác giả>",
+      "suggestedRewrite": "<Đoạn văn đã được viết lại hoàn chỉnh, tự nhiên theo đúng văn phong chương để thay thế trực tiếp cho phần quote ở trên>",
       "relatedEntities": ["<Tên thực thể liên quan>"]
     }
   ],
@@ -1611,6 +1612,7 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
         quote: String(item.quote || '').trim(),
         explanation: String(item.explanation || '').trim(),
         suggestion: String(item.suggestion || '').trim(),
+        suggestedRewrite: String(item.suggestedRewrite || '').trim(),
         relatedEntities: Array.isArray(item.relatedEntities)
           ? item.relatedEntities.map((e) => String(e).trim()).filter(Boolean)
           : [],

@@ -3,6 +3,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   Pressable,
@@ -15,9 +16,19 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { GraphSidebar } from '@/components/graph/GraphSidebar';
+import { DatePickerField } from '@/components/ui/DatePickerField';
+import { FormSelectField } from '@/components/ui/FormSelectField';
 import {
+  CHARACTER_PROFESSIONS,
+  CHARACTER_STATUS_OPTIONS,
+  FACTION_CLASSIFICATIONS,
+  FACTION_STATUS_OPTIONS,
   getProjectChapters,
   INITIAL_PROJECTS,
+  ITEM_RARITY_OPTIONS,
+  LOCATION_CLIMATE_OPTIONS,
+  LOCATION_DANGER_OPTIONS,
+  LOCATION_REGION_OPTIONS,
   StoryNode,
   StoryProject,
 } from '@/constants/story-data';
@@ -27,6 +38,12 @@ import { projectStore } from '@/services/project-store';
 
 type EntityType = 'character' | 'item' | 'location' | 'faction';
 
+const GENDER_OPTIONS = [
+  { label: 'Nam', value: 'Nam', icon: '♂️' },
+  { label: 'Nữ', value: 'Nữ', icon: '♀️' },
+  { label: 'Khác / Phi giới tính', value: 'Khác', icon: '⚧️' },
+];
+
 interface EditableIssue {
   id: string;
   severity: 'error' | 'warning' | 'info';
@@ -35,8 +52,11 @@ interface EditableIssue {
   quote: string;
   explanation: string;
   suggestion: string;
+  suggestedRewrite: string;
   relatedEntities: string[];
   resolved: boolean;
+  applied: boolean;
+  appliedOriginal?: string;
 }
 
 interface EditableSuggestedNode {
@@ -47,6 +67,7 @@ interface EditableSuggestedNode {
   role: string;
   desc: string;
   status: string;
+  statusEvent: string;
   gender: string;
   dob: string;
   birthplace: string;
@@ -77,7 +98,7 @@ interface EditableSuggestedEvent {
   location: string;
   time: string;
   impact: string;
-  charactersText: string;
+  charactersInvolved: string[];
 }
 
 interface EditableStatusChange {
@@ -91,9 +112,9 @@ interface EditableStatusChange {
 
 const ENTITY_TYPE_META: Record<EntityType, { label: string; icon: string; color: string }> = {
   character: { label: 'Nhân vật', icon: '👤', color: '#e5a93c' },
-  item: { label: 'Vật phẩm', icon: '⚔️', color: '#c48f65' },
-  location: { label: 'Địa điểm', icon: '📍', color: '#6ba892' },
-  faction: { label: 'Tổ chức', icon: '🏛️', color: '#9f87d4' },
+  item: { label: 'Vật phẩm', icon: '⚔️', color: '#42b883' },
+  location: { label: 'Địa điểm', icon: '📍', color: '#9f70cf' },
+  faction: { label: 'Tổ chức', icon: '🏛️', color: '#d95a38' },
 };
 
 const SEVERITY_META = {
@@ -123,6 +144,44 @@ const SEVERITY_META = {
   },
 } as const;
 
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function replaceQuoteInText(
+  sourceText: string,
+  quote: string,
+  replacement: string
+): { updatedText: string; matchedText: string } | null {
+  const cleanQuote = quote.trim();
+  if (!cleanQuote) return null;
+
+  const exactIdx = sourceText.indexOf(cleanQuote);
+  if (exactIdx !== -1) {
+    return {
+      updatedText:
+        sourceText.slice(0, exactIdx) + replacement + sourceText.slice(exactIdx + cleanQuote.length),
+      matchedText: cleanQuote,
+    };
+  }
+
+  // Fallback: khớp linh hoạt theo khoảng trắng / xuống dòng
+  const tokens = cleanQuote.split(/\s+/).filter(Boolean).map(escapeRegex);
+  if (tokens.length === 0) return null;
+  const flexRegex = new RegExp(tokens.join('\\s+'));
+  const match = sourceText.match(flexRegex);
+  if (!match || match.index === undefined) return null;
+
+  const matchedText = match[0];
+  return {
+    updatedText:
+      sourceText.slice(0, match.index) +
+      replacement +
+      sourceText.slice(match.index + matchedText.length),
+    matchedText,
+  };
+}
+
 function createEmptySuggestedNode(type: EntityType = 'character'): EditableSuggestedNode {
   return {
     localId: `snode-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -139,6 +198,7 @@ function createEmptySuggestedNode(type: EntityType = 'character'): EditableSugge
           : type === 'faction'
             ? 'Đang hoạt động'
             : 'Hoạt động',
+    statusEvent: '',
     gender: '',
     dob: '',
     birthplace: '',
@@ -154,7 +214,7 @@ function createEmptySuggestedNode(type: EntityType = 'character'): EditableSugge
     terrain: '',
     dangerLevel: '',
     ruler: '',
-    subType: '',
+    subType: type === 'faction' ? 'Đồng minh' : '',
     alignment: '',
     leader: '',
     headquarters: '',
@@ -171,7 +231,7 @@ function createEmptySuggestedEvent(): EditableSuggestedEvent {
     location: '',
     time: '',
     impact: '',
-    charactersText: '',
+    charactersInvolved: [],
   };
 }
 
@@ -199,11 +259,12 @@ export default function TextCheckerScreen() {
   const [statusChanges, setStatusChanges] = useState<EditableStatusChange[]>([]);
   const [activeResultTab, setActiveResultTab] = useState<'issues' | 'nodes' | 'events'>('issues');
 
-  // Modal chỉnh sửa node / event đề xuất
+  // Modal chỉnh sửa node / event đề xuất (tái sử dụng chuẩn form của dự án)
   const [editingNode, setEditingNode] = useState<EditableSuggestedNode | null>(null);
   const [isAddingNewNode, setIsAddingNewNode] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EditableSuggestedEvent | null>(null);
   const [isAddingNewEvent, setIsAddingNewEvent] = useState(false);
+  const [customParticipantInput, setCustomParticipantInput] = useState('');
 
   // Lưu vào database
   const [isSaving, setIsSaving] = useState(false);
@@ -212,6 +273,9 @@ export default function TextCheckerScreen() {
     nodesCount: number;
     eventsCount: number;
   } | null>(null);
+
+  // Khóa toàn bộ nhập liệu khi AI đang phân tích hoặc đang lưu vào DB
+  const isLocked = isAnalyzing || isSaving;
 
   useEffect(() => {
     let isMounted = true;
@@ -235,6 +299,147 @@ export default function TextCheckerScreen() {
       isMounted = false;
     };
   }, [projectId]);
+
+  // Danh sách các thực thể hiện có + đề xuất mới để chọn trong FormSelectField (giống graph/index.tsx)
+  const characterOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string; subtitle?: string; icon: string }>();
+    for (const n of currentProject.nodes || []) {
+      if (n.type === 'character' && n.name) {
+        map.set(n.name.toLocaleLowerCase('vi'), {
+          label: n.name,
+          value: n.name,
+          subtitle: n.role || 'Nhân vật hiện có',
+          icon: '👤',
+        });
+      }
+    }
+    for (const n of suggestedNodes) {
+      if (n.type === 'character' && n.name.trim()) {
+        const key = n.name.trim().toLocaleLowerCase('vi');
+        if (!map.has(key)) {
+          map.set(key, {
+            label: n.name.trim(),
+            value: n.name.trim(),
+            subtitle: n.role || 'Nhân vật mới đề xuất',
+            icon: '✨',
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [currentProject.nodes, suggestedNodes]);
+
+  const locationOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string; subtitle?: string; icon: string }>();
+    for (const n of currentProject.nodes || []) {
+      if (n.type === 'location' && n.name) {
+        map.set(n.name.toLocaleLowerCase('vi'), {
+          label: n.name,
+          value: n.name,
+          subtitle: n.region || n.role || 'Địa danh',
+          icon: '📍',
+        });
+      }
+    }
+    for (const n of suggestedNodes) {
+      if (n.type === 'location' && n.name.trim()) {
+        const key = n.name.trim().toLocaleLowerCase('vi');
+        if (!map.has(key)) {
+          map.set(key, {
+            label: n.name.trim(),
+            value: n.name.trim(),
+            subtitle: n.region || 'Địa điểm mới đề xuất',
+            icon: '✨',
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [currentProject.nodes, suggestedNodes]);
+
+  const itemOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string; subtitle?: string; icon: string }>();
+    for (const n of currentProject.nodes || []) {
+      if (n.type === 'item' && n.name) {
+        map.set(n.name.toLocaleLowerCase('vi'), {
+          label: n.name,
+          value: n.name,
+          subtitle: n.rarity || n.role || 'Vật phẩm',
+          icon: '🗡️',
+        });
+      }
+    }
+    for (const n of suggestedNodes) {
+      if (n.type === 'item' && n.name.trim()) {
+        const key = n.name.trim().toLocaleLowerCase('vi');
+        if (!map.has(key)) {
+          map.set(key, {
+            label: n.name.trim(),
+            value: n.name.trim(),
+            subtitle: n.rarity || 'Vật phẩm mới đề xuất',
+            icon: '✨',
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [currentProject.nodes, suggestedNodes]);
+
+  const factionOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string; subtitle?: string; icon: string }>();
+    for (const n of currentProject.nodes || []) {
+      if (n.type === 'faction' && n.name) {
+        map.set(n.name.toLocaleLowerCase('vi'), {
+          label: n.name,
+          value: n.name,
+          subtitle: n.alignment || n.role || 'Tổ chức',
+          icon: '🏛️',
+        });
+      }
+    }
+    for (const n of suggestedNodes) {
+      if (n.type === 'faction' && n.name.trim()) {
+        const key = n.name.trim().toLocaleLowerCase('vi');
+        if (!map.has(key)) {
+          map.set(key, {
+            label: n.name.trim(),
+            value: n.name.trim(),
+            subtitle: n.alignment || 'Tổ chức mới đề xuất',
+            icon: '✨',
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [currentProject.nodes, suggestedNodes]);
+
+  const eventOptions = useMemo(() => {
+    const map = new Map<string, { label: string; value: string; subtitle?: string; icon: string }>();
+    for (const n of currentProject.nodes || []) {
+      if (n.type === 'event' && n.name) {
+        map.set(n.name.toLocaleLowerCase('vi'), {
+          label: n.name,
+          value: n.name,
+          subtitle: n.chapter || 'Biến cố',
+          icon: '⚡',
+        });
+      }
+    }
+    for (const ev of suggestedEvents) {
+      if (ev.name.trim()) {
+        const key = ev.name.trim().toLocaleLowerCase('vi');
+        if (!map.has(key)) {
+          map.set(key, {
+            label: ev.name.trim(),
+            value: ev.name.trim(),
+            subtitle: 'Sự kiện trong chương này',
+            icon: '✨',
+          });
+        }
+      }
+    }
+    return Array.from(map.values());
+  }, [currentProject.nodes, suggestedEvents]);
 
   const wordCount = useMemo(() => {
     const trimmed = chapterText.trim();
@@ -272,6 +477,7 @@ export default function TextCheckerScreen() {
   };
 
   const handleAnalyze = async () => {
+    if (isLocked) return;
     const trimmedText = chapterText.trim();
     if (trimmedText.length < 20) {
       showNotice(
@@ -315,7 +521,9 @@ export default function TextCheckerScreen() {
 
       const mappedIssues: EditableIssue[] = (data.issues || []).map((item) => ({
         ...item,
+        suggestedRewrite: item.suggestedRewrite || '',
         resolved: false,
+        applied: false,
       }));
       setIssues(mappedIssues);
 
@@ -343,7 +551,7 @@ export default function TextCheckerScreen() {
         terrain: n.terrain || '',
         dangerLevel: n.dangerLevel || '',
         ruler: n.ruler || '',
-        subType: n.subType || '',
+        subType: n.subType || (n.type === 'faction' ? 'Đồng minh' : ''),
         alignment: n.alignment || '',
         leader: n.leader || '',
         headquarters: n.headquarters || '',
@@ -359,9 +567,9 @@ export default function TextCheckerScreen() {
         location: ev.location || '',
         time: ev.time || '',
         impact: ev.impact || '',
-        charactersText: Array.isArray(ev.charactersInvolved)
-          ? ev.charactersInvolved.join(', ')
-          : '',
+        charactersInvolved: Array.isArray(ev.charactersInvolved)
+          ? ev.charactersInvolved.filter(Boolean)
+          : [],
       }));
       setSuggestedEvents(mappedEvents);
 
@@ -393,6 +601,52 @@ export default function TextCheckerScreen() {
     } finally {
       setIsAnalyzing(false);
     }
+  };
+
+  // Chấp nhận đề xuất sửa của AI: thay trực tiếp đoạn quote trong chapterText bằng suggestedRewrite
+  const handleAcceptRewrite = (issue: EditableIssue) => {
+    if (isLocked || !issue.suggestedRewrite.trim() || !issue.quote.trim()) return;
+    const replaced = replaceQuoteInText(chapterText, issue.quote, issue.suggestedRewrite.trim());
+    if (!replaced) {
+      showNotice(
+        'Không tìm thấy đoạn văn gốc',
+        'Đoạn trích dẫn này có thể đã được bạn chỉnh sửa trước đó trong văn bản chương. Vui lòng kiểm tra lại hoặc bấm "Phân tích lại".'
+      );
+      return;
+    }
+    setChapterText(replaced.updatedText);
+    setIssues((prev) =>
+      prev.map((it) =>
+        it.id === issue.id
+          ? { ...it, applied: true, resolved: true, appliedOriginal: replaced.matchedText }
+          : it
+      )
+    );
+  };
+
+  // Hoàn tác đề xuất sửa đã áp dụng
+  const handleUndoRewrite = (issue: EditableIssue) => {
+    if (isLocked || !issue.applied || !issue.appliedOriginal || !issue.suggestedRewrite.trim()) return;
+    const reverted = replaceQuoteInText(
+      chapterText,
+      issue.suggestedRewrite.trim(),
+      issue.appliedOriginal
+    );
+    if (!reverted) {
+      showNotice(
+        'Không thể hoàn tác tự động',
+        'Đoạn văn đã được chỉnh sửa thêm sau khi áp dụng đề xuất.'
+      );
+      return;
+    }
+    setChapterText(reverted.updatedText);
+    setIssues((prev) =>
+      prev.map((it) =>
+        it.id === issue.id
+          ? { ...it, applied: false, resolved: false, appliedOriginal: undefined }
+          : it
+      )
+    );
   };
 
   const executeSaveToDatabase = async () => {
@@ -446,6 +700,7 @@ export default function TextCheckerScreen() {
           role: item.role.trim(),
           desc: item.desc.trim(),
           status: item.status.trim(),
+          statusEvent: item.statusEvent.trim(),
           gender: item.gender.trim(),
           dob: item.dob.trim(),
           birthplace: item.birthplace.trim(),
@@ -481,11 +736,6 @@ export default function TextCheckerScreen() {
       const eventsToSave = suggestedEvents.filter((e) => e.selected && e.name.trim());
       let savedEventsCount = 0;
       for (const ev of eventsToSave) {
-        const participantNames = ev.charactersText
-          .split(/[,;\n]+/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-
         const createdEventNode = await projectStore.createNode(projectId, {
           type: 'event',
           name: ev.name.trim(),
@@ -496,7 +746,7 @@ export default function TextCheckerScreen() {
           location: ev.location.trim(),
           time: ev.time.trim(),
           impact: ev.impact.trim(),
-          charactersInvolved: JSON.stringify(participantNames),
+          charactersInvolved: JSON.stringify(ev.charactersInvolved),
           autoCreatedStub: false,
         });
 
@@ -538,6 +788,11 @@ export default function TextCheckerScreen() {
         nodesCount: savedNodesCount,
         eventsCount: savedEventsCount,
       });
+
+      router.replace({
+        pathname: '/graph/events',
+        params: { projectId: refreshedProject.id || projectId },
+      });
     } catch (err: any) {
       showNotice(
         'Lưu chưa hoàn tất',
@@ -549,6 +804,7 @@ export default function TextCheckerScreen() {
   };
 
   const handleSavePress = () => {
+    if (isLocked) return;
     if (unresolvedErrorCount > 0) {
       const warningMsg = `Vẫn còn ${unresolvedErrorCount} lỗi logic nghiêm trọng chưa đánh dấu xử lý. Bạn có muốn tiếp tục lưu đồ thị và chương mới không?`;
       if (Platform.OS === 'web') {
@@ -598,9 +854,23 @@ export default function TextCheckerScreen() {
     }
     setEditingEvent(null);
     setIsAddingNewEvent(false);
+    setCustomParticipantInput('');
+  };
+
+  const handleAddCustomParticipant = () => {
+    const clean = customParticipantInput.trim();
+    if (!clean || !editingEvent) return;
+    if (!editingEvent.charactersInvolved.includes(clean)) {
+      setEditingEvent({
+        ...editingEvent,
+        charactersInvolved: [...editingEvent.charactersInvolved, clean],
+      });
+    }
+    setCustomParticipantInput('');
   };
 
   const handleResetWorkspace = () => {
+    if (isLocked) return;
     setChapterTitle('');
     setChapterText('');
     setChapterSummary('');
@@ -620,7 +890,8 @@ export default function TextCheckerScreen() {
           <Pressable
             hitSlop={12}
             style={({ pressed }) => [styles.menuBtn, pressed && styles.menuBtnPressed]}
-            onPress={() => setSidebarVisible(true)}>
+            onPress={() => setSidebarVisible(true)}
+            disabled={isLocked}>
             <Text style={styles.menuBtnIcon}>☰</Text>
           </Pressable>
           <View style={{ flex: 1 }}>
@@ -633,7 +904,10 @@ export default function TextCheckerScreen() {
         </View>
 
         {hasAnalyzed && (
-          <Pressable style={styles.resetHeaderBtn} onPress={handleResetWorkspace}>
+          <Pressable
+            style={[styles.resetHeaderBtn, isLocked && styles.btnDisabled]}
+            onPress={handleResetWorkspace}
+            disabled={isLocked}>
             <Text style={styles.resetHeaderBtnText}>Viết mới</Text>
           </Pressable>
         )}
@@ -677,15 +951,21 @@ export default function TextCheckerScreen() {
 
         {/* Khối 1: Nhập nội dung chương */}
         <View style={styles.card}>
-          <Text style={styles.sectionLabel}>01 · NHẬP CHƯƠNG TỰ VIẾT</Text>
+          <View style={styles.sectionHeaderRow}>
+            <Text style={styles.sectionLabel}>01 · NHẬP CHƯƠNG TỰ VIẾT</Text>
+            {isAnalyzing && (
+              <Text style={styles.analyzingLockHint}>🔒 Đang phân tích, tạm khóa nhập liệu...</Text>
+            )}
+          </View>
           <View style={styles.chapterMetaRow}>
             <View style={{ width: 92 }}>
               <Text style={styles.fieldLabel}>Số chương</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isLocked && styles.inputLocked]}
                 value={chapterNumberInput}
                 onChangeText={setChapterNumberInput}
                 keyboardType="number-pad"
+                editable={!isLocked}
                 placeholder="1"
                 placeholderTextColor="#6d6253"
               />
@@ -693,9 +973,10 @@ export default function TextCheckerScreen() {
             <View style={{ flex: 1 }}>
               <Text style={styles.fieldLabel}>Tiêu đề chương</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, isLocked && styles.inputLocked]}
                 value={chapterTitle}
                 onChangeText={setChapterTitle}
+                editable={!isLocked}
                 placeholder="VD: Chương 4: Bóng tối dưới tháp cổ"
                 placeholderTextColor="#6d6253"
               />
@@ -709,19 +990,20 @@ export default function TextCheckerScreen() {
             </Text>
           </View>
           <TextInput
-            style={[styles.input, styles.chapterTextArea]}
+            style={[styles.input, styles.chapterTextArea, isLocked && styles.inputLocked]}
             value={chapterText}
             onChangeText={setChapterText}
             multiline
+            editable={!isLocked}
             textAlignVertical="top"
-            placeholder="Dán hoặc tự viết nội dung chương truyện tại đây...&#10;&#10;AI sẽ đối chiếu toàn bộ bản đồ nhân vật, địa điểm, vật phẩm, tổ chức và các chương trước để phát hiện lỗi logic (nhân vật đã chết xuất hiện, sai lịch sử địa điểm, mâu thuẫn vật phẩm...) đồng thời đề xuất các node & sự kiện mới."
+            placeholder="Dán hoặc tự viết nội dung chương truyện tại đây...&#10;&#10;AI sẽ đối chiếu toàn bộ bản đồ nhân vật, địa điểm, vật phẩm, tổ chức và các chương trước để phát hiện lỗi logic (nhân vật đã chết xuất hiện, sai lịch sử địa điểm, mâu thuẫn vật phẩm...), đề xuất đoạn viết lại và trích xuất các node & sự kiện mới."
             placeholderTextColor="#6d6253"
           />
 
           <Pressable
-            style={[styles.primaryBtn, (isAnalyzing || !chapterText.trim()) && styles.btnDisabled]}
+            style={[styles.primaryBtn, (isLocked || !chapterText.trim()) && styles.btnDisabled]}
             onPress={handleAnalyze}
-            disabled={isAnalyzing || !chapterText.trim()}>
+            disabled={isLocked || !chapterText.trim()}>
             {isAnalyzing ? (
               <View style={styles.btnInlineRow}>
                 <ActivityIndicator size="small" color="#12100d" />
@@ -743,10 +1025,11 @@ export default function TextCheckerScreen() {
               <Text style={styles.sectionLabel}>02 · TÓM TẮT CHƯƠNG & TRẠNG THÁI</Text>
               <Text style={styles.fieldLabel}>Tóm tắt chương (lưu vào Chi tiết chương)</Text>
               <TextInput
-                style={[styles.input, { minHeight: 72 }]}
+                style={[styles.input, { minHeight: 72 }, isLocked && styles.inputLocked]}
                 value={chapterSummary}
                 onChangeText={setChapterSummary}
                 multiline
+                editable={!isLocked}
                 textAlignVertical="top"
                 placeholder="Tóm tắt ngắn gọn diễn biến chính của chương..."
                 placeholderTextColor="#6d6253"
@@ -765,6 +1048,7 @@ export default function TextCheckerScreen() {
                         styles.statusChangeCard,
                         !sc.selected && styles.cardDimmed,
                       ]}
+                      disabled={isLocked}
                       onPress={() =>
                         setStatusChanges((prev) =>
                           prev.map((x) =>
@@ -874,6 +1158,7 @@ export default function TextCheckerScreen() {
                           </View>
                           <Pressable
                             style={styles.resolveBtn}
+                            disabled={isLocked}
                             onPress={() =>
                               setIssues((prev) =>
                                 prev.map((it) =>
@@ -891,6 +1176,7 @@ export default function TextCheckerScreen() {
 
                         {!!issue.quote && (
                           <View style={styles.quoteBox}>
+                            <Text style={styles.quoteLabel}>Đoạn gốc trong chương:</Text>
                             <Text style={styles.quoteText}>"{issue.quote}"</Text>
                           </View>
                         )}
@@ -901,8 +1187,43 @@ export default function TextCheckerScreen() {
 
                         {!!issue.suggestion && (
                           <Text style={styles.issueSuggestion}>
-                            💡 Gợi ý sửa: {issue.suggestion}
+                            💡 Hướng xử lý: {issue.suggestion}
                           </Text>
+                        )}
+
+                        {/* Đề xuất sửa trực tiếp của AI + nút Chấp nhận thay vào văn bản gốc */}
+                        {!!issue.suggestedRewrite && (
+                          <View style={styles.rewriteBox}>
+                            <Text style={styles.rewriteLabel}>✨ Đề xuất sửa của AI:</Text>
+                            <Text style={styles.rewriteText}>"{issue.suggestedRewrite}"</Text>
+                            <View style={styles.rewriteActionsRow}>
+                              {!issue.applied ? (
+                                <Pressable
+                                  style={[
+                                    styles.acceptRewriteBtn,
+                                    (isLocked || !issue.quote.trim()) && styles.btnDisabled,
+                                  ]}
+                                  disabled={isLocked || !issue.quote.trim()}
+                                  onPress={() => handleAcceptRewrite(issue)}>
+                                  <Text style={styles.acceptRewriteBtnText}>
+                                    ✓ Chấp nhận đề xuất
+                                  </Text>
+                                </Pressable>
+                              ) : (
+                                <View style={styles.appliedRow}>
+                                  <Text style={styles.appliedBadgeText}>
+                                    ✅ Đã thay vào văn bản gốc
+                                  </Text>
+                                  <Pressable
+                                    style={styles.undoRewriteBtn}
+                                    disabled={isLocked}
+                                    onPress={() => handleUndoRewrite(issue)}>
+                                    <Text style={styles.undoRewriteBtnText}>↩ Hoàn tác</Text>
+                                  </Pressable>
+                                </View>
+                              )}
+                            </View>
+                          </View>
                         )}
 
                         {issue.relatedEntities.length > 0 && (
@@ -929,7 +1250,8 @@ export default function TextCheckerScreen() {
                     Chọn và chỉnh sửa các thực thể mới sẽ thêm vào đồ thị:
                   </Text>
                   <Pressable
-                    style={styles.addSmallBtn}
+                    style={[styles.addSmallBtn, isLocked && styles.btnDisabled]}
+                    disabled={isLocked}
                     onPress={() => {
                       setIsAddingNewNode(true);
                       setEditingNode(createEmptySuggestedNode('character'));
@@ -956,6 +1278,7 @@ export default function TextCheckerScreen() {
                         <View style={styles.suggestionTopRow}>
                           <Pressable
                             style={styles.checkboxHit}
+                            disabled={isLocked}
                             onPress={() =>
                               setSuggestedNodes((prev) =>
                                 prev.map((n) =>
@@ -980,6 +1303,7 @@ export default function TextCheckerScreen() {
                           </View>
                           <Pressable
                             style={styles.editMiniBtn}
+                            disabled={isLocked}
                             onPress={() => {
                               setIsAddingNewNode(false);
                               setEditingNode({ ...node });
@@ -988,6 +1312,7 @@ export default function TextCheckerScreen() {
                           </Pressable>
                           <Pressable
                             style={styles.deleteMiniBtn}
+                            disabled={isLocked}
                             onPress={() =>
                               setSuggestedNodes((prev) =>
                                 prev.filter((n) => n.localId !== node.localId)
@@ -1014,10 +1339,12 @@ export default function TextCheckerScreen() {
                     Các sự kiện được chọn sẽ tạo thành node Sự kiện và gán vào chương này:
                   </Text>
                   <Pressable
-                    style={styles.addSmallBtn}
+                    style={[styles.addSmallBtn, isLocked && styles.btnDisabled]}
+                    disabled={isLocked}
                     onPress={() => {
                       setIsAddingNewEvent(true);
                       setEditingEvent(createEmptySuggestedEvent());
+                      setCustomParticipantInput('');
                     }}>
                     <Text style={styles.addSmallBtnText}>+ Thêm sự kiện</Text>
                   </Pressable>
@@ -1038,6 +1365,7 @@ export default function TextCheckerScreen() {
                       <View style={styles.suggestionTopRow}>
                         <Pressable
                           style={styles.checkboxHit}
+                          disabled={isLocked}
                           onPress={() =>
                             setSuggestedEvents((prev) =>
                               prev.map((item) =>
@@ -1059,14 +1387,20 @@ export default function TextCheckerScreen() {
                         </View>
                         <Pressable
                           style={styles.editMiniBtn}
+                          disabled={isLocked}
                           onPress={() => {
                             setIsAddingNewEvent(false);
-                            setEditingEvent({ ...ev });
+                            setEditingEvent({
+                              ...ev,
+                              charactersInvolved: [...ev.charactersInvolved],
+                            });
+                            setCustomParticipantInput('');
                           }}>
                           <Text style={styles.editMiniBtnText}>✏️ Sửa</Text>
                         </Pressable>
                         <Pressable
                           style={styles.deleteMiniBtn}
+                          disabled={isLocked}
                           onPress={() =>
                             setSuggestedEvents((prev) =>
                               prev.filter((item) => item.localId !== ev.localId)
@@ -1076,9 +1410,9 @@ export default function TextCheckerScreen() {
                         </Pressable>
                       </View>
                       {!!ev.desc && <Text style={styles.suggestionDesc}>{ev.desc}</Text>}
-                      {!!ev.charactersText && (
+                      {ev.charactersInvolved.length > 0 && (
                         <Text style={styles.eventCharsText}>
-                          👥 Nhân vật: {ev.charactersText}
+                          👥 Nhân vật: {ev.charactersInvolved.join(', ')}
                         </Text>
                       )}
                       {!!ev.impact && (
@@ -1107,9 +1441,9 @@ export default function TextCheckerScreen() {
             </Text>
           </View>
           <Pressable
-            style={[styles.saveBtn, isSaving && styles.btnDisabled]}
+            style={[styles.saveBtn, isLocked && styles.btnDisabled]}
             onPress={handleSavePress}
-            disabled={isSaving}>
+            disabled={isLocked}>
             {isSaving ? (
               <ActivityIndicator size="small" color="#12100d" />
             ) : (
@@ -1119,20 +1453,22 @@ export default function TextCheckerScreen() {
         </View>
       )}
 
-      {/* Modal chỉnh sửa Node đề xuất */}
+      {/* Modal chỉnh sửa Node đề xuất — Tái sử dụng chuẩn form & options của dự án (graph/index.tsx) */}
       <Modal
         visible={editingNode !== null}
         transparent
         animationType="fade"
         onRequestClose={() => setEditingNode(null)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              {isAddingNewNode ? 'Thêm node đề xuất' : 'Chỉnh sửa node đề xuất'}
+              {isAddingNewNode ? 'Tạo Thực Thể Mới' : 'Chỉnh Sửa Thực Thể'}
             </Text>
             {editingNode && (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 460 }}>
-                <Text style={styles.fieldLabel}>Loại thực thể</Text>
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
+                <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
                 <View style={styles.typeChipsRow}>
                   {(['character', 'item', 'location', 'faction'] as EntityType[]).map((t) => {
                     const meta = ENTITY_TYPE_META[t];
@@ -1141,7 +1477,20 @@ export default function TextCheckerScreen() {
                       <Pressable
                         key={t}
                         style={[styles.typeChip, active && styles.typeChipActive]}
-                        onPress={() => setEditingNode({ ...editingNode, type: t })}>
+                        onPress={() =>
+                          setEditingNode({
+                            ...editingNode,
+                            type: t,
+                            status:
+                              t === 'character'
+                                ? 'Còn sống'
+                                : t === 'item'
+                                  ? 'Nguyên vẹn'
+                                  : t === 'faction'
+                                    ? 'Đang hoạt động'
+                                    : 'Hoạt động',
+                          })
+                        }>
                         <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
                           {meta.icon} {meta.label}
                         </Text>
@@ -1155,162 +1504,290 @@ export default function TextCheckerScreen() {
                   style={styles.input}
                   value={editingNode.name}
                   onChangeText={(v) => setEditingNode({ ...editingNode, name: v })}
-                  placeholder="Nhập tên..."
+                  placeholder={
+                    editingNode.type === 'character'
+                      ? 'Ví dụ: Lăng Tiêu'
+                      : editingNode.type === 'item'
+                        ? 'Ví dụ: Hồ Sơ Hoàng Hôn'
+                        : editingNode.type === 'location'
+                          ? 'Ví dụ: Thành phố Bắc Nguyệt'
+                          : 'Ví dụ: Tập đoàn Thiên Hạ'
+                  }
                   placeholderTextColor="#6d6253"
                 />
 
-                <Text style={styles.fieldLabel}>Vai trò / Phân loại ngắn</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingNode.role}
-                  onChangeText={(v) => setEditingNode({ ...editingNode, role: v })}
-                  placeholder="VD: NHÂN VẬT PHỤ, Quý hiếm, Địa danh..."
-                  placeholderTextColor="#6d6253"
-                />
+                {/* ============ THÔNG TIN NHÂN VẬT ============ */}
+                {editingNode.type === 'character' && (
+                  <View style={styles.dynamicSectionBox}>
+                    <Text style={styles.dynamicSectionHeader}>THÔNG TIN NHÂN VẬT</Text>
 
-                <Text style={styles.fieldLabel}>Trạng thái</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingNode.status}
-                  onChangeText={(v) => setEditingNode({ ...editingNode, status: v })}
-                  placeholder="Còn sống / Nguyên vẹn / Hoạt động..."
-                  placeholderTextColor="#6d6253"
-                />
+                    <Text style={styles.fieldLabel}>Vai trò / Nhãn</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editingNode.role}
+                      onChangeText={(v) => setEditingNode({ ...editingNode, role: v })}
+                      placeholder="Ví dụ: NHÂN VẬT CHÍNH"
+                      placeholderTextColor="#6d6253"
+                    />
 
-                <Text style={styles.fieldLabel}>Mô tả</Text>
+                    <Text style={styles.fieldLabel}>Phân loại phụ (Nghề nghiệp)</Text>
+                    <FormSelectField
+                      value={editingNode.subType}
+                      onChange={(v) => setEditingNode({ ...editingNode, subType: v })}
+                      options={CHARACTER_PROFESSIONS.map((p) => ({
+                        label: p,
+                        value: p,
+                        icon: '🎭',
+                      }))}
+                      allowCustom
+                      placeholder="-- Chọn nghề nghiệp --"
+                      customPlaceholder="Tự nhập nghề nghiệp khác..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Trạng thái hiện tại</Text>
+                    <FormSelectField
+                      value={editingNode.status}
+                      onChange={(v) => setEditingNode({ ...editingNode, status: v })}
+                      options={CHARACTER_STATUS_OPTIONS}
+                      placeholder="-- Chọn trạng thái --"
+                    />
+
+                    {(editingNode.status === 'Đã chết' || editingNode.status === 'Hồi sinh') && (
+                      <>
+                        <Text style={styles.fieldLabel}>
+                          Sự kiện {editingNode.status === 'Đã chết' ? 'tử nạn' : 'hồi sinh'}
+                        </Text>
+                        <FormSelectField
+                          value={editingNode.statusEvent}
+                          onChange={(v) => setEditingNode({ ...editingNode, statusEvent: v })}
+                          options={eventOptions}
+                          allowCustom
+                          placeholder="-- Chọn hoặc bỏ trống --"
+                          customPlaceholder="Nhập tên sự kiện mới..."
+                        />
+                      </>
+                    )}
+
+                    <Text style={styles.fieldLabel}>Ngày sinh</Text>
+                    <DatePickerField
+                      value={editingNode.dob}
+                      onChange={(v) => setEditingNode({ ...editingNode, dob: v })}
+                      placeholder="Chọn ngày sinh"
+                    />
+
+                    <Text style={styles.fieldLabel}>Nơi sinh ra</Text>
+                    <FormSelectField
+                      value={editingNode.birthplace}
+                      onChange={(v) => setEditingNode({ ...editingNode, birthplace: v })}
+                      options={locationOptions}
+                      allowCustom
+                      placeholder="-- Chọn địa điểm hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên địa điểm mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Giới tính</Text>
+                    <FormSelectField
+                      value={editingNode.gender}
+                      onChange={(v) => setEditingNode({ ...editingNode, gender: v })}
+                      options={GENDER_OPTIONS}
+                      placeholder="-- Chọn giới tính --"
+                    />
+
+                    <Text style={styles.fieldLabel}>Vật dụng / Vật phẩm</Text>
+                    <FormSelectField
+                      value={editingNode.weapon}
+                      onChange={(v) => setEditingNode({ ...editingNode, weapon: v })}
+                      options={itemOptions}
+                      allowCustom
+                      placeholder="-- Chọn vật phẩm hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên vật phẩm mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Tổ chức / Nhóm</Text>
+                    <FormSelectField
+                      value={editingNode.sect}
+                      onChange={(v) => setEditingNode({ ...editingNode, sect: v })}
+                      options={factionOptions}
+                      allowCustom
+                      placeholder="-- Chọn tổ chức hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên tổ chức mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Tính cách</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editingNode.personality}
+                      onChangeText={(v) => setEditingNode({ ...editingNode, personality: v })}
+                      placeholder="Ví dụ: Trầm mặc, kiên định"
+                      placeholderTextColor="#6d6253"
+                    />
+                  </View>
+                )}
+
+                {/* ============ THÔNG TIN VẬT PHẨM ============ */}
+                {editingNode.type === 'item' && (
+                  <View style={styles.dynamicSectionBox}>
+                    <Text style={[styles.dynamicSectionHeader, { color: '#42b883' }]}>
+                      THÔNG TIN VẬT PHẨM
+                    </Text>
+
+                    <Text style={styles.fieldLabel}>Độ hiếm</Text>
+                    <FormSelectField
+                      value={editingNode.rarity}
+                      onChange={(v) => setEditingNode({ ...editingNode, rarity: v, role: v })}
+                      options={ITEM_RARITY_OPTIONS}
+                      allowCustom
+                      placeholder="-- Chọn độ hiếm --"
+                      customPlaceholder="Nhập độ hiếm khác..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Nguồn gốc xuất xứ</Text>
+                    <FormSelectField
+                      value={editingNode.origin}
+                      onChange={(v) => setEditingNode({ ...editingNode, origin: v })}
+                      options={locationOptions}
+                      allowCustom
+                      placeholder="-- Chọn nguồn gốc hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên địa danh mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Người sở hữu / Nắm giữ</Text>
+                    <FormSelectField
+                      value={editingNode.holderOrLocation}
+                      onChange={(v) => setEditingNode({ ...editingNode, holderOrLocation: v })}
+                      options={characterOptions}
+                      allowCustom
+                      placeholder="-- Chọn người sở hữu hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên nhân vật mới..."
+                    />
+                  </View>
+                )}
+
+                {/* ============ THÔNG TIN ĐỊA ĐIỂM ============ */}
+                {editingNode.type === 'location' && (
+                  <View style={styles.dynamicSectionBox}>
+                    <Text style={[styles.dynamicSectionHeader, { color: '#9f70cf' }]}>
+                      THÔNG TIN ĐỊA DANH / ĐỊA ĐIỂM
+                    </Text>
+
+                    <Text style={styles.fieldLabel}>Khu vực / Phương hướng</Text>
+                    <FormSelectField
+                      value={editingNode.region}
+                      onChange={(v) => setEditingNode({ ...editingNode, region: v })}
+                      options={LOCATION_REGION_OPTIONS}
+                      allowCustom
+                      placeholder="-- Chọn khu vực --"
+                      customPlaceholder="Nhập khu vực khác..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Mức độ nguy hiểm</Text>
+                    <FormSelectField
+                      value={editingNode.dangerLevel}
+                      onChange={(v) => setEditingNode({ ...editingNode, dangerLevel: v })}
+                      options={LOCATION_DANGER_OPTIONS}
+                      placeholder="-- Chọn mức độ nguy hiểm --"
+                    />
+
+                    <Text style={styles.fieldLabel}>Khí hậu đặc trưng</Text>
+                    <FormSelectField
+                      value={editingNode.climate}
+                      onChange={(v) => setEditingNode({ ...editingNode, climate: v })}
+                      options={LOCATION_CLIMATE_OPTIONS}
+                      allowCustom
+                      placeholder="-- Chọn khí hậu --"
+                      customPlaceholder="Nhập khí hậu khác..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Thế lực cai quản</Text>
+                    <FormSelectField
+                      value={editingNode.ruler}
+                      onChange={(v) => setEditingNode({ ...editingNode, ruler: v })}
+                      options={factionOptions}
+                      allowCustom
+                      placeholder="-- Chọn thế lực hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên thế lực mới..."
+                    />
+                  </View>
+                )}
+
+                {/* ============ THÔNG TIN TỔ CHỨC ============ */}
+                {editingNode.type === 'faction' && (
+                  <View style={styles.dynamicSectionBox}>
+                    <Text style={[styles.dynamicSectionHeader, { color: '#d95a38' }]}>
+                      THÔNG TIN TỔ CHỨC
+                    </Text>
+
+                    <Text style={styles.fieldLabel}>Vai trò trong câu chuyện</Text>
+                    <FormSelectField
+                      value={editingNode.subType}
+                      onChange={(v) => setEditingNode({ ...editingNode, subType: v })}
+                      options={FACTION_CLASSIFICATIONS}
+                      placeholder="-- Chọn vai trò --"
+                    />
+
+                    <Text style={styles.fieldLabel}>Trạng thái tổ chức</Text>
+                    <FormSelectField
+                      value={editingNode.status}
+                      onChange={(v) => setEditingNode({ ...editingNode, status: v })}
+                      options={FACTION_STATUS_OPTIONS}
+                      placeholder="-- Chọn trạng thái --"
+                    />
+
+                    {(editingNode.status === 'Tạm ngừng' || editingNode.status === 'Suy tàn') && (
+                      <>
+                        <Text style={styles.fieldLabel}>Sự kiện dẫn đến thay đổi trạng thái</Text>
+                        <FormSelectField
+                          value={editingNode.statusEvent}
+                          onChange={(v) => setEditingNode({ ...editingNode, statusEvent: v })}
+                          options={eventOptions}
+                          allowCustom
+                          placeholder="-- Chọn hoặc bỏ trống --"
+                          customPlaceholder="Nhập tên sự kiện mới..."
+                        />
+                      </>
+                    )}
+
+                    <Text style={styles.fieldLabel}>Người đại diện / Thủ lĩnh</Text>
+                    <FormSelectField
+                      value={editingNode.leader}
+                      onChange={(v) => setEditingNode({ ...editingNode, leader: v })}
+                      options={characterOptions}
+                      allowCustom
+                      placeholder="-- Chọn thủ lĩnh hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên thủ lĩnh mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Trụ sở / Cơ sở</Text>
+                    <FormSelectField
+                      value={editingNode.headquarters}
+                      onChange={(v) => setEditingNode({ ...editingNode, headquarters: v })}
+                      options={locationOptions}
+                      allowCustom
+                      placeholder="-- Chọn căn cứ hoặc bỏ trống --"
+                      customPlaceholder="Nhập tên căn cứ mới..."
+                    />
+
+                    <Text style={styles.fieldLabel}>Tôn chỉ</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editingNode.motto}
+                      onChangeText={(v) => setEditingNode({ ...editingNode, motto: v })}
+                      placeholder="Ví dụ: nghiên cứu, hỗ trợ cộng đồng, kinh doanh..."
+                      placeholderTextColor="#6d6253"
+                    />
+                  </View>
+                )}
+
+                <Text style={styles.fieldLabel}>Mô tả chi tiết</Text>
                 <TextInput
                   style={[styles.input, { minHeight: 80 }]}
                   value={editingNode.desc}
                   onChangeText={(v) => setEditingNode({ ...editingNode, desc: v })}
                   multiline
                   textAlignVertical="top"
-                  placeholder="Mô tả chi tiết..."
+                  placeholder="Ghi chú bối cảnh, lai lịch, cốt truyện liên quan..."
                   placeholderTextColor="#6d6253"
                 />
-
-                {editingNode.type === 'character' && (
-                  <>
-                    <Text style={styles.fieldLabel}>Giới tính</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.gender}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, gender: v })}
-                      placeholder="Nam / Nữ / Khác"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Vật dụng / Vũ khí</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.weapon}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, weapon: v })}
-                      placeholder="Để trống nếu không có"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Tổ chức / Môn phái</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.sect}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, sect: v })}
-                      placeholder="Để trống nếu không có"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Nơi sinh</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.birthplace}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, birthplace: v })}
-                      placeholder="Để trống nếu không có"
-                      placeholderTextColor="#6d6253"
-                    />
-                  </>
-                )}
-
-                {editingNode.type === 'item' && (
-                  <>
-                    <Text style={styles.fieldLabel}>Độ hiếm</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.rarity}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, rarity: v })}
-                      placeholder="Phổ thông / Hiếm / Quý hiếm / Độc bản..."
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Người giữ / Vị trí</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.holderOrLocation}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, holderOrLocation: v })}
-                      placeholder="Tên nhân vật giữ vật phẩm"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Nguồn gốc</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.origin}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, origin: v })}
-                      placeholder="Địa điểm nguồn gốc"
-                      placeholderTextColor="#6d6253"
-                    />
-                  </>
-                )}
-
-                {editingNode.type === 'location' && (
-                  <>
-                    <Text style={styles.fieldLabel}>Vùng miền</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.region}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, region: v })}
-                      placeholder="VD: Miền Bắc, Kinh thành..."
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Khí hậu / Mức nguy hiểm</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.dangerLevel}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, dangerLevel: v })}
-                      placeholder="An toàn / Bình thường / Nguy hiểm..."
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Thế lực cai quản</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.ruler}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, ruler: v })}
-                      placeholder="Tên tổ chức cai quản"
-                      placeholderTextColor="#6d6253"
-                    />
-                  </>
-                )}
-
-                {editingNode.type === 'faction' && (
-                  <>
-                    <Text style={styles.fieldLabel}>Thủ lĩnh / Đại diện</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.leader}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, leader: v })}
-                      placeholder="Tên nhân vật thủ lĩnh"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Trụ sở / Căn cứ</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.headquarters}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, headquarters: v })}
-                      placeholder="Tên địa điểm trụ sở"
-                      placeholderTextColor="#6d6253"
-                    />
-                    <Text style={styles.fieldLabel}>Tôn chỉ</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={editingNode.motto}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, motto: v })}
-                      placeholder="Khẩu hiệu hoặc mục tiêu..."
-                      placeholderTextColor="#6d6253"
-                    />
-                  </>
-                )}
               </ScrollView>
             )}
             <View style={styles.modalActionsRow}>
@@ -1327,75 +1804,160 @@ export default function TextCheckerScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
-      {/* Modal chỉnh sửa Sự kiện đề xuất */}
+      {/* Modal chỉnh sửa Sự kiện đề xuất — Tái sử dụng chuẩn form sự kiện của dự án (graph/index.tsx) */}
       <Modal
         visible={editingEvent !== null}
         transparent
         animationType="fade"
         onRequestClose={() => setEditingEvent(null)}>
-        <View style={styles.modalBackdrop}>
+        <KeyboardAvoidingView
+          style={styles.modalBackdrop}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalCard}>
             <Text style={styles.modalTitle}>
-              {isAddingNewEvent ? 'Thêm sự kiện cho chương' : 'Chỉnh sửa sự kiện'}
+              {isAddingNewEvent ? 'Thêm Biến Cố / Sự Kiện' : 'Chỉnh Sửa Sự Kiện'}
             </Text>
             {editingEvent && (
-              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 440 }}>
+              <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
                 <Text style={styles.fieldLabel}>Tên sự kiện *</Text>
                 <TextInput
                   style={styles.input}
                   value={editingEvent.name}
                   onChangeText={(v) => setEditingEvent({ ...editingEvent, name: v })}
-                  placeholder="VD: Cuộc phục kích tại cầu đá"
+                  placeholder="Ví dụ: Đêm Hỏa Thiêu"
                   placeholderTextColor="#6d6253"
                 />
 
-                <Text style={styles.fieldLabel}>Mô tả diễn biến</Text>
+                <View style={styles.dynamicSectionBox}>
+                  <Text style={[styles.dynamicSectionHeader, { color: '#5b8ec2' }]}>
+                    THÔNG TIN BIẾN CỐ / SỰ KIỆN
+                  </Text>
+
+                  <Text style={styles.fieldLabel}>Nơi diễn ra</Text>
+                  <FormSelectField
+                    value={editingEvent.location}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, location: v })}
+                    options={locationOptions}
+                    allowCustom
+                    placeholder="-- Chọn nơi diễn ra hoặc bỏ trống --"
+                    customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
+                  />
+
+                  <Text style={styles.fieldLabel}>Thời điểm diễn ra</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.time}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
+                    placeholder="VD: Đầu chương / Đêm khuya / Khi trăng tròn"
+                    placeholderTextColor="#6d6253"
+                  />
+
+                  <Text style={styles.fieldLabel}>Nhân vật tham gia</Text>
+                  {characterOptions.length > 0 ? (
+                    <View style={styles.eventCharacterOptions}>
+                      {characterOptions.map((ch) => {
+                        const isSelected = editingEvent.charactersInvolved.includes(ch.value);
+                        return (
+                          <Pressable
+                            key={ch.value}
+                            style={[
+                              styles.eventCharacterChip,
+                              isSelected && styles.eventCharacterChipSelected,
+                            ]}
+                            onPress={() =>
+                              setEditingEvent({
+                                ...editingEvent,
+                                charactersInvolved: isSelected
+                                  ? editingEvent.charactersInvolved.filter((n) => n !== ch.value)
+                                  : [...editingEvent.charactersInvolved, ch.value],
+                              })
+                            }
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: isSelected }}>
+                            <Text
+                              style={[
+                                styles.eventCharacterChipText,
+                                isSelected && styles.eventCharacterChipTextSelected,
+                              ]}>
+                              {isSelected ? '✓ ' : ''}
+                              {ch.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.eventCharacterEmpty}>
+                      Chưa có node nhân vật nào trong dự án.
+                    </Text>
+                  )}
+
+                  {/* Các nhân vật tùy chỉnh ngoài danh sách hiện có */}
+                  {editingEvent.charactersInvolved
+                    .filter((name) => !characterOptions.some((o) => o.value === name))
+                    .length > 0 && (
+                    <View style={[styles.eventCharacterOptions, { marginTop: 6 }]}>
+                      {editingEvent.charactersInvolved
+                        .filter((name) => !characterOptions.some((o) => o.value === name))
+                        .map((customName) => (
+                          <Pressable
+                            key={customName}
+                            style={[styles.eventCharacterChip, styles.eventCharacterChipSelected]}
+                            onPress={() =>
+                              setEditingEvent({
+                                ...editingEvent,
+                                charactersInvolved: editingEvent.charactersInvolved.filter(
+                                  (n) => n !== customName
+                                ),
+                              })
+                            }>
+                            <Text
+                              style={[
+                                styles.eventCharacterChipText,
+                                styles.eventCharacterChipTextSelected,
+                              ]}>
+                              ✓ {customName} ✕
+                            </Text>
+                          </Pressable>
+                        ))}
+                    </View>
+                  )}
+
+                  <View style={styles.customParticipantRow}>
+                    <TextInput
+                      style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                      value={customParticipantInput}
+                      onChangeText={setCustomParticipantInput}
+                      placeholder="Thêm tên nhân vật khác..."
+                      placeholderTextColor="#6d6253"
+                      onSubmitEditing={handleAddCustomParticipant}
+                    />
+                    <Pressable style={styles.addSmallBtn} onPress={handleAddCustomParticipant}>
+                      <Text style={styles.addSmallBtnText}>+ Thêm</Text>
+                    </Pressable>
+                  </View>
+
+                  <Text style={styles.fieldLabel}>Tác động / Hậu quả</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.impact}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, impact: v })}
+                    placeholder="Hệ quả sau sự kiện..."
+                    placeholderTextColor="#6d6253"
+                  />
+                </View>
+
+                <Text style={styles.fieldLabel}>Mô tả chi tiết</Text>
                 <TextInput
                   style={[styles.input, { minHeight: 80 }]}
                   value={editingEvent.desc}
                   onChangeText={(v) => setEditingEvent({ ...editingEvent, desc: v })}
                   multiline
                   textAlignVertical="top"
-                  placeholder="Mô tả chi tiết sự kiện..."
-                  placeholderTextColor="#6d6253"
-                />
-
-                <Text style={styles.fieldLabel}>Địa điểm diễn ra</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingEvent.location}
-                  onChangeText={(v) => setEditingEvent({ ...editingEvent, location: v })}
-                  placeholder="Tên địa điểm"
-                  placeholderTextColor="#6d6253"
-                />
-
-                <Text style={styles.fieldLabel}>Thời điểm</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingEvent.time}
-                  onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
-                  placeholder="VD: Đêm khuya / Đầu chương"
-                  placeholderTextColor="#6d6253"
-                />
-
-                <Text style={styles.fieldLabel}>Nhân vật tham gia (phân cách bằng dấu phẩy)</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingEvent.charactersText}
-                  onChangeText={(v) => setEditingEvent({ ...editingEvent, charactersText: v })}
-                  placeholder="VD: Minh, Lan, Trưởng lão Hắc Phong"
-                  placeholderTextColor="#6d6253"
-                />
-
-                <Text style={styles.fieldLabel}>Tác động / Hậu quả</Text>
-                <TextInput
-                  style={styles.input}
-                  value={editingEvent.impact}
-                  onChangeText={(v) => setEditingEvent({ ...editingEvent, impact: v })}
-                  placeholder="Hệ quả sau sự kiện..."
+                  placeholder="Mô tả chi tiết diễn biến sự kiện..."
                   placeholderTextColor="#6d6253"
                 />
               </ScrollView>
@@ -1406,6 +1968,7 @@ export default function TextCheckerScreen() {
                 onPress={() => {
                   setEditingEvent(null);
                   setIsAddingNewEvent(false);
+                  setCustomParticipantInput('');
                 }}>
                 <Text style={styles.modalCancelBtnText}>Hủy</Text>
               </Pressable>
@@ -1414,7 +1977,7 @@ export default function TextCheckerScreen() {
               </Pressable>
             </View>
           </View>
-        </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Thanh bên điều hướng */}
@@ -1505,12 +2068,23 @@ const styles = StyleSheet.create({
     borderColor: '#2c251d',
     padding: 14,
   },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    marginBottom: 10,
+  },
   sectionLabel: {
     color: '#e5a93c',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 1.1,
-    marginBottom: 10,
+  },
+  analyzingLockHint: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '600',
   },
   chapterMetaRow: {
     flexDirection: 'row',
@@ -1527,7 +2101,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '600',
     marginBottom: 6,
-    marginTop: 4,
+    marginTop: 6,
   },
   wordCountText: {
     color: '#8c7f6d',
@@ -1544,6 +2118,10 @@ const styles = StyleSheet.create({
     color: '#f4ede4',
     fontSize: 14,
     marginBottom: 8,
+  },
+  inputLocked: {
+    opacity: 0.6,
+    backgroundColor: '#171410',
   },
   chapterTextArea: {
     minHeight: 190,
@@ -1569,7 +2147,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   btnDisabled: {
-    opacity: 0.55,
+    opacity: 0.5,
   },
   tabsRow: {
     flexDirection: 'row',
@@ -1677,11 +2255,18 @@ const styles = StyleSheet.create({
   },
   quoteBox: {
     borderLeftWidth: 3,
-    borderLeftColor: '#e5a93c',
+    borderLeftColor: '#d97a6c',
     paddingLeft: 10,
-    paddingVertical: 4,
-    backgroundColor: 'rgba(0,0,0,0.22)',
-    borderRadius: 4,
+    paddingVertical: 6,
+    paddingRight: 8,
+    backgroundColor: 'rgba(0,0,0,0.24)',
+    borderRadius: 6,
+    gap: 2,
+  },
+  quoteLabel: {
+    color: '#c99c95',
+    fontSize: 11,
+    fontWeight: '600',
   },
   quoteText: {
     color: '#e6d8c3',
@@ -1698,6 +2283,66 @@ const styles = StyleSheet.create({
     color: '#f2c879',
     fontSize: 13,
     lineHeight: 19,
+  },
+  rewriteBox: {
+    borderLeftWidth: 3,
+    borderLeftColor: '#42b883',
+    backgroundColor: '#12211a',
+    borderRadius: 8,
+    padding: 10,
+    gap: 6,
+  },
+  rewriteLabel: {
+    color: '#7fe0b2',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rewriteText: {
+    color: '#dcf5e8',
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  rewriteActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    marginTop: 2,
+  },
+  acceptRewriteBtn: {
+    backgroundColor: '#2d8a61',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+  },
+  acceptRewriteBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  appliedRow: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  appliedBadgeText: {
+    color: '#7fe0b2',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  undoRewriteBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#4b6e5c',
+    backgroundColor: '#172b22',
+  },
+  undoRewriteBtnText: {
+    color: '#c4e6d5',
+    fontSize: 11,
+    fontWeight: '600',
   },
   tagsRow: {
     flexDirection: 'row',
@@ -1731,7 +2376,7 @@ const styles = StyleSheet.create({
   },
   addSmallBtn: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingVertical: 8,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: '#e5a93c',
@@ -1752,7 +2397,7 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   cardDimmed: {
-    opacity: 0.48,
+    opacity: 0.52,
   },
   suggestionTopRow: {
     flexDirection: 'row',
@@ -1929,7 +2574,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.72)',
     justifyContent: 'center',
-    padding: 18,
+    padding: 16,
   },
   modalCard: {
     backgroundColor: '#1a1612',
@@ -1944,6 +2589,22 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.serif,
     fontWeight: '700',
     marginBottom: 12,
+  },
+  dynamicSectionBox: {
+    backgroundColor: '#14110e',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#2b241c',
+    padding: 12,
+    marginTop: 6,
+    marginBottom: 8,
+  },
+  dynamicSectionHeader: {
+    color: '#e5a93c',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 1,
+    marginBottom: 6,
   },
   typeChipsRow: {
     flexDirection: 'row',
@@ -1970,6 +2631,45 @@ const styles = StyleSheet.create({
   },
   typeChipTextActive: {
     color: '#f2c265',
+  },
+  eventCharacterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 8,
+  },
+  eventCharacterChip: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#3a3228',
+    backgroundColor: '#181410',
+  },
+  eventCharacterChipSelected: {
+    borderColor: '#e5a93c',
+    backgroundColor: '#2c2315',
+  },
+  eventCharacterChipText: {
+    color: '#a89a86',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  eventCharacterChipTextSelected: {
+    color: '#f5c76b',
+  },
+  eventCharacterEmpty: {
+    color: '#807464',
+    fontSize: 12,
+    fontStyle: 'italic',
+    marginBottom: 8,
+  },
+  customParticipantRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+    marginBottom: 8,
   },
   modalActionsRow: {
     flexDirection: 'row',

@@ -680,6 +680,7 @@ class ApiService {
         quote: string;
         explanation: string;
         suggestion: string;
+        suggestedRewrite?: string;
         relatedEntities: string[];
       }>;
       suggestedNodes: Array<{
