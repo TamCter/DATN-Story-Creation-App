@@ -724,17 +724,28 @@ class ApiService {
         statusEvent?: string;
         reason?: string;
       }>;
+      contextOmissions?: {
+        omittedCharacters: number;
+        omittedLocations: number;
+        omittedItems: number;
+        omittedFactions: number;
+        omittedEvents: number;
+        omittedChapters: number;
+        omittedLinks: number;
+        totalOmitted: number;
+      };
       model?: string;
     };
     message?: string;
   }> {
+    // Vượt tổng hạn mức của backend (tối đa 4 model fallback × 150s = 600s) để client nhận đủ kết quả hoặc lỗi từ server
     return this.request(
       '/ai/analyze-chapter',
       {
         method: 'POST',
         body: JSON.stringify(payload),
       },
-      180000
+      620000
     );
   }
 }

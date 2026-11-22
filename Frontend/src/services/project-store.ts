@@ -988,7 +988,7 @@ export class ProjectStore {
     projectId: string,
     nodeId: string,
     updates: Partial<StoryNode>,
-    options: { requireBackend?: boolean; context?: AccountContext } = {}
+    options: { requireBackend?: boolean; onlyIfStub?: boolean; context?: AccountContext } = {}
   ): Promise<StoryNode> {
     const accountContext = options.context || this.captureAccountContext();
     const project = await this.getProject(projectId);
@@ -999,6 +999,9 @@ export class ProjectStore {
     const index = project.nodes.findIndex((n) => n.id === nodeId);
     if (index === -1) {
       throw new Error(`Không tìm thấy node với ID: ${nodeId} trong dự án`);
+    }
+    if (options.onlyIfStub && project.nodes[index].autoCreatedStub !== true) {
+      throw new ApiError('Node này đã có dữ liệu đầy đủ và không còn là stub tự sinh.', 409);
     }
 
     const effectiveUpdates =
@@ -1019,7 +1022,10 @@ export class ProjectStore {
         'Tài khoản đã thay đổi trong lúc cập nhật node.'
       );
       const { id, createdAt, updatedAt, ...updatesForBackend } = effectiveUpdates;
-      const res = await api.updateNode(nodeId, updatesForBackend);
+      const backendPayload = options.onlyIfStub
+        ? { ...updatesForBackend, onlyIfStub: true }
+        : updatesForBackend;
+      const res = await api.updateNode(nodeId, backendPayload);
       this.assertAccountContext(
         accountContext,
         'Tài khoản đã thay đổi trong lúc cập nhật node.'

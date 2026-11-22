@@ -20,6 +20,8 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(cors());
+// Riêng endpoint phân tích chương nhận toàn văn (tối đa 40.000 ký tự) kèm bối cảnh đồ thị dự án lớn
+app.use('/api/ai/analyze-chapter', express.json({ limit: '2mb' }));
 app.use(express.json({ limit: '1mb' }));
 
 // Trang giới thiệu API tổng quan

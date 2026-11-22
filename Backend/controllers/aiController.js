@@ -201,7 +201,11 @@ function getNodeCreationRequest(messages) {
   return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
 }
 
-function normalizeEventCharacters(events, characterNodes) {
+function normalizeEventCharacters(
+  events,
+  characterNodes,
+  { includeDescriptionMatches = true } = {}
+) {
   const characters = characterNodes.filter(
     (node) => node && node.type === 'character' && typeof node.name === 'string' && node.name.trim()
   );
@@ -242,6 +246,11 @@ function normalizeEventCharacters(events, characterNodes) {
         involvedKeys.add(nameKey);
       }
     }
+
+    if (!includeDescriptionMatches) {
+      return { ...event, charactersInvolved: involvedNames };
+    }
+
     const eventText = [event.name, event.desc, event.impact]
       .filter((value) => typeof value === 'string')
       .join(' ');
@@ -1289,11 +1298,18 @@ async function analyzeChapterText(req, res, next) {
       chapters = [],
     } = req.body || {};
 
+    const MAX_CHAPTER_ANALYSIS_CHARS = 40000;
     const cleanText = typeof chapterText === 'string' ? chapterText.trim() : '';
     if (cleanText.length < 20) {
       return res.status(400).json({
         success: false,
         message: 'Vui lòng nhập nội dung chương tối thiểu 20 ký tự để AI phân tích.',
+      });
+    }
+    if (cleanText.length > MAX_CHAPTER_ANALYSIS_CHARS) {
+      return res.status(400).json({
+        success: false,
+        message: `Nội dung chương dài ${cleanText.length.toLocaleString('vi-VN')} ký tự, vượt giới hạn tối đa ${MAX_CHAPTER_ANALYSIS_CHARS.toLocaleString('vi-VN')} ký tự. Vui lòng rút gọn hoặc chia nhỏ chương trước khi phân tích.`,
       });
     }
 
@@ -1333,9 +1349,41 @@ async function analyzeChapterText(req, res, next) {
       }
     }
 
-    const characterLines = safeNodes
-      .filter((n) => n.type === 'character' && n.name)
-      .slice(0, 50)
+    const allCharacters = safeNodes.filter((n) => n.type === 'character' && n.name);
+    const allLocations = safeNodes.filter((n) => n.type === 'location' && n.name);
+    const allItems = safeNodes.filter((n) => n.type === 'item' && n.name);
+    const allFactions = safeNodes.filter((n) => n.type === 'faction' && n.name);
+    const allEvents = safeNodes.filter((n) => n.type === 'event' && n.name);
+
+    const MAX_CTX_CHARACTERS = 50;
+    const MAX_CTX_LOCATIONS = 35;
+    const MAX_CTX_ITEMS = 35;
+    const MAX_CTX_FACTIONS = 25;
+    const MAX_CTX_EVENTS = 40;
+    const MAX_CTX_CHAPTERS = 15;
+    const MAX_CTX_LINKS = 80;
+
+    const contextOmissions = {
+      omittedCharacters: Math.max(0, allCharacters.length - MAX_CTX_CHARACTERS),
+      omittedLocations: Math.max(0, allLocations.length - MAX_CTX_LOCATIONS),
+      omittedItems: Math.max(0, allItems.length - MAX_CTX_ITEMS),
+      omittedFactions: Math.max(0, allFactions.length - MAX_CTX_FACTIONS),
+      omittedEvents: Math.max(0, allEvents.length - MAX_CTX_EVENTS),
+      omittedChapters: Math.max(0, safeChapters.length - MAX_CTX_CHAPTERS),
+      omittedLinks: Math.max(0, safeLinks.length - MAX_CTX_LINKS),
+      totalOmitted: 0,
+    };
+    contextOmissions.totalOmitted =
+      contextOmissions.omittedCharacters +
+      contextOmissions.omittedLocations +
+      contextOmissions.omittedItems +
+      contextOmissions.omittedFactions +
+      contextOmissions.omittedEvents +
+      contextOmissions.omittedChapters +
+      contextOmissions.omittedLinks;
+
+    const characterLines = allCharacters
+      .slice(0, MAX_CTX_CHARACTERS)
       .map((n) =>
         [
           n.name,
@@ -1354,9 +1402,8 @@ async function analyzeChapterText(req, res, next) {
           .join(' | ')
       );
 
-    const locationLines = safeNodes
-      .filter((n) => n.type === 'location' && n.name)
-      .slice(0, 35)
+    const locationLines = allLocations
+      .slice(0, MAX_CTX_LOCATIONS)
       .map((n) =>
         [
           n.name,
@@ -1372,9 +1419,8 @@ async function analyzeChapterText(req, res, next) {
           .join(' | ')
       );
 
-    const itemLines = safeNodes
-      .filter((n) => n.type === 'item' && n.name)
-      .slice(0, 35)
+    const itemLines = allItems
+      .slice(0, MAX_CTX_ITEMS)
       .map((n) =>
         [
           n.name,
@@ -1389,9 +1435,8 @@ async function analyzeChapterText(req, res, next) {
           .join(' | ')
       );
 
-    const factionLines = safeNodes
-      .filter((n) => n.type === 'faction' && n.name)
-      .slice(0, 25)
+    const factionLines = allFactions
+      .slice(0, MAX_CTX_FACTIONS)
       .map((n) =>
         [
           n.name,
@@ -1407,9 +1452,8 @@ async function analyzeChapterText(req, res, next) {
           .join(' | ')
       );
 
-    const eventLines = safeNodes
-      .filter((n) => n.type === 'event' && n.name)
-      .slice(-40)
+    const eventLines = allEvents
+      .slice(-MAX_CTX_EVENTS)
       .map((n) =>
         [
           n.name,
@@ -1426,21 +1470,21 @@ async function analyzeChapterText(req, res, next) {
       );
 
     const chapterLines = safeChapters
-      .slice(-15)
+      .slice(-MAX_CTX_CHAPTERS)
       .map(
         (c) =>
           `- Chương ${c.chapterNumber}: ${c.title || 'Chưa đặt tên'} — ${String(c.desc || '').slice(0, 220)}`
       );
 
     const linkLines = safeLinks
-      .slice(0, 80)
+      .slice(0, MAX_CTX_LINKS)
       .map((l) => {
         const src = nodeNameById.get(String(l.source)) || String(l.source);
         const tgt = nodeNameById.get(String(l.target)) || String(l.target);
         return `${src} --[${l.label || l.category || 'LIÊN_KẾT'}]--> ${tgt}`;
       });
 
-    const boundedChapterText = cleanText.slice(0, 40000);
+    const boundedChapterText = cleanText;
 
     const contextPrompt = `Bạn là biên tập viên văn học & chuyên gia kiểm tra tính nhất quán (Continuity Editor) xuất sắc cho tiểu thuyết "${projectTitle}".
 Nhiệm vụ của bạn là đọc kỹ VĂN BẢN CHƯƠNG MỚI do tác giả tự viết, đối chiếu chặt chẽ với BẢN ĐỒ THỰC THỂ & LỊCH SỬ CÁC CHƯƠNG TRƯỚC của dự án để thực hiện 3 việc:
@@ -1580,10 +1624,18 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       console.warn('[AI Controller] Lỗi parse JSON analyzeChapterText:', parseErr.message);
     }
 
-    if (!parsed || typeof parsed !== 'object') {
+    const isValidAnalysisEnvelope =
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      Array.isArray(parsed.issues) &&
+      Array.isArray(parsed.suggestedNodes) &&
+      Array.isArray(parsed.suggestedEvents);
+
+    if (!isValidAnalysisEnvelope) {
       return res.status(502).json({
         success: false,
-        message: 'AI trả về định dạng không hợp lệ khi phân tích chương. Vui lòng thử lại.',
+        message: 'AI trả về định dạng phân tích không đầy đủ hoặc không hợp lệ. Vui lòng thử lại.',
       });
     }
 
@@ -1687,22 +1739,20 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
           ? ev.charactersInvolved.map((c) => String(c).trim()).filter(Boolean)
           : typeof ev.charactersInvolved === 'string'
             ? ev.charactersInvolved
-                .split(/[,;\n]+/)
-                .map((c) => c.trim())
-                .filter(Boolean)
             : [],
       }));
 
-    const normalizedEvents = normalizeEventCharacters(rawSuggestedEvents, allKnownCharacters).map(
-      (ev) => ({
-        name: ev.name,
-        desc: ev.desc || '',
-        location: ev.location || '',
-        time: ev.time || '',
-        impact: ev.impact || '',
-        charactersInvolved: Array.isArray(ev.charactersInvolved) ? ev.charactersInvolved : [],
-      })
-    );
+    // Chỉ chuẩn hóa nhân vật được liệt kê tường minh, không tự thêm từ mô tả sự kiện
+    const normalizedEvents = normalizeEventCharacters(rawSuggestedEvents, allKnownCharacters, {
+      includeDescriptionMatches: false,
+    }).map((ev) => ({
+      name: ev.name,
+      desc: ev.desc || '',
+      location: ev.location || '',
+      time: ev.time || '',
+      impact: ev.impact || '',
+      charactersInvolved: Array.isArray(ev.charactersInvolved) ? ev.charactersInvolved : [],
+    }));
 
     const characterStatusChanges = (
       Array.isArray(parsed.characterStatusChanges) ? parsed.characterStatusChanges : []
@@ -1730,6 +1780,7 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
         suggestedNodes,
         suggestedEvents: normalizedEvents,
         characterStatusChanges,
+        contextOmissions,
         model: aiRes.model,
       },
     });

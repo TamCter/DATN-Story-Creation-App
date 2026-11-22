@@ -1,5 +1,5 @@
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -33,7 +33,7 @@ import {
   StoryProject,
 } from '@/constants/story-data';
 import { AppFonts } from '@/constants/theme';
-import { api } from '@/services/api';
+import { api, ApiError } from '@/services/api';
 import { projectStore } from '@/services/project-store';
 
 type EntityType = 'character' | 'item' | 'location' | 'faction';
@@ -43,6 +43,26 @@ const GENDER_OPTIONS = [
   { label: 'Nữ', value: 'Nữ', icon: '♀️' },
   { label: 'Khác / Phi giới tính', value: 'Khác', icon: '⚧️' },
 ];
+
+interface AppliedRewriteRange {
+  start: number;
+  end: number;
+  beforeContext: string;
+  afterContext: string;
+  originalText: string;
+  replacementText: string;
+}
+
+interface ContextOmissionsInfo {
+  omittedCharacters: number;
+  omittedLocations: number;
+  omittedItems: number;
+  omittedFactions: number;
+  omittedEvents: number;
+  omittedChapters: number;
+  omittedLinks: number;
+  totalOmitted: number;
+}
 
 interface EditableIssue {
   id: string;
@@ -56,7 +76,7 @@ interface EditableIssue {
   relatedEntities: string[];
   resolved: boolean;
   applied: boolean;
-  appliedOriginal?: string;
+  appliedRange?: AppliedRewriteRange;
 }
 
 interface EditableSuggestedNode {
@@ -148,38 +168,98 @@ function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+const REWRITE_CONTEXT_WINDOW = 24;
+
+type ReplaceQuoteResult =
+  | { status: 'ok'; updatedText: string; range: AppliedRewriteRange }
+  | { status: 'ambiguous' }
+  | { status: 'not_found' };
+
 function replaceQuoteInText(
   sourceText: string,
   quote: string,
   replacement: string
-): { updatedText: string; matchedText: string } | null {
+): ReplaceQuoteResult {
   const cleanQuote = quote.trim();
-  if (!cleanQuote) return null;
+  if (!cleanQuote) return { status: 'not_found' };
 
   const exactIdx = sourceText.indexOf(cleanQuote);
   if (exactIdx !== -1) {
+    // Chỉ áp dụng khi đoạn trích dẫn xuất hiện duy nhất 1 lần
+    if (sourceText.indexOf(cleanQuote, exactIdx + 1) !== -1) {
+      return { status: 'ambiguous' };
+    }
+    const endIdx = exactIdx + cleanQuote.length;
+    const updatedText = sourceText.slice(0, exactIdx) + replacement + sourceText.slice(endIdx);
     return {
-      updatedText:
-        sourceText.slice(0, exactIdx) + replacement + sourceText.slice(exactIdx + cleanQuote.length),
-      matchedText: cleanQuote,
+      status: 'ok',
+      updatedText,
+      range: {
+        start: exactIdx,
+        end: exactIdx + replacement.length,
+        beforeContext: sourceText.slice(Math.max(0, exactIdx - REWRITE_CONTEXT_WINDOW), exactIdx),
+        afterContext: sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW),
+        originalText: cleanQuote,
+        replacementText: replacement,
+      },
     };
   }
 
-  // Fallback: khớp linh hoạt theo khoảng trắng / xuống dòng
+  // Fallback: khớp linh hoạt theo khoảng trắng / xuống dòng, đồng thời bắt buộc duy nhất
   const tokens = cleanQuote.split(/\s+/).filter(Boolean).map(escapeRegex);
-  if (tokens.length === 0) return null;
-  const flexRegex = new RegExp(tokens.join('\\s+'));
-  const match = sourceText.match(flexRegex);
-  if (!match || match.index === undefined) return null;
+  if (tokens.length === 0) return { status: 'not_found' };
+  const flexRegex = new RegExp(tokens.join('\\s+'), 'g');
+  const matches = Array.from(sourceText.matchAll(flexRegex));
+  if (matches.length === 0) return { status: 'not_found' };
+  if (matches.length > 1) return { status: 'ambiguous' };
 
-  const matchedText = match[0];
+  const first = matches[0];
+  if (first.index === undefined) return { status: 'not_found' };
+  const startIdx = first.index;
+  const matchedText = first[0];
+  const endIdx = startIdx + matchedText.length;
+  const updatedText = sourceText.slice(0, startIdx) + replacement + sourceText.slice(endIdx);
   return {
-    updatedText:
-      sourceText.slice(0, match.index) +
-      replacement +
-      sourceText.slice(match.index + matchedText.length),
-    matchedText,
+    status: 'ok',
+    updatedText,
+    range: {
+      start: startIdx,
+      end: startIdx + replacement.length,
+      beforeContext: sourceText.slice(Math.max(0, startIdx - REWRITE_CONTEXT_WINDOW), startIdx),
+      afterContext: sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW),
+      originalText: matchedText,
+      replacementText: replacement,
+    },
   };
+}
+
+function restoreAppliedRangeInText(
+  sourceText: string,
+  range: AppliedRewriteRange
+): string | null {
+  const { start, end, beforeContext, afterContext, originalText, replacementText } = range;
+
+  // 1. Ưu tiên kiểm tra chính xác tại vị trí đã ghi nhận kèm ngữ cảnh xung quanh
+  if (
+    start >= 0 &&
+    end <= sourceText.length &&
+    sourceText.slice(start, end) === replacementText &&
+    sourceText.slice(Math.max(0, start - beforeContext.length), start) === beforeContext &&
+    sourceText.slice(end, end + afterContext.length) === afterContext
+  ) {
+    return sourceText.slice(0, start) + originalText + sourceText.slice(end);
+  }
+
+  // 2. Nếu có chỉnh sửa ở đoạn khác làm dịch chỉ số, chỉ khôi phục khi toàn bộ cụm ngữ cảnh khớp duy nhất
+  const anchored = `${beforeContext}${replacementText}${afterContext}`;
+  if (!anchored) return null;
+  const idx = sourceText.indexOf(anchored);
+  if (idx === -1 || sourceText.indexOf(anchored, idx + 1) !== -1) {
+    return null;
+  }
+  const replaceStart = idx + beforeContext.length;
+  const replaceEnd = replaceStart + replacementText.length;
+  return sourceText.slice(0, replaceStart) + originalText + sourceText.slice(replaceEnd);
 }
 
 function createEmptySuggestedNode(type: EntityType = 'character'): EditableSuggestedNode {
@@ -235,23 +315,47 @@ function createEmptySuggestedEvent(): EditableSuggestedEvent {
   };
 }
 
+function createPlaceholderProject(id: string): StoryProject {
+  return {
+    id,
+    title: 'Đang tải dự án...',
+    genre: '',
+    number: '№ 01',
+    nodeCount: 0,
+    linkCount: 0,
+    updatedAt: '',
+    nodes: [],
+    links: [],
+    chapters: [],
+  };
+}
+
 export default function TextCheckerScreen() {
   const params = useLocalSearchParams<{ projectId?: string }>();
-  const projectId = params.projectId || INITIAL_PROJECTS[0].id;
+  const projectId = (typeof params.projectId === 'string' && params.projectId.trim()) || INITIAL_PROJECTS[0].id;
+  const matchedInitialProject = INITIAL_PROJECTS.find((p) => p.id === projectId);
 
   const [currentProject, setCurrentProject] = useState<StoryProject>(
-    INITIAL_PROJECTS.find((p) => p.id === projectId) || INITIAL_PROJECTS[0]
+    () => matchedInitialProject || createPlaceholderProject(projectId)
   );
+  const [projectLoadState, setProjectLoadState] = useState<'loading' | 'ready' | 'error'>(
+    matchedInitialProject ? 'ready' : 'loading'
+  );
+  const [projectLoadError, setProjectLoadError] = useState<string | null>(null);
   const [sidebarVisible, setSidebarVisible] = useState(false);
 
   // Form nhập chương do tác giả tự viết
   const [chapterNumberInput, setChapterNumberInput] = useState('1');
+  const chapterNumberTouchedRef = useRef(false);
   const [chapterTitle, setChapterTitle] = useState('');
   const [chapterText, setChapterText] = useState('');
 
   // Kết quả phân tích từ AI (có thể chỉnh sửa trước khi lưu)
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [hasAnalyzed, setHasAnalyzed] = useState(false);
+  const [isAnalysisStale, setIsAnalysisStale] = useState(false);
+  const analyzedTextSnapshotRef = useRef<string | null>(null);
+  const [contextOmissions, setContextOmissions] = useState<ContextOmissionsInfo | null>(null);
   const [chapterSummary, setChapterSummary] = useState('');
   const [issues, setIssues] = useState<EditableIssue[]>([]);
   const [suggestedNodes, setSuggestedNodes] = useState<EditableSuggestedNode[]>([]);
@@ -261,13 +365,15 @@ export default function TextCheckerScreen() {
 
   // Modal chỉnh sửa node / event đề xuất (tái sử dụng chuẩn form của dự án)
   const [editingNode, setEditingNode] = useState<EditableSuggestedNode | null>(null);
+  const [editingNodeOriginalName, setEditingNodeOriginalName] = useState<string>('');
   const [isAddingNewNode, setIsAddingNewNode] = useState(false);
   const [editingEvent, setEditingEvent] = useState<EditableSuggestedEvent | null>(null);
   const [isAddingNewEvent, setIsAddingNewEvent] = useState(false);
   const [customParticipantInput, setCustomParticipantInput] = useState('');
 
-  // Lưu vào database
+  // Lưu vào database (ghi nhớ chapterId đã tạo trong phiên để retry không tạo trùng chương)
   const [isSaving, setIsSaving] = useState(false);
+  const activeSaveChapterIdRef = useRef<string | null>(null);
   const [saveSuccessInfo, setSaveSuccessInfo] = useState<{
     chapterTitle: string;
     nodesCount: number;
@@ -277,28 +383,33 @@ export default function TextCheckerScreen() {
   // Khóa toàn bộ nhập liệu khi AI đang phân tích hoặc đang lưu vào DB
   const isLocked = isAnalyzing || isSaving;
 
-  useEffect(() => {
-    let isMounted = true;
-    async function loadProject() {
-      try {
-        const proj = await projectStore.getProject(projectId);
-        if (!isMounted) return;
-        setCurrentProject(proj);
+  const loadProject = useCallback(async () => {
+    setProjectLoadError(null);
+    setProjectLoadState((prev) => (prev === 'ready' ? 'ready' : 'loading'));
+    try {
+      const proj = await projectStore.getProject(projectId);
+      setCurrentProject(proj);
+      setProjectLoadState('ready');
+      if (!chapterNumberTouchedRef.current) {
         const existingChapters = getProjectChapters(proj);
         const nextNum =
           existingChapters.length > 0
             ? Math.max(...existingChapters.map((c) => Number(c.chapterNumber) || 0)) + 1
             : 1;
         setChapterNumberInput(String(nextNum));
-      } catch (err) {
-        console.warn('[TextChecker] Lỗi tải dự án:', err);
       }
+    } catch (err: any) {
+      console.warn('[TextChecker] Lỗi tải dự án:', err);
+      setProjectLoadState('error');
+      setProjectLoadError(err?.message || 'Không thể tải thông tin dự án.');
     }
-    void loadProject();
-    return () => {
-      isMounted = false;
-    };
   }, [projectId]);
+
+  useEffect(() => {
+    chapterNumberTouchedRef.current = false;
+    activeSaveChapterIdRef.current = null;
+    void loadProject();
+  }, [loadProject]);
 
   // Danh sách các thực thể hiện có + đề xuất mới để chọn trong FormSelectField (giống graph/index.tsx)
   const characterOptions = useMemo(() => {
@@ -476,13 +587,31 @@ export default function TextCheckerScreen() {
     }
   };
 
+  const handleChapterTextChange = (nextText: string) => {
+    setChapterText(nextText);
+    if (hasAnalyzed && analyzedTextSnapshotRef.current !== null) {
+      setIsAnalysisStale(nextText !== analyzedTextSnapshotRef.current);
+    }
+  };
+
   const handleAnalyze = async () => {
     if (isLocked) return;
+    if (projectLoadState !== 'ready') {
+      showNotice('Đang tải dự án', 'Vui lòng chờ tải xong thông tin dự án trước khi phân tích.');
+      return;
+    }
     const trimmedText = chapterText.trim();
     if (trimmedText.length < 20) {
       showNotice(
         'Nội dung quá ngắn',
         'Vui lòng nhập hoặc dán nội dung chương (tối thiểu 20 ký tự) để AI kiểm tra.'
+      );
+      return;
+    }
+    if (trimmedText.length > 40000) {
+      showNotice(
+        'Nội dung vượt giới hạn',
+        `Nội dung chương hiện có ${trimmedText.length.toLocaleString('vi-VN')} ký tự, vượt mức tối đa 40.000 ký tự. Vui lòng rút gọn hoặc chia thành hai chương.`
       );
       return;
     }
@@ -515,6 +644,7 @@ export default function TextCheckerScreen() {
 
       const data = res.data;
       setChapterSummary(data.summary || '');
+      setContextOmissions(data.contextOmissions || null);
       if (!chapterTitle.trim()) {
         setChapterTitle(`Chương ${data.chapterNumber}`);
       }
@@ -584,6 +714,8 @@ export default function TextCheckerScreen() {
         })
       );
       setStatusChanges(mappedStatusChanges);
+      analyzedTextSnapshotRef.current = chapterText;
+      setIsAnalysisStale(false);
       setHasAnalyzed(true);
 
       if (mappedIssues.length > 0) {
@@ -594,6 +726,9 @@ export default function TextCheckerScreen() {
         setActiveResultTab('events');
       }
     } catch (err: any) {
+      if (hasAnalyzed && analyzedTextSnapshotRef.current !== chapterText) {
+        setIsAnalysisStale(true);
+      }
       showNotice(
         'Phân tích thất bại',
         err?.message || 'Không thể kết nối AI để kiểm tra văn bản. Vui lòng thử lại.'
@@ -603,11 +738,18 @@ export default function TextCheckerScreen() {
     }
   };
 
-  // Chấp nhận đề xuất sửa của AI: thay trực tiếp đoạn quote trong chapterText bằng suggestedRewrite
+  // Chấp nhận đề xuất sửa của AI: chỉ thay khi đoạn trích dẫn khớp duy nhất trong chapterText
   const handleAcceptRewrite = (issue: EditableIssue) => {
     if (isLocked || !issue.suggestedRewrite.trim() || !issue.quote.trim()) return;
     const replaced = replaceQuoteInText(chapterText, issue.quote, issue.suggestedRewrite.trim());
-    if (!replaced) {
+    if (replaced.status === 'ambiguous') {
+      showNotice(
+        'Đoạn văn xuất hiện nhiều lần',
+        'Đoạn trích dẫn này khớp nhiều vị trí trong chương nên hệ thống không tự động thay thế. Vui lòng tự tìm và sửa trực tiếp đoạn bạn muốn trong văn bản chương.'
+      );
+      return;
+    }
+    if (replaced.status === 'not_found') {
       showNotice(
         'Không tìm thấy đoạn văn gốc',
         'Đoạn trích dẫn này có thể đã được bạn chỉnh sửa trước đó trong văn bản chương. Vui lòng kiểm tra lại hoặc bấm "Phân tích lại".'
@@ -615,41 +757,45 @@ export default function TextCheckerScreen() {
       return;
     }
     setChapterText(replaced.updatedText);
+    // Đây là thay thế có chủ đích từ đề xuất phân tích -> đồng bộ snapshot nếu kết quả chưa bị stale
+    if (!isAnalysisStale) {
+      analyzedTextSnapshotRef.current = replaced.updatedText;
+    }
     setIssues((prev) =>
       prev.map((it) =>
         it.id === issue.id
-          ? { ...it, applied: true, resolved: true, appliedOriginal: replaced.matchedText }
+          ? { ...it, applied: true, resolved: true, appliedRange: replaced.range }
           : it
       )
     );
   };
 
-  // Hoàn tác đề xuất sửa đã áp dụng
+  // Hoàn tác đề xuất sửa đã áp dụng dựa trên đúng vị trí + ngữ cảnh xung quanh đã ghi nhận
   const handleUndoRewrite = (issue: EditableIssue) => {
-    if (isLocked || !issue.applied || !issue.appliedOriginal || !issue.suggestedRewrite.trim()) return;
-    const reverted = replaceQuoteInText(
-      chapterText,
-      issue.suggestedRewrite.trim(),
-      issue.appliedOriginal
-    );
-    if (!reverted) {
+    if (isLocked || !issue.applied || !issue.appliedRange) return;
+    const revertedText = restoreAppliedRangeInText(chapterText, issue.appliedRange);
+    if (revertedText === null) {
       showNotice(
         'Không thể hoàn tác tự động',
-        'Đoạn văn đã được chỉnh sửa thêm sau khi áp dụng đề xuất.'
+        'Đoạn văn hoặc ngữ cảnh xung quanh đã thay đổi nên không xác minh được vị trí hoàn tác duy nhất.'
       );
       return;
     }
-    setChapterText(reverted.updatedText);
+    setChapterText(revertedText);
+    if (!isAnalysisStale) {
+      analyzedTextSnapshotRef.current = revertedText;
+    }
     setIssues((prev) =>
       prev.map((it) =>
         it.id === issue.id
-          ? { ...it, applied: false, resolved: false, appliedOriginal: undefined }
+          ? { ...it, applied: false, resolved: false, appliedRange: undefined }
           : it
       )
     );
   };
 
-  const executeSaveToDatabase = async () => {
+  const executeSaveToDatabase = async (options?: { saveChapterOnly?: boolean }) => {
+    const saveChapterOnly = Boolean(options?.saveChapterOnly);
     const trimmedText = chapterText.trim();
     if (!trimmedText) {
       showNotice('Thiếu nội dung', 'Vui lòng nhập nội dung chương trước khi lưu.');
@@ -669,29 +815,103 @@ export default function TextCheckerScreen() {
     setIsSaving(true);
     try {
       const initialProject = await projectStore.getProject(projectId);
-      const initialNodeIds = new Set((initialProject.nodes || []).map((n) => n.id));
+      const initialNodes = initialProject.nodes || [];
+      const nodesToSave = saveChapterOnly
+        ? []
+        : suggestedNodes.filter((n) => n.selected && n.name.trim());
+      const eventsToSave = saveChapterOnly
+        ? []
+        : suggestedEvents.filter((e) => e.selected && e.name.trim());
+      const activeStatusChanges = saveChapterOnly
+        ? []
+        : statusChanges.filter((s) => s.selected);
 
-      // 1. Tạo chương mới kèm toàn bộ nội dung văn bản do người dùng viết
-      const savedChapter = await projectStore.createChapter(projectId, {
-        chapterNumber: finalChapterNum,
-        title: finalTitle,
-        desc:
-          chapterSummary.trim() ||
-          `Nội dung chương ${finalChapterNum} (${wordCount} từ).`,
-        content: trimmedText,
-      });
+      // Kiểm tra trước khi tạo chương: mọi cập nhật trạng thái nhân vật phải có mục tiêu hợp lệ
+      if (activeStatusChanges.length > 0) {
+        const existingCharKeys = new Set(
+          initialNodes
+            .filter((n) => n.type === 'character' && n.name)
+            .map((n) => n.name.trim().toLocaleLowerCase('vi'))
+        );
+        const proposedCharKeys = new Set(
+          nodesToSave
+            .filter((n) => n.type === 'character' && n.name.trim())
+            .map((n) => n.name.trim().toLocaleLowerCase('vi'))
+        );
+        const missingTargets = activeStatusChanges
+          .filter((sc) => {
+            const key = sc.characterName.trim().toLocaleLowerCase('vi');
+            return !existingCharKeys.has(key) && !proposedCharKeys.has(key);
+          })
+          .map((sc) => sc.characterName);
+        if (missingTargets.length > 0) {
+          showNotice(
+            'Không tìm thấy nhân vật mục tiêu',
+            `Không thể cập nhật trạng thái cho: ${missingTargets.join(', ')}. Hãy bật chọn đề xuất nhân vật tương ứng hoặc bỏ chọn cập nhật trạng thái trước khi lưu.`
+          );
+          return;
+        }
+      }
 
-      // 2. Tạo các node thực thể được người dùng chọn (làm giàu stub nếu mới sinh trong batch, không ghi đè node cũ)
-      const nodesToSave = suggestedNodes.filter((n) => n.selected && n.name.trim());
+      // Kiểm tra trước khi tạo chương: không tạo trùng node đầy đủ đã tồn tại trong đồ thị
+      const duplicateFullNodeNames: string[] = [];
+      for (const item of nodesToSave) {
+        const key = item.name.trim().toLocaleLowerCase('vi');
+        const matchedFull = initialNodes.find(
+          (n) =>
+            n.type === item.type &&
+            n.name.trim().toLocaleLowerCase('vi') === key &&
+            n.autoCreatedStub !== true
+        );
+        if (matchedFull) {
+          duplicateFullNodeNames.push(`${item.name.trim()} (${ENTITY_TYPE_META[item.type].label})`);
+        }
+      }
+      if (duplicateFullNodeNames.length > 0) {
+        showNotice(
+          'Thực thể đã tồn tại trong đồ thị',
+          `Các node sau đã có đầy đủ trong dự án nên không thể tạo mới trùng lặp:\n- ${duplicateFullNodeNames.join('\n- ')}\n\nVui lòng bỏ chọn hoặc đổi tên các node này trước khi lưu.`
+        );
+        return;
+      }
+
+      // 1. Tạo hoặc tái sử dụng chương (tránh tạo chương thứ 2 trùng số chương khi retry sau lỗi một phần)
+      const latestChapters = getProjectChapters(initialProject);
+      const existingChapter =
+        (activeSaveChapterIdRef.current
+          ? latestChapters.find((c) => c.id === activeSaveChapterIdRef.current)
+          : undefined) ||
+        latestChapters.find(
+          (c) =>
+            Number(c.chapterNumber) === finalChapterNum &&
+            c.title.trim().toLocaleLowerCase('vi') === finalTitle.toLocaleLowerCase('vi')
+        );
+
+      let savedChapter;
+      if (existingChapter) {
+        savedChapter = existingChapter;
+        await projectStore.updateChapterStoryContent(projectId, existingChapter.id, trimmedText);
+      } else {
+        savedChapter = await projectStore.createChapter(projectId, {
+          chapterNumber: finalChapterNum,
+          title: finalTitle,
+          desc:
+            (!saveChapterOnly && chapterSummary.trim()) ||
+            `Nội dung chương ${finalChapterNum} (${wordCount} từ).`,
+          content: trimmedText,
+        });
+      }
+      activeSaveChapterIdRef.current = savedChapter.id;
+
+      // 2. Tạo hoặc làm giàu nguyên tử các node thực thể được chọn (chỉ update khi vẫn là stub)
       let savedNodesCount = 0;
       for (const item of nodesToSave) {
         const latestProj = await projectStore.getProject(projectId);
         const normalizedName = item.name.trim();
-        const stubMatch = (latestProj.nodes || []).find(
+        const existingMatch = (latestProj.nodes || []).find(
           (n) =>
             n.type === item.type &&
-            n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi') &&
-            (n.autoCreatedStub === true || !initialNodeIds.has(n.id))
+            n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi')
         );
 
         const payload: Partial<StoryNode> = {
@@ -724,38 +944,61 @@ export default function TextCheckerScreen() {
           autoCreatedStub: false,
         };
 
-        if (stubMatch) {
-          await projectStore.updateNode(projectId, stubMatch.id, payload);
+        if (existingMatch) {
+          if (existingMatch.autoCreatedStub === true) {
+            try {
+              await projectStore.updateNode(projectId, existingMatch.id, payload, {
+                onlyIfStub: true,
+              });
+              savedNodesCount += 1;
+            } catch (stubErr) {
+              // Nếu node đã trở thành node đầy đủ trong lúc ghi -> giữ nguyên, không ghi đè
+              if (!(stubErr instanceof ApiError && stubErr.status === 409)) {
+                throw stubErr;
+              }
+            }
+          }
+          // Nếu đã là node đầy đủ (ví dụ từ lần retry trước) -> tái sử dụng, không tạo trùng
         } else {
           await projectStore.createNode(projectId, payload);
+          savedNodesCount += 1;
         }
-        savedNodesCount += 1;
       }
 
-      // 3. Tạo các node sự kiện của chương và gán trực tiếp vào chương mới
-      const eventsToSave = suggestedEvents.filter((e) => e.selected && e.name.trim());
+      // 3. Tạo hoặc tái sử dụng các node sự kiện của chương và hoàn tất gán vào chương
       let savedEventsCount = 0;
       for (const ev of eventsToSave) {
-        const createdEventNode = await projectStore.createNode(projectId, {
-          type: 'event',
-          name: ev.name.trim(),
-          role: 'SỰ KIỆN',
-          desc: ev.desc.trim() || `Sự kiện trong ${finalTitle}`,
-          status: 'Đã diễn ra',
-          chapter: savedChapter.id,
-          location: ev.location.trim(),
-          time: ev.time.trim(),
-          impact: ev.impact.trim(),
-          charactersInvolved: JSON.stringify(ev.charactersInvolved),
-          autoCreatedStub: false,
-        });
+        const latestProj = await projectStore.getProject(projectId);
+        const evName = ev.name.trim();
+        const existingEvent = (latestProj.nodes || []).find(
+          (n) =>
+            n.type === 'event' &&
+            n.name.trim().toLocaleLowerCase('vi') === evName.toLocaleLowerCase('vi') &&
+            (n.chapter === savedChapter.id || n.chapter === savedChapter.title)
+        );
 
-        await projectStore.assignEventToChapter(projectId, savedChapter.id, createdEventNode);
+        const targetEventNode =
+          existingEvent ||
+          (await projectStore.createNode(projectId, {
+            type: 'event',
+            name: evName,
+            role: 'SỰ KIỆN',
+            desc: ev.desc.trim() || `Sự kiện trong ${finalTitle}`,
+            status: 'Đã diễn ra',
+            chapter: savedChapter.id,
+            location: ev.location.trim(),
+            time: ev.time.trim(),
+            impact: ev.impact.trim(),
+            charactersInvolved: JSON.stringify(ev.charactersInvolved),
+            autoCreatedStub: false,
+          }));
+
+        await projectStore.assignEventToChapter(projectId, savedChapter.id, targetEventNode);
         savedEventsCount += 1;
       }
 
-      // 4. Áp dụng các thay đổi trạng thái nhân vật được chọn (Đã chết / Hồi sinh)
-      const activeStatusChanges = statusChanges.filter((s) => s.selected);
+      // 4. Áp dụng các thay đổi trạng thái nhân vật được chọn (chỉ dùng statusEvent mới, báo nếu mục tiêu biến mất)
+      const unappliedStatusChanges: string[] = [];
       if (activeStatusChanges.length > 0) {
         const latestProj = await projectStore.getProject(projectId);
         for (const sc of activeStatusChanges) {
@@ -768,8 +1011,10 @@ export default function TextCheckerScreen() {
           if (targetChar) {
             await projectStore.updateNode(projectId, targetChar.id, {
               status: sc.status,
-              statusEvent: sc.statusEvent || targetChar.statusEvent || '',
+              statusEvent: sc.statusEvent.trim(),
             });
+          } else {
+            unappliedStatusChanges.push(`${sc.characterName} → ${sc.status}`);
           }
         }
       }
@@ -781,7 +1026,17 @@ export default function TextCheckerScreen() {
         updatedChapters.length > 0
           ? Math.max(...updatedChapters.map((c) => Number(c.chapterNumber) || 0)) + 1
           : finalChapterNum + 1;
+      chapterNumberTouchedRef.current = false;
       setChapterNumberInput(String(nextNum));
+      activeSaveChapterIdRef.current = null;
+
+      if (unappliedStatusChanges.length > 0) {
+        showNotice(
+          'Lưu hoàn tất một phần',
+          `Đã lưu chương "${finalTitle}", nhưng chưa thể cập nhật trạng thái cho nhân vật do không còn tồn tại trong đồ thị:\n- ${unappliedStatusChanges.join('\n- ')}`
+        );
+        return;
+      }
 
       setSaveSuccessInfo({
         chapterTitle: finalTitle,
@@ -805,6 +1060,24 @@ export default function TextCheckerScreen() {
 
   const handleSavePress = () => {
     if (isLocked) return;
+    if (isAnalysisStale) {
+      const staleMsg =
+        'Văn bản chương đã thay đổi kể từ lần phân tích gần nhất nên kết quả phân tích trước đã cũ.\n\nBạn hãy bấm "Phân tích lại" để cập nhật đề xuất mới, hoặc chọn "Chỉ lưu văn bản chương" để lưu chương mà không áp dụng các node/sự kiện cũ.';
+      if (Platform.OS === 'web') {
+        if (window.confirm(`${staleMsg}\n\nNhấn OK để chỉ lưu văn bản chương (bỏ qua kết quả phân tích cũ).`)) {
+          void executeSaveToDatabase({ saveChapterOnly: true });
+        }
+      } else {
+        Alert.alert('Kết quả phân tích đã cũ', staleMsg, [
+          { text: 'Phân tích lại', style: 'cancel', onPress: () => void handleAnalyze() },
+          {
+            text: 'Chỉ lưu văn bản chương',
+            onPress: () => void executeSaveToDatabase({ saveChapterOnly: true }),
+          },
+        ]);
+      }
+      return;
+    }
     if (unresolvedErrorCount > 0) {
       const warningMsg = `Vẫn còn ${unresolvedErrorCount} lỗi logic nghiêm trọng chưa đánh dấu xử lý. Bạn có muốn tiếp tục lưu đồ thị và chương mới không?`;
       if (Platform.OS === 'web') {
@@ -824,18 +1097,44 @@ export default function TextCheckerScreen() {
 
   const handleCommitNodeEdit = () => {
     if (!editingNode) return;
-    if (!editingNode.name.trim()) {
+    const trimmedNewName = editingNode.name.trim();
+    if (!trimmedNewName) {
       showNotice('Thiếu tên thực thể', 'Vui lòng nhập tên cho node đề xuất.');
       return;
     }
+    const normalizedNode = { ...editingNode, name: trimmedNewName };
     if (isAddingNewNode) {
-      setSuggestedNodes((prev) => [...prev, editingNode]);
+      setSuggestedNodes((prev) => [...prev, normalizedNode]);
     } else {
+      const oldNameTrimmed = editingNodeOriginalName.trim();
       setSuggestedNodes((prev) =>
-        prev.map((n) => (n.localId === editingNode.localId ? editingNode : n))
+        prev.map((n) => (n.localId === normalizedNode.localId ? normalizedNode : n))
       );
+      // Nếu đổi tên một nhân vật đề xuất, đồng bộ tên mới vào charactersInvolved của các sự kiện đề xuất
+      if (
+        normalizedNode.type === 'character' &&
+        oldNameTrimmed &&
+        oldNameTrimmed.toLocaleLowerCase('vi') !== trimmedNewName.toLocaleLowerCase('vi')
+      ) {
+        const oldKey = oldNameTrimmed.toLocaleLowerCase('vi');
+        setSuggestedEvents((prev) =>
+          prev.map((ev) => ({
+            ...ev,
+            charactersInvolved: Array.from(
+              new Set(
+                ev.charactersInvolved.map((participant) =>
+                  participant.trim().toLocaleLowerCase('vi') === oldKey
+                    ? trimmedNewName
+                    : participant
+                )
+              )
+            ),
+          }))
+        );
+      }
     }
     setEditingNode(null);
+    setEditingNodeOriginalName('');
     setIsAddingNewNode(false);
   };
 

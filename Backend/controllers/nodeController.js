@@ -490,6 +490,7 @@ async function updateNode(req, res, next) {
     }
 
     let query;
+    const onlyIfStub = body.onlyIfStub === true;
     const participantFieldsChanged =
       body.charactersInvolved !== undefined ||
       body.characters !== undefined ||
@@ -499,24 +500,57 @@ async function updateNode(req, res, next) {
       updates._participantSyncRevision = crypto.randomUUID();
     }
 
-    if (newSecondaryLabel) {
+    if (onlyIfStub) {
+      if (newSecondaryLabel) {
+        query = `
+          MATCH (n:StoryNode { id: $id })
+          SET n._stubUpdateLock = coalesce(n._stubUpdateLock, 0) + 1
+          WITH n, coalesce(n.autoCreatedStub, false) AS isStillStub
+          FOREACH (_ IN CASE WHEN isStillStub THEN [1] ELSE [] END |
+            REMOVE n:Character:Item:Faction:Event:Location
+            SET n:${newSecondaryLabel}, n += $updates
+          )
+          REMOVE n._stubUpdateLock
+          RETURN n, isStillStub
+        `;
+      } else {
+        query = `
+          MATCH (n:StoryNode { id: $id })
+          SET n._stubUpdateLock = coalesce(n._stubUpdateLock, 0) + 1
+          WITH n, coalesce(n.autoCreatedStub, false) AS isStillStub
+          FOREACH (_ IN CASE WHEN isStillStub THEN [1] ELSE [] END |
+            SET n += $updates
+          )
+          REMOVE n._stubUpdateLock
+          RETURN n, isStillStub
+        `;
+      }
+    } else if (newSecondaryLabel) {
       query = `
         MATCH (n:StoryNode { id: $id })
         REMOVE n:Character:Item:Faction:Event:Location
         SET n:${newSecondaryLabel}, n += $updates
-        RETURN n
+        RETURN n, true AS isStillStub
       `;
     } else {
       query = `
         MATCH (n:StoryNode { id: $id })
         SET n += $updates
-        RETURN n
+        RETURN n, true AS isStillStub
       `;
     }
 
     const records = await runQuery(query, { id, updates });
     if (!records.length || !records[0].n) {
       return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
+    }
+    if (onlyIfStub && !records[0].isStillStub) {
+      return res.status(409).json({
+        success: false,
+        code: 'NODE_ALREADY_FULL',
+        message: 'Node này đã có dữ liệu đầy đủ và không còn là stub tự sinh.',
+        data: records[0].n,
+      });
     }
 
     const updatedNode = records[0].n;
