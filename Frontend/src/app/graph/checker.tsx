@@ -1178,8 +1178,26 @@ export default function TextCheckerScreen() {
     setSuggestedEvents([]);
     setStatusChanges([]);
     setHasAnalyzed(false);
+    setIsAnalysisStale(false);
+    analyzedTextSnapshotRef.current = null;
+    setContextOmissions(null);
+    activeSaveChapterIdRef.current = null;
+    chapterNumberTouchedRef.current = false;
     setSaveSuccessInfo(null);
   };
+
+  const contextOmissionSummary = useMemo(() => {
+    if (!contextOmissions || contextOmissions.totalOmitted <= 0) return null;
+    const parts: string[] = [];
+    if (contextOmissions.omittedCharacters > 0) parts.push(`${contextOmissions.omittedCharacters} nhân vật`);
+    if (contextOmissions.omittedLocations > 0) parts.push(`${contextOmissions.omittedLocations} địa điểm`);
+    if (contextOmissions.omittedItems > 0) parts.push(`${contextOmissions.omittedItems} vật phẩm`);
+    if (contextOmissions.omittedFactions > 0) parts.push(`${contextOmissions.omittedFactions} tổ chức`);
+    if (contextOmissions.omittedEvents > 0) parts.push(`${contextOmissions.omittedEvents} sự kiện`);
+    if (contextOmissions.omittedChapters > 0) parts.push(`${contextOmissions.omittedChapters} chương cũ`);
+    if (contextOmissions.omittedLinks > 0) parts.push(`${contextOmissions.omittedLinks} liên kết`);
+    return parts.join(', ');
+  }, [contextOmissions]);
 
   return (
     <SafeAreaView style={styles.safeArea}>
@@ -1188,16 +1206,23 @@ export default function TextCheckerScreen() {
         <View style={styles.headerLeftGroup}>
           <Pressable
             hitSlop={12}
-            style={({ pressed }) => [styles.menuBtn, pressed && styles.menuBtnPressed]}
+            style={({ pressed }) => [
+              styles.menuBtn,
+              pressed && styles.menuBtnPressed,
+              (isLocked || projectLoadState !== 'ready') && styles.btnDisabled,
+            ]}
             onPress={() => setSidebarVisible(true)}
-            disabled={isLocked}>
+            disabled={isLocked || projectLoadState !== 'ready'}>
             <Text style={styles.menuBtnIcon}>☰</Text>
           </Pressable>
           <View style={{ flex: 1 }}>
             <Text style={styles.headerTitle}>Kiểm tra văn bản</Text>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {currentProject.title} · {currentProject.nodes.length} NODE ·{' '}
-              {getProjectChapters(currentProject).length} CHƯƠNG
+              {projectLoadState === 'loading'
+                ? 'Đang tải thông tin dự án...'
+                : projectLoadState === 'error'
+                  ? 'Không thể tải dự án'
+                  : `${currentProject.title} · ${currentProject.nodes.length} NODE · ${getProjectChapters(currentProject).length} CHƯƠNG`}
             </Text>
           </View>
         </View>
@@ -1216,6 +1241,44 @@ export default function TextCheckerScreen() {
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">
+        {/* Banner trạng thái tải dự án */}
+        {projectLoadState === 'loading' && (
+          <View style={styles.infoBanner}>
+            <ActivityIndicator size="small" color="#e5a93c" />
+            <Text style={styles.infoBannerText}>Đang tải dữ liệu đồ thị của dự án...</Text>
+          </View>
+        )}
+
+        {projectLoadState === 'error' && (
+          <View style={styles.errorBanner}>
+            <Text style={styles.errorBannerText}>
+              ⚠️ {projectLoadError || 'Không thể tải dự án này.'}
+            </Text>
+            <Pressable style={styles.retryLoadBtn} onPress={() => void loadProject()}>
+              <Text style={styles.retryLoadBtnText}>Thử lại</Text>
+            </Pressable>
+          </View>
+        )}
+
+        {/* Banner cảnh báo kết quả phân tích đã lỗi thời sau khi chỉnh sửa văn bản */}
+        {hasAnalyzed && isAnalysisStale && (
+          <View style={styles.staleBanner}>
+            <Text style={styles.staleBannerText}>
+              ⚠️ Văn bản chương đã thay đổi kể từ lần phân tích gần nhất. Hãy bấm "Phân tích & Kiểm
+              tra lại" trước khi lưu node/sự kiện để tránh lưu đề xuất cũ.
+            </Text>
+          </View>
+        )}
+
+        {/* Banner thông báo phần bối cảnh đồ thị bị rút gọn khi gửi AI */}
+        {hasAnalyzed && contextOmissionSummary && (
+          <View style={styles.infoBanner}>
+            <Text style={styles.infoBannerText}>
+              ℹ️ Do giới hạn ngữ cảnh AI, lần phân tích này đã lược bớt: {contextOmissionSummary}.
+            </Text>
+          </View>
+        )}
+
         {/* Banner lưu thành công */}
         {saveSuccessInfo && (
           <View style={styles.successBanner}>
@@ -1262,7 +1325,10 @@ export default function TextCheckerScreen() {
               <TextInput
                 style={[styles.input, isLocked && styles.inputLocked]}
                 value={chapterNumberInput}
-                onChangeText={setChapterNumberInput}
+                onChangeText={(val) => {
+                  chapterNumberTouchedRef.current = true;
+                  setChapterNumberInput(val);
+                }}
                 keyboardType="number-pad"
                 editable={!isLocked}
                 placeholder="1"
@@ -1285,17 +1351,17 @@ export default function TextCheckerScreen() {
           <View style={styles.fieldHeaderRow}>
             <Text style={styles.fieldLabel}>Nội dung văn bản chương</Text>
             <Text style={styles.wordCountText}>
-              {wordCount} từ · {chapterText.length} ký tự
+              {wordCount} từ · {chapterText.length.toLocaleString('vi-VN')}/40.000 ký tự
             </Text>
           </View>
           <TextInput
             style={[styles.input, styles.chapterTextArea, isLocked && styles.inputLocked]}
             value={chapterText}
-            onChangeText={setChapterText}
+            onChangeText={handleChapterTextChange}
             multiline
             editable={!isLocked}
             textAlignVertical="top"
-            placeholder="Dán hoặc tự viết nội dung chương truyện tại đây...&#10;&#10;AI sẽ đối chiếu toàn bộ bản đồ nhân vật, địa điểm, vật phẩm, tổ chức và các chương trước để phát hiện lỗi logic (nhân vật đã chết xuất hiện, sai lịch sử địa điểm, mâu thuẫn vật phẩm...), đề xuất đoạn viết lại và trích xuất các node & sự kiện mới."
+            placeholder="Dán hoặc tự viết nội dung chương truyện tại đây (tối đa 40.000 ký tự)...&#10;&#10;AI sẽ đối chiếu với bối cảnh đồ thị được chọn của dự án (nhân vật, địa điểm, vật phẩm, tổ chức, sự kiện và các chương gần nhất; một phần dữ liệu lớn có thể được lược bớt) để bắt lỗi logic, đề xuất viết lại và trích xuất node & sự kiện mới."
             placeholderTextColor="#6d6253"
           />
 
@@ -1605,6 +1671,7 @@ export default function TextCheckerScreen() {
                             disabled={isLocked}
                             onPress={() => {
                               setIsAddingNewNode(false);
+                              setEditingNodeOriginalName(node.name);
                               setEditingNode({ ...node });
                             }}>
                             <Text style={styles.editMiniBtnText}>✏️ Sửa</Text>
@@ -1731,12 +1798,16 @@ export default function TextCheckerScreen() {
         <View style={styles.bottomActionBar}>
           <View style={{ flex: 1 }}>
             <Text style={styles.bottomBarTitle}>
-              Lưu 1 chương · {selectedNodesCount} node · {selectedEventsCount} sự kiện
+              {isAnalysisStale
+                ? 'Kết quả phân tích đã cũ'
+                : `Lưu 1 chương · ${selectedNodesCount} node · ${selectedEventsCount} sự kiện`}
             </Text>
             <Text style={styles.bottomBarSub}>
-              {unresolvedErrorCount > 0
-                ? `Còn ${unresolvedErrorCount} lỗi nghiêm trọng chưa xử lý`
-                : 'Sẵn sàng lưu vào đồ thị và Chi tiết chương'}
+              {isAnalysisStale
+                ? 'Hãy phân tích lại hoặc bấm lưu để chỉ lưu văn bản chương'
+                : unresolvedErrorCount > 0
+                  ? `Còn ${unresolvedErrorCount} lỗi nghiêm trọng chưa xử lý`
+                  : 'Sẵn sàng lưu vào đồ thị và Chi tiết chương'}
             </Text>
           </View>
           <Pressable
@@ -1776,7 +1847,8 @@ export default function TextCheckerScreen() {
                       <Pressable
                         key={t}
                         style={[styles.typeChip, active && styles.typeChipActive]}
-                        onPress={() =>
+                        onPress={() => {
+                          if (editingNode.type === t) return;
                           setEditingNode({
                             ...editingNode,
                             type: t,
@@ -1788,8 +1860,8 @@ export default function TextCheckerScreen() {
                                   : t === 'faction'
                                     ? 'Đang hoạt động'
                                     : 'Hoạt động',
-                          })
-                        }>
+                          });
+                        }}>
                         <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
                           {meta.icon} {meta.label}
                         </Text>
@@ -2999,5 +3071,63 @@ const styles = StyleSheet.create({
     color: '#12100d',
     fontSize: 13,
     fontWeight: '700',
+  },
+  infoBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#162129',
+    borderWidth: 1,
+    borderColor: '#2d516b',
+    borderRadius: 12,
+    padding: 12,
+  },
+  infoBannerText: {
+    flex: 1,
+    color: '#b9dbf2',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: '#2b1614',
+    borderWidth: 1,
+    borderColor: '#7a2f28',
+    borderRadius: 12,
+    padding: 12,
+  },
+  errorBannerText: {
+    flex: 1,
+    color: '#f5b0a8',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  retryLoadBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#e5a93c',
+    backgroundColor: '#241d13',
+  },
+  retryLoadBtnText: {
+    color: '#e5a93c',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  staleBanner: {
+    backgroundColor: '#292113',
+    borderWidth: 1,
+    borderColor: '#755622',
+    borderRadius: 12,
+    padding: 12,
+  },
+  staleBannerText: {
+    color: '#f3d28e',
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
