@@ -2,6 +2,7 @@ const express = require('express');
 const { rateLimit } = require('express-rate-limit');
 const router = express.Router();
 const {
+  analyzeChapterText,
   chatWithAI,
   clearChatHistory,
   generateChapterAndEvents,
@@ -44,6 +45,7 @@ router.delete('/chat-history/:projectId', clearChatHistory);
 router.post('/chat', aiChatLimiter, aiChatAggregateLimiter, chatWithAI);
 router.post('/generate-chapter-events', aiChatLimiter, aiChatAggregateLimiter, generateChapterAndEvents);
 router.post('/generate-chapter-story', aiChatLimiter, aiChatAggregateLimiter, generateChapterStory);
+router.post('/analyze-chapter', aiChatLimiter, aiChatAggregateLimiter, analyzeChapterText);
 
 module.exports = router;
 
