@@ -658,6 +658,96 @@ class ApiService {
       180000
     );
   }
+
+  async analyzeChapterText(payload: {
+    projectTitle: string;
+    chapterNumber?: number;
+    chapterTitle?: string;
+    chapterText: string;
+    nodes?: any[];
+    links?: any[];
+    chapters?: any[];
+  }): Promise<{
+    success: boolean;
+    data: {
+      chapterNumber: number;
+      summary: string;
+      issues: Array<{
+        id: string;
+        severity: 'error' | 'warning' | 'info';
+        category: string;
+        title: string;
+        quote: string;
+        explanation: string;
+        suggestion: string;
+        suggestedRewrite?: string;
+        relatedEntities: string[];
+      }>;
+      suggestedNodes: Array<{
+        type: 'character' | 'item' | 'location' | 'faction';
+        name: string;
+        role?: string;
+        desc?: string;
+        status?: string;
+        gender?: string;
+        dob?: string;
+        birthplace?: string;
+        weapon?: string;
+        sect?: string;
+        personality?: string;
+        rarity?: string;
+        origin?: string;
+        element?: string;
+        holderOrLocation?: string;
+        region?: string;
+        climate?: string;
+        terrain?: string;
+        dangerLevel?: string;
+        ruler?: string;
+        subType?: string;
+        alignment?: string;
+        leader?: string;
+        headquarters?: string;
+        motto?: string;
+      }>;
+      suggestedEvents: Array<{
+        name: string;
+        desc: string;
+        location?: string;
+        time?: string;
+        impact?: string;
+        charactersInvolved: string[];
+      }>;
+      characterStatusChanges: Array<{
+        characterName: string;
+        status: 'Đã chết' | 'Hồi sinh';
+        statusEvent?: string;
+        reason?: string;
+      }>;
+      contextOmissions?: {
+        omittedCharacters: number;
+        omittedLocations: number;
+        omittedItems: number;
+        omittedFactions: number;
+        omittedEvents: number;
+        omittedChapters: number;
+        omittedLinks: number;
+        totalOmitted: number;
+      };
+      model?: string;
+    };
+    message?: string;
+  }> {
+    // Vượt tổng hạn mức của backend (tối đa 4 model fallback × 150s = 600s) để client nhận đủ kết quả hoặc lỗi từ server
+    return this.request(
+      '/ai/analyze-chapter',
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      },
+      620000
+    );
+  }
 }
 
 export const api = new ApiService();

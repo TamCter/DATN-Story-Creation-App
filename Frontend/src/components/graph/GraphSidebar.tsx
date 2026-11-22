@@ -30,7 +30,8 @@ type GraphSection =
   | 'characters'
   | 'factions'
   | 'items'
-  | 'links';
+  | 'links'
+  | 'checker';
 
 interface GraphSidebarProps {
   visible: boolean;
@@ -196,6 +197,7 @@ export function GraphSidebar({
     { id: 'factions', number: '06', icon: '🏛️', title: 'Tổ chức / Môn phái', badge: project.nodes.filter((n) => n.type === 'faction').length, route: '/graph/factions' },
     { id: 'items', number: '07', icon: '⚔️', title: 'Vật phẩm / Bảo vật', badge: project.nodes.filter((n) => n.type === 'item').length, route: '/graph/items' },
     { id: 'links', number: '08', icon: '⟷', title: 'Mối liên kết', subtitle: 'Tất cả cạnh quan hệ', badge: project.links.length, route: '/graph/links' },
+    { id: 'checker', number: '09', icon: '🔍', title: 'Kiểm tra văn bản', subtitle: 'Bắt lỗi & trích xuất node', route: '/graph/checker' },
   ];
 
   return (

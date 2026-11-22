@@ -201,7 +201,11 @@ function getNodeCreationRequest(messages) {
   return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
 }
 
-function normalizeEventCharacters(events, characterNodes) {
+function normalizeEventCharacters(
+  events,
+  characterNodes,
+  { includeDescriptionMatches = true } = {}
+) {
   const characters = characterNodes.filter(
     (node) => node && node.type === 'character' && typeof node.name === 'string' && node.name.trim()
   );
@@ -242,6 +246,11 @@ function normalizeEventCharacters(events, characterNodes) {
         involvedKeys.add(nameKey);
       }
     }
+
+    if (!includeDescriptionMatches) {
+      return { ...event, charactersInvolved: involvedNames };
+    }
+
     const eventText = [event.name, event.desc, event.impact]
       .filter((value) => typeof value === 'string')
       .join(' ');
@@ -1270,7 +1279,524 @@ async function clearChatHistory(req, res) {
   }
 }
 
+/**
+ * Phân tích văn bản một chương do tác giả tự viết:
+ * - Bắt lỗi tính nhất quán (nhân vật đã chết, mâu thuẫn địa điểm/lần đầu đặt chân, vật phẩm, tổ chức, thời gian, đặc điểm, quan hệ...)
+ * - Trích xuất & đề xuất các node mới (character, item, location, faction) và các sự kiện của chương (event)
+ * - Đề xuất cập nhật trạng thái nhân vật nếu có (Đã chết / Hồi sinh)
+ * POST /api/ai/analyze-chapter
+ */
+async function analyzeChapterText(req, res, next) {
+  try {
+    const {
+      projectTitle = 'Dự án truyện',
+      chapterNumber,
+      chapterTitle = '',
+      chapterText = '',
+      nodes = [],
+      links = [],
+      chapters = [],
+    } = req.body || {};
+
+    const MAX_CHAPTER_ANALYSIS_CHARS = 40000;
+    const cleanText = typeof chapterText === 'string' ? chapterText.trim() : '';
+    if (cleanText.length < 20) {
+      return res.status(400).json({
+        success: false,
+        message: 'Vui lòng nhập nội dung chương tối thiểu 20 ký tự để AI phân tích.',
+      });
+    }
+    if (cleanText.length > MAX_CHAPTER_ANALYSIS_CHARS) {
+      return res.status(400).json({
+        success: false,
+        message: `Nội dung chương dài ${cleanText.length.toLocaleString('vi-VN')} ký tự, vượt giới hạn tối đa ${MAX_CHAPTER_ANALYSIS_CHARS.toLocaleString('vi-VN')} ký tự. Vui lòng rút gọn hoặc chia nhỏ chương trước khi phân tích.`,
+      });
+    }
+
+    const provider = (
+      process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini')
+    )
+      .trim()
+      .toLowerCase();
+    const apiKey = (
+      process.env[provider === 'aimlapi' ? 'AIMLAPI_API_KEY' : 'GEMINI_API_KEY'] || ''
+    ).trim();
+    if (!apiKey) {
+      return res.status(503).json({
+        success: false,
+        message:
+          'AI chưa được cấu hình. Vui lòng thêm GEMINI_API_KEY hoặc AIMLAPI_API_KEY vào file .env của Backend.',
+      });
+    }
+
+    const safeNodes = Array.isArray(nodes) ? nodes.filter((n) => n && typeof n === 'object') : [];
+    const safeLinks = Array.isArray(links) ? links.filter((l) => l && typeof l === 'object') : [];
+    const safeChapters = Array.isArray(chapters)
+      ? chapters.filter((c) => c && typeof c === 'object')
+      : [];
+
+    const resolvedChapterNumber =
+      Number.isInteger(Number(chapterNumber)) && Number(chapterNumber) > 0
+        ? Number(chapterNumber)
+        : safeChapters.length > 0
+          ? Math.max(...safeChapters.map((c) => Number(c.chapterNumber) || 0)) + 1
+          : 1;
+
+    const nodeNameById = new Map();
+    for (const n of safeNodes) {
+      if (n.id && n.name) {
+        nodeNameById.set(String(n.id), String(n.name));
+      }
+    }
+
+    const allCharacters = safeNodes.filter((n) => n.type === 'character' && n.name);
+    const allLocations = safeNodes.filter((n) => n.type === 'location' && n.name);
+    const allItems = safeNodes.filter((n) => n.type === 'item' && n.name);
+    const allFactions = safeNodes.filter((n) => n.type === 'faction' && n.name);
+    const allEvents = safeNodes.filter((n) => n.type === 'event' && n.name);
+    const eligibleChapters = safeChapters
+      .filter((c) => {
+        const num = Number(c.chapterNumber);
+        return Number.isFinite(num) && num < resolvedChapterNumber;
+      })
+      .sort((a, b) => (Number(a.chapterNumber) || 0) - (Number(b.chapterNumber) || 0));
+
+    const MAX_CTX_CHARACTERS = 50;
+    const MAX_CTX_LOCATIONS = 35;
+    const MAX_CTX_ITEMS = 35;
+    const MAX_CTX_FACTIONS = 25;
+    const MAX_CTX_EVENTS = 40;
+    const MAX_CTX_CHAPTERS = 15;
+    const MAX_CTX_LINKS = 80;
+
+    const contextOmissions = {
+      omittedCharacters: Math.max(0, allCharacters.length - MAX_CTX_CHARACTERS),
+      omittedLocations: Math.max(0, allLocations.length - MAX_CTX_LOCATIONS),
+      omittedItems: Math.max(0, allItems.length - MAX_CTX_ITEMS),
+      omittedFactions: Math.max(0, allFactions.length - MAX_CTX_FACTIONS),
+      omittedEvents: Math.max(0, allEvents.length - MAX_CTX_EVENTS),
+      omittedChapters: Math.max(0, eligibleChapters.length - MAX_CTX_CHAPTERS),
+      omittedLinks: Math.max(0, safeLinks.length - MAX_CTX_LINKS),
+      totalOmitted: 0,
+    };
+    contextOmissions.totalOmitted =
+      contextOmissions.omittedCharacters +
+      contextOmissions.omittedLocations +
+      contextOmissions.omittedItems +
+      contextOmissions.omittedFactions +
+      contextOmissions.omittedEvents +
+      contextOmissions.omittedChapters +
+      contextOmissions.omittedLinks;
+
+    const characterLines = allCharacters
+      .slice(0, MAX_CTX_CHARACTERS)
+      .map((n) =>
+        [
+          n.name,
+          n.status && `trạng thái=${n.status}`,
+          n.statusEvent && `biến cố trạng thái=${n.statusEvent}`,
+          n.role && `vai trò=${n.role}`,
+          n.gender && `giới tính=${n.gender}`,
+          n.dob && `ngày sinh/tuổi=${n.dob}`,
+          n.birthplace && `nơi sinh=${n.birthplace}`,
+          n.weapon && `vật dụng/vũ khí=${n.weapon}`,
+          n.sect && `tổ chức=${n.sect}`,
+          n.personality && `tính cách=${String(n.personality).slice(0, 120)}`,
+          n.desc && `mô tả=${String(n.desc).slice(0, 160)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+
+    const locationLines = allLocations
+      .slice(0, MAX_CTX_LOCATIONS)
+      .map((n) =>
+        [
+          n.name,
+          n.region && `vùng=${n.region}`,
+          n.climate && `khí hậu=${n.climate}`,
+          n.terrain && `địa hình=${n.terrain}`,
+          n.dangerLevel && `nguy hiểm=${n.dangerLevel}`,
+          n.ruler && `cai quản=${n.ruler}`,
+          n.status && `trạng thái=${n.status}`,
+          n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+
+    const itemLines = allItems
+      .slice(0, MAX_CTX_ITEMS)
+      .map((n) =>
+        [
+          n.name,
+          n.rarity && `độ hiếm=${n.rarity}`,
+          n.status && `trạng thái=${n.status}`,
+          n.holderOrLocation && `người giữ/vị trí=${n.holderOrLocation}`,
+          n.origin && `nguồn gốc=${n.origin}`,
+          n.element && `nguyên tố=${n.element}`,
+          n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+
+    const factionLines = allFactions
+      .slice(0, MAX_CTX_FACTIONS)
+      .map((n) =>
+        [
+          n.name,
+          n.subType && `loại=${n.subType}`,
+          n.alignment && `phe=${n.alignment}`,
+          n.status && `trạng thái=${n.status}`,
+          n.leader && `thủ lĩnh=${n.leader}`,
+          n.headquarters && `trụ sở=${n.headquarters}`,
+          n.motto && `tôn chỉ=${n.motto}`,
+          n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+
+    const eventLines = allEvents
+      .slice(-MAX_CTX_EVENTS)
+      .map((n) =>
+        [
+          n.name,
+          n.chapter && `chương=${n.chapter}`,
+          n.time && `thời gian=${n.time}`,
+          n.location && `địa điểm=${n.location}`,
+          (n.charactersInvolved || n.characters) &&
+            `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          n.impact && `tác động=${String(n.impact).slice(0, 120)}`,
+          n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
+        ]
+          .filter(Boolean)
+          .join(' | ')
+      );
+
+    const chapterLines = eligibleChapters
+      .slice(-MAX_CTX_CHAPTERS)
+      .map(
+        (c) =>
+          `- Chương ${c.chapterNumber}: ${c.title || 'Chưa đặt tên'} — ${String(c.desc || '').slice(0, 220)}`
+      );
+
+    const linkLines = safeLinks
+      .slice(0, MAX_CTX_LINKS)
+      .map((l) => {
+        const src = nodeNameById.get(String(l.source)) || String(l.source);
+        const tgt = nodeNameById.get(String(l.target)) || String(l.target);
+        return `${src} --[${l.label || l.category || 'LIÊN_KẾT'}]--> ${tgt}`;
+      });
+
+    const boundedChapterText = cleanText;
+
+    const contextPrompt = `Bạn là biên tập viên văn học & chuyên gia kiểm tra tính nhất quán (Continuity Editor) xuất sắc cho tiểu thuyết "${projectTitle}".
+Nhiệm vụ của bạn là đọc kỹ VĂN BẢN CHƯƠNG MỚI do tác giả tự viết, đối chiếu chặt chẽ với BẢN ĐỒ THỰC THỂ & LỊCH SỬ CÁC CHƯƠNG TRƯỚC của dự án để thực hiện 3 việc:
+
+1. BẮT LỖI TÍNH NHẤT QUÁN & LOGIC (issues):
+Hãy rà soát toàn diện các nhóm lỗi sau (chỉ báo lỗi thực sự có căn cứ từ dữ liệu đồ thị hoặc mâu thuẫn nội tại trong chương, KHÔNG bịa đặt):
+- "Nhân vật đã chết": Nhân vật đang có trạng thái "Đã chết" nhưng lại xuất hiện hành động/đối thoại trực tiếp trong hiện tại (trừ khi văn bản nêu rõ là hồi tưởng, linh hồn hoặc sự kiện hồi sinh).
+- "Mâu thuẫn địa điểm": Nhân vật đã từng đến địa điểm đó (trong sự kiện trước, nơi sinh, trụ sở hoặc liên kết) nhưng văn bản lại viết là "lần đầu đặt chân đến", "chưa từng nghe qua" hoặc không nhận ra nơi đó.
+- "Vật phẩm & Sở hữu": Vật phẩm đang thuộc về nhân vật khác, đã bị phá hủy/thất lạc, hoặc có thuộc tính/nguyên tố khác nhưng nhân vật lại dùng trái ngược không giải thích.
+- "Tổ chức & Phe phái": Tổ chức đã "Suy tàn" / "Tạm ngừng" nhưng vẫn hoạt động bình thường; nhân vật thuộc phe "Đối lập" bỗng hành xử như đồng minh không có lý do; nhầm thủ lĩnh/trụ sở.
+- "Dòng thời gian": Thứ tự sự kiện, thời gian trôi qua, ngày sinh/độ tuổi mâu thuẫn với các chương trước hoặc mâu thuẫn ngay trong chương.
+- "Đặc điểm nhân vật": Sai giới tính, sai vai trò, tính cách/năng lực trái ngược hoàn toàn với hồ sơ đã thiết lập.
+- "Mâu thuẫn quan hệ": Cách xưng hô hoặc thái độ thù địch/thân thiết mâu thuẫn với các mối liên kết hiện có trên đồ thị.
+- "Bối cảnh & Địa lý": Mô tả khí hậu, địa hình, mức độ nguy hiểm, vùng miền trái ngược với thiết lập của địa điểm.
+- "Mâu thuẫn nội tại": Mâu thuẫn tự thân ngay trong văn bản chương (đổi tên nhân vật, buổi sáng đột ngột thành đêm khuya không chuyển cảnh, chi tiết trước đá chi tiết sau).
+
+Phân loại mức độ severity:
+- "error": Lỗi logic/nhất quán nghiêm trọng (VD: người đã chết xuất hiện, sai sự thật đã khẳng định).
+- "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, nhân vật hành xử khác thường).
+- "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn.
+
+2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes):
+- Trích xuất các thực thể MỚI xuất hiện rõ ràng trong chương thuộc 4 loại: "character", "item", "location", "faction" mà CHƯA CÓ trong danh sách thực thể hiện có ở dưới (so khớp không phân biệt hoa/thường).
+- KHÔNG tạo lại node đã tồn tại.
+- Điền đầy đủ các trường thông tin suy ra được từ văn bản; các trường liên kết (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters) CHỈ điền tên cụ thể hoặc chuỗi rỗng "", TUYỆT ĐỐI KHÔNG dùng chữ giữ chỗ như "không rõ", "chưa xác định", "n/a".
+
+3. TRÍCH XUẤT SỰ KIỆN CỦA CHƯƠNG (suggestedEvents) & THAY ĐỔI TRẠNG THÁI (characterStatusChanges):
+- Rút ra 1 đến 5 SỰ KIỆN CHÍNH theo đúng trình tự thời gian diễn ra trong chương này để gắn vào Chi tiết chương.
+- Mỗi sự kiện phải có: "name", "desc", "location" (tên địa điểm cụ thể hoặc ""), "time" (ví dụ: "Đầu chương", "Đêm khuya"...), "impact", và "charactersInvolved" (mảng tên chính xác các nhân vật tham gia trực tiếp, ưu tiên khớp tên nhân vật đã có trong đồ thị).
+- "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
+
+DỮ LIỆU ĐỒ THỊ HIỆN TẠI CỦA DỰ ÁN:
+[Các chương trước]
+${chapterLines.join('\n') || '(Chưa có chương nào)'}
+
+[Nhân vật hiện có]
+${characterLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+[Địa điểm hiện có]
+${locationLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+[Vật phẩm hiện có]
+${itemLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+[Tổ chức / Môn phái hiện có]
+${factionLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+[Sự kiện đã diễn ra]
+${eventLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+[Các mối liên kết hiện có]
+${linkLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
+
+BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngoài khối JSON), đúng cấu trúc sau:
+\`\`\`json
+{
+  "summary": "<Tóm tắt 2-3 câu nội dung chính của chương này>",
+  "issues": [
+    {
+      "severity": "error",
+      "category": "Nhân vật đã chết",
+      "title": "<Tiêu đề ngắn gọn của lỗi>",
+      "quote": "<Trích dẫn CHÍNH XÁC nguyên văn câu/đoạn ngắn chứa lỗi từ chương gốc để hệ thống có thể thay thế 1-1>",
+      "explanation": "<Giải thích rõ vì sao lỗi khi đối chiếu với đồ thị hiện có>",
+      "suggestion": "<Gợi ý hướng xử lý ngắn gọn cho tác giả>",
+      "suggestedRewrite": "<Đoạn văn đã được viết lại hoàn chỉnh, tự nhiên theo đúng văn phong chương để thay thế trực tiếp cho phần quote ở trên>",
+      "relatedEntities": ["<Tên thực thể liên quan>"]
+    }
+  ],
+  "suggestedNodes": [
+    {
+      "type": "character",
+      "name": "<Tên thực thể mới>",
+      "role": "<Vai trò / Độ hiếm / Loại>",
+      "desc": "<Mô tả dựa trên chương>",
+      "status": "<Còn sống / Nguyên vẹn / Hoạt động / Đang hoạt động>",
+      "gender": "",
+      "dob": "",
+      "birthplace": "",
+      "weapon": "",
+      "sect": "",
+      "personality": "",
+      "rarity": "",
+      "origin": "",
+      "element": "",
+      "holderOrLocation": "",
+      "region": "",
+      "climate": "",
+      "terrain": "",
+      "dangerLevel": "",
+      "ruler": "",
+      "subType": "",
+      "alignment": "",
+      "leader": "",
+      "headquarters": "",
+      "motto": ""
+    }
+  ],
+  "suggestedEvents": [
+    {
+      "name": "<Tên sự kiện>",
+      "desc": "<Mô tả diễn biến sự kiện>",
+      "location": "<Tên địa điểm hoặc chuỗi rỗng>",
+      "time": "<Thời điểm diễn ra>",
+      "impact": "<Tác động của sự kiện>",
+      "charactersInvolved": ["<Tên nhân vật tham gia>"]
+    }
+  ],
+  "characterStatusChanges": [
+    {
+      "characterName": "<Tên chính xác nhân vật>",
+      "status": "Đã chết",
+      "statusEvent": "<Tên sự kiện gây ra thay đổi>",
+      "reason": "<Lý do ngắn gọn theo văn bản chương>"
+    }
+  ]
+}
+\`\`\``;
+
+    const userPrompt = `Hãy kiểm tra tính nhất quán và trích xuất node/sự kiện cho Chương ${resolvedChapterNumber}${chapterTitle ? `: "${chapterTitle}"` : ''} dưới đây:\n\n${boundedChapterText}`;
+
+    const aiRes = await generateAIResponse({
+      provider,
+      apiKey,
+      contextText: contextPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
+    });
+
+    let parsed = null;
+    try {
+      const fenced = aiRes.text.match(/```json\s*([\s\S]*?)```/i);
+      const rawJson = fenced ? fenced[1] : (aiRes.text.match(/\{[\s\S]*\}/) || [])[0];
+      if (rawJson) {
+        parsed = JSON.parse(rawJson);
+      }
+    } catch (parseErr) {
+      console.warn('[AI Controller] Lỗi parse JSON analyzeChapterText:', parseErr.message);
+    }
+
+    const isValidAnalysisEnvelope =
+      parsed !== null &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      Array.isArray(parsed.issues) &&
+      Array.isArray(parsed.suggestedNodes) &&
+      Array.isArray(parsed.suggestedEvents);
+
+    if (!isValidAnalysisEnvelope) {
+      return res.status(502).json({
+        success: false,
+        message: 'AI trả về định dạng phân tích không đầy đủ hoặc không hợp lệ. Vui lòng thử lại.',
+      });
+    }
+
+    const cleanField = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val).trim();
+      return PLACEHOLDER_VALUE_PATTERN.test(str) ? '' : str;
+    };
+
+    const existingNodeKeys = new Set(
+      safeNodes
+        .filter((n) => n.type && n.name)
+        .map((n) => `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`)
+    );
+
+    const issues = (Array.isArray(parsed.issues) ? parsed.issues : [])
+      .filter((item) => item && typeof item === 'object' && (item.title || item.explanation))
+      .map((item, idx) => ({
+        id: `issue-${Date.now()}-${idx}`,
+        severity:
+          item.severity === 'error' || item.severity === 'warning' || item.severity === 'info'
+            ? item.severity
+            : 'warning',
+        category: String(item.category || 'Tính nhất quán').trim(),
+        title: String(item.title || 'Phát hiện điểm chưa nhất quán').trim(),
+        quote: String(item.quote || '').trim(),
+        explanation: String(item.explanation || '').trim(),
+        suggestion: String(item.suggestion || '').trim(),
+        suggestedRewrite: String(item.suggestedRewrite || '').trim(),
+        relatedEntities: Array.isArray(item.relatedEntities)
+          ? item.relatedEntities.map((e) => String(e).trim()).filter(Boolean)
+          : [],
+      }));
+
+    const seenSuggestedKeys = new Set();
+    const validEntityTypes = new Set(['character', 'item', 'location', 'faction']);
+    const suggestedNodes = (Array.isArray(parsed.suggestedNodes) ? parsed.suggestedNodes : [])
+      .filter((n) => n && typeof n === 'object' && validEntityTypes.has(String(n.type || '').toLowerCase()))
+      .map((n) => {
+        const type = String(n.type).toLowerCase();
+        const name = String(n.name || '').trim();
+        return {
+          type,
+          name,
+          role: cleanField(n.role),
+          desc: cleanField(n.desc),
+          status:
+            cleanField(n.status) ||
+            (type === 'character'
+              ? 'Còn sống'
+              : type === 'item'
+                ? 'Nguyên vẹn'
+                : type === 'faction'
+                  ? 'Đang hoạt động'
+                  : 'Hoạt động'),
+          gender: cleanField(n.gender),
+          dob: cleanField(n.dob),
+          birthplace: cleanField(n.birthplace),
+          weapon: cleanField(n.weapon),
+          sect: cleanField(n.sect),
+          personality: cleanField(n.personality),
+          rarity: cleanField(n.rarity),
+          origin: cleanField(n.origin),
+          element: cleanField(n.element),
+          holderOrLocation: cleanField(n.holderOrLocation),
+          region: cleanField(n.region),
+          climate: cleanField(n.climate),
+          terrain: cleanField(n.terrain),
+          dangerLevel: cleanField(n.dangerLevel),
+          ruler: cleanField(n.ruler),
+          subType: cleanField(n.subType),
+          alignment: cleanField(n.alignment),
+          leader: cleanField(n.leader),
+          headquarters: cleanField(n.headquarters),
+          motto: cleanField(n.motto),
+        };
+      })
+      .filter((n) => {
+        if (!n.name) return false;
+        const key = `${n.type}::${n.name.toLocaleLowerCase('vi')}`;
+        if (existingNodeKeys.has(key) || seenSuggestedKeys.has(key)) return false;
+        seenSuggestedKeys.add(key);
+        return true;
+      });
+
+    const allKnownCharacters = [
+      ...safeNodes.filter((n) => n.type === 'character' && n.name),
+      ...suggestedNodes.filter((n) => n.type === 'character'),
+    ];
+    const rawSuggestedEvents = (
+      Array.isArray(parsed.suggestedEvents) ? parsed.suggestedEvents : []
+    )
+      .filter((ev) => ev && typeof ev === 'object' && String(ev.name || '').trim())
+      .map((ev) => ({
+        name: String(ev.name).trim(),
+        desc: cleanField(ev.desc),
+        location: cleanField(ev.location),
+        time: cleanField(ev.time),
+        impact: cleanField(ev.impact),
+        charactersInvolved: Array.isArray(ev.charactersInvolved)
+          ? ev.charactersInvolved.map((c) => String(c).trim()).filter(Boolean)
+          : typeof ev.charactersInvolved === 'string'
+            ? ev.charactersInvolved
+            : [],
+      }));
+
+    // Chỉ chuẩn hóa nhân vật được liệt kê tường minh, không tự thêm từ mô tả sự kiện
+    const normalizedEvents = normalizeEventCharacters(rawSuggestedEvents, allKnownCharacters, {
+      includeDescriptionMatches: false,
+    }).map((ev) => ({
+      name: ev.name,
+      desc: ev.desc || '',
+      location: ev.location || '',
+      time: ev.time || '',
+      impact: ev.impact || '',
+      charactersInvolved: Array.isArray(ev.charactersInvolved) ? ev.charactersInvolved : [],
+    }));
+
+    const characterStatusChanges = (
+      Array.isArray(parsed.characterStatusChanges) ? parsed.characterStatusChanges : []
+    )
+      .filter(
+        (sc) =>
+          sc &&
+          typeof sc === 'object' &&
+          String(sc.characterName || '').trim() &&
+          (sc.status === 'Đã chết' || sc.status === 'Hồi sinh')
+      )
+      .map((sc) => ({
+        characterName: String(sc.characterName).trim(),
+        status: sc.status,
+        statusEvent: cleanField(sc.statusEvent),
+        reason: cleanField(sc.reason),
+      }));
+
+    return res.status(200).json({
+      success: true,
+      data: {
+        chapterNumber: resolvedChapterNumber,
+        summary: String(parsed.summary || '').trim(),
+        issues,
+        suggestedNodes,
+        suggestedEvents: normalizedEvents,
+        characterStatusChanges,
+        contextOmissions,
+        model: aiRes.model,
+      },
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 module.exports = {
+  analyzeChapterText,
   chatWithAI,
   clearChatHistory,
   extractCreateNodeResponse,
