@@ -893,7 +893,7 @@ export default function TextCheckerScreen() {
         const sameTarget =
           currentAttempt.chapterNumber === finalChapterNum &&
           currentAttempt.title.trim().toLocaleLowerCase('vi') ===
-            finalTitle.toLocaleLowerCase('vi');
+          finalTitle.toLocaleLowerCase('vi');
         if (sameTarget) {
           existingChapter = latestChapters.find((c) => c.id === currentAttempt!.chapterId);
         } else {
@@ -1098,11 +1098,11 @@ export default function TextCheckerScreen() {
         const committedEventId = attempt.committedEventIds[ev.localId];
         const existingEvent = committedEventId
           ? (latestProj.nodes || []).find(
-              (n) =>
-                n.id === committedEventId &&
-                n.type === 'event' &&
-                n.chapter === savedChapter.id
-            )
+            (n) =>
+              n.id === committedEventId &&
+              n.type === 'event' &&
+              n.chapter === savedChapter.id
+          )
           : undefined;
 
         const targetEventNode =
@@ -1135,7 +1135,7 @@ export default function TextCheckerScreen() {
             (n) =>
               n.type === 'character' &&
               n.name.trim().toLocaleLowerCase('vi') ===
-                sc.characterName.trim().toLocaleLowerCase('vi')
+              sc.characterName.trim().toLocaleLowerCase('vi')
           );
           if (targetChar) {
             await projectStore.updateNode(projectId, targetChar.id, {
@@ -2446,32 +2446,32 @@ export default function TextCheckerScreen() {
                   {editingEvent.charactersInvolved
                     .filter((name) => !characterOptions.some((o) => o.value === name))
                     .length > 0 && (
-                    <View style={[styles.eventCharacterOptions, { marginTop: 6 }]}>
-                      {editingEvent.charactersInvolved
-                        .filter((name) => !characterOptions.some((o) => o.value === name))
-                        .map((customName) => (
-                          <Pressable
-                            key={customName}
-                            style={[styles.eventCharacterChip, styles.eventCharacterChipSelected]}
-                            onPress={() =>
-                              setEditingEvent({
-                                ...editingEvent,
-                                charactersInvolved: editingEvent.charactersInvolved.filter(
-                                  (n) => n !== customName
-                                ),
-                              })
-                            }>
-                            <Text
-                              style={[
-                                styles.eventCharacterChipText,
-                                styles.eventCharacterChipTextSelected,
-                              ]}>
-                              ✓ {customName} ✕
-                            </Text>
-                          </Pressable>
-                        ))}
-                    </View>
-                  )}
+                      <View style={[styles.eventCharacterOptions, { marginTop: 6 }]}>
+                        {editingEvent.charactersInvolved
+                          .filter((name) => !characterOptions.some((o) => o.value === name))
+                          .map((customName) => (
+                            <Pressable
+                              key={customName}
+                              style={[styles.eventCharacterChip, styles.eventCharacterChipSelected]}
+                              onPress={() =>
+                                setEditingEvent({
+                                  ...editingEvent,
+                                  charactersInvolved: editingEvent.charactersInvolved.filter(
+                                    (n) => n !== customName
+                                  ),
+                                })
+                              }>
+                              <Text
+                                style={[
+                                  styles.eventCharacterChipText,
+                                  styles.eventCharacterChipTextSelected,
+                                ]}>
+                                ✓ {customName} ✕
+                              </Text>
+                            </Pressable>
+                          ))}
+                      </View>
+                    )}
 
                   <View style={styles.customParticipantRow}>
                     <TextInput
