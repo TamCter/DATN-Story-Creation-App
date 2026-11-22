@@ -454,17 +454,23 @@ async function updateNode(req, res, next) {
     updates.y = parsedY;
   }
 
-  for (const field of ALLOWED_NODE_SCALARS) {
-    if (['name', 'type', 'x', 'y'].includes(field)) continue;
-    if (body[field] !== undefined) {
-      updates[field] = body[field] !== null ? String(body[field]).trim() : '';
-    }
+  if (body.onlyIfStub !== undefined && typeof body.onlyIfStub !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'onlyIfStub phải là giá trị boolean' });
   }
+  const onlyIfStub = body.onlyIfStub === true;
+
   if (body.autoCreatedStub !== undefined) {
     if (typeof body.autoCreatedStub !== 'boolean') {
       return res.status(400).json({ success: false, message: 'autoCreatedStub phải là giá trị boolean' });
     }
     updates.autoCreatedStub = body.autoCreatedStub;
+  }
+
+  for (const field of ALLOWED_NODE_SCALARS) {
+    if (['name', 'type', 'x', 'y'].includes(field)) continue;
+    if (body[field] !== undefined) {
+      updates[field] = body[field] !== null ? String(body[field]).trim() : '';
+    }
   }
   if (body.charactersInvolved !== undefined && body.characters === undefined) {
     updates.characters = '';
@@ -490,7 +496,6 @@ async function updateNode(req, res, next) {
     }
 
     let query;
-    const onlyIfStub = body.onlyIfStub === true;
     const participantFieldsChanged =
       body.charactersInvolved !== undefined ||
       body.characters !== undefined ||

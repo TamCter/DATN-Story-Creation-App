@@ -444,7 +444,7 @@ export class ProjectStore {
    */
   async getProject(
     projectId: string,
-    options: { preferCache?: boolean } = {}
+    options: { preferCache?: boolean; requireRemoteOrCache?: boolean } = {}
   ): Promise<StoryProject> {
     const accountId = this.accountId;
     const accountVersion = this.accountVersion;
@@ -475,6 +475,7 @@ export class ProjectStore {
     this.graphRequestVersions.set(projectId, graphRequestVersion);
 
     // 1. Thử gọi API Backend để lấy dữ liệu mới nhất từ Neo4j
+    let backendError: unknown = null;
     try {
       const res = await api.getProjectGraph(projectId);
       if (res.success && res.data) {
@@ -550,11 +551,14 @@ export class ProjectStore {
           }
         }
         return fullProject;
+      } else {
+        backendError = new Error(res.message || 'Không thể tải dữ liệu dự án từ máy chủ.');
       }
-    } catch {
+    } catch (err) {
       if (this.accountVersion !== accountVersion) {
         throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
       }
+      backendError = err;
       // Bỏ qua lỗi mạng, chuyển sang lấy từ cache / local storage
     }
 
@@ -581,6 +585,12 @@ export class ProjectStore {
       const clone = JSON.parse(JSON.stringify(sample));
       this.memoryProjects.set(projectId, clone);
       return clone;
+    }
+
+    if (options.requireRemoteOrCache && backendError) {
+      throw backendError instanceof Error
+        ? backendError
+        : new Error('Không thể tải thông tin dự án từ máy chủ.');
     }
 
     // 5. Nếu là dự án mới chưa có node nào: Trả về dự án sạch (nodes: []), TUYỆT ĐỐI không lấy dự án khác
@@ -1015,6 +1025,7 @@ export class ProjectStore {
     };
 
     let backendSynced = false;
+    const mustConfirmBackend = Boolean(options.requireBackend || options.onlyIfStub);
     // Thử gọi backend để cập nhật vào Neo4j (không truyền id / createdAt / updatedAt)
     try {
       this.assertAccountContext(
@@ -1030,7 +1041,7 @@ export class ProjectStore {
         accountContext,
         'Tài khoản đã thay đổi trong lúc cập nhật node.'
       );
-      if (!res.success && options.requireBackend) {
+      if (!res.success && mustConfirmBackend) {
         throw new Error(res.message || 'Backend không xác nhận đã cập nhật node');
       }
       if (res.success && res.data) {
@@ -1042,7 +1053,7 @@ export class ProjectStore {
         accountContext,
         'Tài khoản đã thay đổi trong lúc cập nhật node.'
       );
-      if (options.requireBackend || err instanceof ApiError) {
+      if (mustConfirmBackend || err instanceof ApiError) {
         throw err;
       }
       console.warn('[ProjectStore] Không thể cập nhật node lên Backend, cập nhật local:', err);

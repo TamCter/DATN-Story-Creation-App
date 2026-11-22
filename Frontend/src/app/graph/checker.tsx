@@ -29,6 +29,7 @@ import {
   LOCATION_CLIMATE_OPTIONS,
   LOCATION_DANGER_OPTIONS,
   LOCATION_REGION_OPTIONS,
+  StoryChapter,
   StoryNode,
   StoryProject,
 } from '@/constants/story-data';
@@ -51,6 +52,7 @@ interface AppliedRewriteRange {
   afterContext: string;
   originalText: string;
   replacementText: string;
+  anchoredWasUniqueAfterApply: boolean;
 }
 
 interface ContextOmissionsInfo {
@@ -191,16 +193,23 @@ function replaceQuoteInText(
     }
     const endIdx = exactIdx + cleanQuote.length;
     const updatedText = sourceText.slice(0, exactIdx) + replacement + sourceText.slice(endIdx);
+    const beforeContext = sourceText.slice(Math.max(0, exactIdx - REWRITE_CONTEXT_WINDOW), exactIdx);
+    const afterContext = sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW);
+    const anchored = `${beforeContext}${replacement}${afterContext}`;
+    const firstAnchoredIdx = anchored ? updatedText.indexOf(anchored) : -1;
+    const anchoredWasUniqueAfterApply =
+      firstAnchoredIdx !== -1 && updatedText.indexOf(anchored, firstAnchoredIdx + 1) === -1;
     return {
       status: 'ok',
       updatedText,
       range: {
         start: exactIdx,
         end: exactIdx + replacement.length,
-        beforeContext: sourceText.slice(Math.max(0, exactIdx - REWRITE_CONTEXT_WINDOW), exactIdx),
-        afterContext: sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW),
+        beforeContext,
+        afterContext,
         originalText: cleanQuote,
         replacementText: replacement,
+        anchoredWasUniqueAfterApply,
       },
     };
   }
@@ -219,16 +228,23 @@ function replaceQuoteInText(
   const matchedText = first[0];
   const endIdx = startIdx + matchedText.length;
   const updatedText = sourceText.slice(0, startIdx) + replacement + sourceText.slice(endIdx);
+  const beforeContext = sourceText.slice(Math.max(0, startIdx - REWRITE_CONTEXT_WINDOW), startIdx);
+  const afterContext = sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW);
+  const anchored = `${beforeContext}${replacement}${afterContext}`;
+  const firstAnchoredIdx = anchored ? updatedText.indexOf(anchored) : -1;
+  const anchoredWasUniqueAfterApply =
+    firstAnchoredIdx !== -1 && updatedText.indexOf(anchored, firstAnchoredIdx + 1) === -1;
   return {
     status: 'ok',
     updatedText,
     range: {
       start: startIdx,
       end: startIdx + replacement.length,
-      beforeContext: sourceText.slice(Math.max(0, startIdx - REWRITE_CONTEXT_WINDOW), startIdx),
-      afterContext: sourceText.slice(endIdx, endIdx + REWRITE_CONTEXT_WINDOW),
+      beforeContext,
+      afterContext,
       originalText: matchedText,
       replacementText: replacement,
+      anchoredWasUniqueAfterApply,
     },
   };
 }
@@ -237,7 +253,15 @@ function restoreAppliedRangeInText(
   sourceText: string,
   range: AppliedRewriteRange
 ): string | null {
-  const { start, end, beforeContext, afterContext, originalText, replacementText } = range;
+  const {
+    start,
+    end,
+    beforeContext,
+    afterContext,
+    originalText,
+    replacementText,
+    anchoredWasUniqueAfterApply,
+  } = range;
 
   // 1. Ưu tiên kiểm tra chính xác tại vị trí đã ghi nhận kèm ngữ cảnh xung quanh
   if (
@@ -245,12 +269,19 @@ function restoreAppliedRangeInText(
     end <= sourceText.length &&
     sourceText.slice(start, end) === replacementText &&
     sourceText.slice(Math.max(0, start - beforeContext.length), start) === beforeContext &&
-    sourceText.slice(end, end + afterContext.length) === afterContext
+    sourceText.slice(end, end + afterContext.length) === afterContext &&
+    (beforeContext.length > 0 ||
+      afterContext.length > 0 ||
+      (start === 0 && end === sourceText.length))
   ) {
     return sourceText.slice(0, start) + originalText + sourceText.slice(end);
   }
 
-  // 2. Nếu có chỉnh sửa ở đoạn khác làm dịch chỉ số, chỉ khôi phục khi toàn bộ cụm ngữ cảnh khớp duy nhất
+  // 2. Nếu có chỉnh sửa ở đoạn khác làm dịch chỉ số, chỉ khôi phục khi có ngữ cảnh phân biệt
+  // và cụm ngữ cảnh đó là duy nhất cả lúc áp dụng lẫn hiện tại
+  if (!anchoredWasUniqueAfterApply || (beforeContext.length === 0 && afterContext.length === 0)) {
+    return null;
+  }
   const anchored = `${beforeContext}${replacementText}${afterContext}`;
   if (!anchored) return null;
   const idx = sourceText.indexOf(anchored);
@@ -373,7 +404,13 @@ export default function TextCheckerScreen() {
 
   // Lưu vào database (ghi nhớ chapterId đã tạo trong phiên để retry không tạo trùng chương)
   const [isSaving, setIsSaving] = useState(false);
-  const activeSaveChapterIdRef = useRef<string | null>(null);
+  const activeSaveAttemptRef = useRef<{
+    chapterId: string;
+    chapterNumber: number;
+    title: string;
+    committedNodeIds: Record<string, string>;
+    committedEventIds: Record<string, string>;
+  } | null>(null);
   const [saveSuccessInfo, setSaveSuccessInfo] = useState<{
     chapterTitle: string;
     nodesCount: number;
@@ -387,7 +424,7 @@ export default function TextCheckerScreen() {
     setProjectLoadError(null);
     setProjectLoadState((prev) => (prev === 'ready' ? 'ready' : 'loading'));
     try {
-      const proj = await projectStore.getProject(projectId);
+      const proj = await projectStore.getProject(projectId, { requireRemoteOrCache: true });
       setCurrentProject(proj);
       setProjectLoadState('ready');
       if (!chapterNumberTouchedRef.current) {
@@ -407,7 +444,7 @@ export default function TextCheckerScreen() {
 
   useEffect(() => {
     chapterNumberTouchedRef.current = false;
-    activeSaveChapterIdRef.current = null;
+    activeSaveAttemptRef.current = null;
     void loadProject();
   }, [loadProject]);
 
@@ -738,6 +775,23 @@ export default function TextCheckerScreen() {
     }
   };
 
+  const confirmAction = (
+    title: string,
+    message: string,
+    confirmLabel = 'Tiếp tục',
+    cancelLabel = 'Hủy'
+  ): Promise<boolean> => {
+    if (Platform.OS === 'web') {
+      return Promise.resolve(window.confirm(`${title}\n\n${message}`));
+    }
+    return new Promise((resolve) => {
+      Alert.alert(title, message, [
+        { text: cancelLabel, style: 'cancel', onPress: () => resolve(false) },
+        { text: confirmLabel, onPress: () => resolve(true) },
+      ]);
+    });
+  };
+
   // Chấp nhận đề xuất sửa của AI: chỉ thay khi đoạn trích dẫn khớp duy nhất trong chapterText
   const handleAcceptRewrite = (issue: EditableIssue) => {
     if (isLocked || !issue.suggestedRewrite.trim() || !issue.quote.trim()) return;
@@ -757,9 +811,9 @@ export default function TextCheckerScreen() {
       return;
     }
     setChapterText(replaced.updatedText);
-    // Đây là thay thế có chủ đích từ đề xuất phân tích -> đồng bộ snapshot nếu kết quả chưa bị stale
-    if (!isAnalysisStale) {
-      analyzedTextSnapshotRef.current = replaced.updatedText;
+    // Đánh dấu kết quả phân tích đồ thị cần phân tích lại vì văn bản đã thay đổi so với snapshot
+    if (hasAnalyzed) {
+      setIsAnalysisStale(replaced.updatedText !== analyzedTextSnapshotRef.current);
     }
     setIssues((prev) =>
       prev.map((it) =>
@@ -782,8 +836,8 @@ export default function TextCheckerScreen() {
       return;
     }
     setChapterText(revertedText);
-    if (!isAnalysisStale) {
-      analyzedTextSnapshotRef.current = revertedText;
+    if (hasAnalyzed) {
+      setIsAnalysisStale(revertedText !== analyzedTextSnapshotRef.current);
     }
     setIssues((prev) =>
       prev.map((it) =>
@@ -814,8 +868,11 @@ export default function TextCheckerScreen() {
 
     setIsSaving(true);
     try {
-      const initialProject = await projectStore.getProject(projectId);
+      const initialProject = await projectStore.getProject(projectId, {
+        requireRemoteOrCache: true,
+      });
       const initialNodes = initialProject.nodes || [];
+      const latestChapters = getProjectChapters(initialProject);
       const nodesToSave = saveChapterOnly
         ? []
         : suggestedNodes.filter((n) => n.selected && n.name.trim());
@@ -825,6 +882,56 @@ export default function TextCheckerScreen() {
       const activeStatusChanges = saveChapterOnly
         ? []
         : statusChanges.filter((s) => s.selected);
+
+      // Xác định chương mục tiêu: chỉ tái sử dụng ID từ phiên lưu đang dở khi đúng số chương & tiêu đề
+      let currentAttempt = activeSaveAttemptRef.current;
+      let effectiveChapterNum = finalChapterNum;
+      let effectiveTitle = finalTitle;
+      let existingChapter: StoryChapter | undefined;
+
+      if (currentAttempt) {
+        const sameTarget =
+          currentAttempt.chapterNumber === finalChapterNum &&
+          currentAttempt.title.trim().toLocaleLowerCase('vi') ===
+            finalTitle.toLocaleLowerCase('vi');
+        if (sameTarget) {
+          existingChapter = latestChapters.find((c) => c.id === currentAttempt!.chapterId);
+        } else {
+          const resumePrevious = await confirmAction(
+            'Phiên lưu trước chưa hoàn tất',
+            `Bạn đang có phiên lưu dở cho Chương ${currentAttempt.chapterNumber}: "${currentAttempt.title}".\n\nChọn "Tiếp tục phiên cũ" để hoàn tất chương đó, hoặc "Bắt đầu phiên mới" để lưu như một chương mới.`,
+            'Tiếp tục phiên cũ',
+            'Bắt đầu phiên mới'
+          );
+          if (resumePrevious) {
+            effectiveChapterNum = currentAttempt.chapterNumber;
+            effectiveTitle = currentAttempt.title;
+            existingChapter = latestChapters.find((c) => c.id === currentAttempt!.chapterId);
+          } else {
+            activeSaveAttemptRef.current = null;
+            currentAttempt = null;
+          }
+        }
+      }
+
+      // Phiên lưu mới: nếu số chương đã tồn tại trong dự án, yêu cầu xác nhận trước khi ghi đè
+      if (!existingChapter) {
+        const collidingChapter = latestChapters.find(
+          (c) => Number(c.chapterNumber) === effectiveChapterNum
+        );
+        if (collidingChapter) {
+          const confirmOverwrite = await confirmAction(
+            'Số chương đã tồn tại',
+            `Chương ${effectiveChapterNum} ("${collidingChapter.title}") đã tồn tại trong dự án.\n\nBạn có muốn ghi đè nội dung văn bản của chương này không? Nếu không, hãy hủy và đổi sang số chương khác.`,
+            'Ghi đè chương này',
+            'Đổi số chương'
+          );
+          if (!confirmOverwrite) {
+            return;
+          }
+          existingChapter = collidingChapter;
+        }
+      }
 
       // Kiểm tra trước khi tạo chương: mọi cập nhật trạng thái nhân vật phải có mục tiêu hợp lệ
       if (activeStatusChanges.length > 0) {
@@ -854,6 +961,10 @@ export default function TextCheckerScreen() {
       }
 
       // Kiểm tra trước khi tạo chương: không tạo trùng node đầy đủ đã tồn tại trong đồ thị
+      // Miễn trừ riêng các node đã được tạo/cập nhật trong chính phiên lưu retry này
+      const committedNodeIdSet = new Set(
+        Object.values(currentAttempt?.committedNodeIds || {})
+      );
       const duplicateFullNodeNames: string[] = [];
       for (const item of nodesToSave) {
         const key = item.name.trim().toLocaleLowerCase('vi');
@@ -861,7 +972,8 @@ export default function TextCheckerScreen() {
           (n) =>
             n.type === item.type &&
             n.name.trim().toLocaleLowerCase('vi') === key &&
-            n.autoCreatedStub !== true
+            n.autoCreatedStub !== true &&
+            !committedNodeIdSet.has(n.id)
         );
         if (matchedFull) {
           duplicateFullNodeNames.push(`${item.name.trim()} (${ENTITY_TYPE_META[item.type].label})`);
@@ -875,38 +987,46 @@ export default function TextCheckerScreen() {
         return;
       }
 
-      // 1. Tạo hoặc tái sử dụng chương (tránh tạo chương thứ 2 trùng số chương khi retry sau lỗi một phần)
-      const latestChapters = getProjectChapters(initialProject);
-      const existingChapter =
-        (activeSaveChapterIdRef.current
-          ? latestChapters.find((c) => c.id === activeSaveChapterIdRef.current)
-          : undefined) ||
-        latestChapters.find(
-          (c) =>
-            Number(c.chapterNumber) === finalChapterNum &&
-            c.title.trim().toLocaleLowerCase('vi') === finalTitle.toLocaleLowerCase('vi')
-        );
-
-      let savedChapter;
+      // 1. Tạo hoặc cập nhật chương mục tiêu
+      let savedChapter: StoryChapter;
       if (existingChapter) {
         savedChapter = existingChapter;
         await projectStore.updateChapterStoryContent(projectId, existingChapter.id, trimmedText);
       } else {
         savedChapter = await projectStore.createChapter(projectId, {
-          chapterNumber: finalChapterNum,
-          title: finalTitle,
+          chapterNumber: effectiveChapterNum,
+          title: effectiveTitle,
           desc:
             (!saveChapterOnly && chapterSummary.trim()) ||
-            `Nội dung chương ${finalChapterNum} (${wordCount} từ).`,
+            `Nội dung chương ${effectiveChapterNum} (${wordCount} từ).`,
           content: trimmedText,
         });
       }
-      activeSaveChapterIdRef.current = savedChapter.id;
+      if (
+        !activeSaveAttemptRef.current ||
+        activeSaveAttemptRef.current.chapterId !== savedChapter.id
+      ) {
+        activeSaveAttemptRef.current = {
+          chapterId: savedChapter.id,
+          chapterNumber: effectiveChapterNum,
+          title: effectiveTitle,
+          committedNodeIds: {},
+          committedEventIds: {},
+        };
+      }
+      const attempt = activeSaveAttemptRef.current;
 
       // 2. Tạo hoặc làm giàu nguyên tử các node thực thể được chọn (chỉ update khi vẫn là stub)
       let savedNodesCount = 0;
       for (const item of nodesToSave) {
         const latestProj = await projectStore.getProject(projectId);
+        const alreadyCommittedNodeId = attempt.committedNodeIds[item.localId];
+        if (
+          alreadyCommittedNodeId &&
+          (latestProj.nodes || []).some((n) => n.id === alreadyCommittedNodeId)
+        ) {
+          continue;
+        }
         const normalizedName = item.name.trim();
         const existingMatch = (latestProj.nodes || []).find(
           (n) =>
@@ -947,9 +1067,13 @@ export default function TextCheckerScreen() {
         if (existingMatch) {
           if (existingMatch.autoCreatedStub === true) {
             try {
-              await projectStore.updateNode(projectId, existingMatch.id, payload, {
-                onlyIfStub: true,
-              });
+              const updatedNode = await projectStore.updateNode(
+                projectId,
+                existingMatch.id,
+                payload,
+                { onlyIfStub: true }
+              );
+              attempt.committedNodeIds[item.localId] = updatedNode.id;
               savedNodesCount += 1;
             } catch (stubErr) {
               // Nếu node đã trở thành node đầy đủ trong lúc ghi -> giữ nguyên, không ghi đè
@@ -958,24 +1082,28 @@ export default function TextCheckerScreen() {
               }
             }
           }
-          // Nếu đã là node đầy đủ (ví dụ từ lần retry trước) -> tái sử dụng, không tạo trùng
+          // Nếu đã là node đầy đủ -> giữ nguyên, không tạo trùng
         } else {
-          await projectStore.createNode(projectId, payload);
+          const createdNode = await projectStore.createNode(projectId, payload);
+          attempt.committedNodeIds[item.localId] = createdNode.id;
           savedNodesCount += 1;
         }
       }
 
-      // 3. Tạo hoặc tái sử dụng các node sự kiện của chương và hoàn tất gán vào chương
+      // 3. Tạo hoặc tái sử dụng các node sự kiện theo localId của phiên lưu hiện tại (chỉ khớp chapter === savedChapter.id)
       let savedEventsCount = 0;
       for (const ev of eventsToSave) {
         const latestProj = await projectStore.getProject(projectId);
         const evName = ev.name.trim();
-        const existingEvent = (latestProj.nodes || []).find(
-          (n) =>
-            n.type === 'event' &&
-            n.name.trim().toLocaleLowerCase('vi') === evName.toLocaleLowerCase('vi') &&
-            (n.chapter === savedChapter.id || n.chapter === savedChapter.title)
-        );
+        const committedEventId = attempt.committedEventIds[ev.localId];
+        const existingEvent = committedEventId
+          ? (latestProj.nodes || []).find(
+              (n) =>
+                n.id === committedEventId &&
+                n.type === 'event' &&
+                n.chapter === savedChapter.id
+            )
+          : undefined;
 
         const targetEventNode =
           existingEvent ||
@@ -983,7 +1111,7 @@ export default function TextCheckerScreen() {
             type: 'event',
             name: evName,
             role: 'SỰ KIỆN',
-            desc: ev.desc.trim() || `Sự kiện trong ${finalTitle}`,
+            desc: ev.desc.trim() || `Sự kiện trong ${effectiveTitle}`,
             status: 'Đã diễn ra',
             chapter: savedChapter.id,
             location: ev.location.trim(),
@@ -992,6 +1120,7 @@ export default function TextCheckerScreen() {
             charactersInvolved: JSON.stringify(ev.charactersInvolved),
             autoCreatedStub: false,
           }));
+        attempt.committedEventIds[ev.localId] = targetEventNode.id;
 
         await projectStore.assignEventToChapter(projectId, savedChapter.id, targetEventNode);
         savedEventsCount += 1;
@@ -1021,25 +1150,27 @@ export default function TextCheckerScreen() {
 
       const refreshedProject = await projectStore.getProject(projectId);
       setCurrentProject(refreshedProject);
-      const updatedChapters = getProjectChapters(refreshedProject);
-      const nextNum =
-        updatedChapters.length > 0
-          ? Math.max(...updatedChapters.map((c) => Number(c.chapterNumber) || 0)) + 1
-          : finalChapterNum + 1;
-      chapterNumberTouchedRef.current = false;
-      setChapterNumberInput(String(nextNum));
-      activeSaveChapterIdRef.current = null;
 
+      // Nếu còn cập nhật trạng thái chưa áp dụng được: giữ nguyên phiên lưu retry và số chương hiện tại
       if (unappliedStatusChanges.length > 0) {
         showNotice(
           'Lưu hoàn tất một phần',
-          `Đã lưu chương "${finalTitle}", nhưng chưa thể cập nhật trạng thái cho nhân vật do không còn tồn tại trong đồ thị:\n- ${unappliedStatusChanges.join('\n- ')}`
+          `Đã lưu chương "${effectiveTitle}", nhưng chưa thể cập nhật trạng thái cho nhân vật do không còn tồn tại trong đồ thị:\n- ${unappliedStatusChanges.join('\n- ')}\n\nBạn có thể chỉnh sửa và bấm lưu lại để hoàn tất trên cùng chương này.`
         );
         return;
       }
 
+      const updatedChapters = getProjectChapters(refreshedProject);
+      const nextNum =
+        updatedChapters.length > 0
+          ? Math.max(...updatedChapters.map((c) => Number(c.chapterNumber) || 0)) + 1
+          : effectiveChapterNum + 1;
+      chapterNumberTouchedRef.current = false;
+      setChapterNumberInput(String(nextNum));
+      activeSaveAttemptRef.current = null;
+
       setSaveSuccessInfo({
-        chapterTitle: finalTitle,
+        chapterTitle: effectiveTitle,
         nodesCount: savedNodesCount,
         eventsCount: savedEventsCount,
       });
@@ -1111,6 +1242,7 @@ export default function TextCheckerScreen() {
         prev.map((n) => (n.localId === normalizedNode.localId ? normalizedNode : n))
       );
       // Nếu đổi tên một nhân vật đề xuất, đồng bộ tên mới vào charactersInvolved của các sự kiện đề xuất
+      // và cập nhật (hoặc hỏi xác nhận nếu mơ hồ) các mục statusChanges có liên quan
       if (
         normalizedNode.type === 'character' &&
         oldNameTrimmed &&
@@ -1131,6 +1263,50 @@ export default function TextCheckerScreen() {
             ),
           }))
         );
+
+        const hasMatchingStatusChange = statusChanges.some(
+          (sc) => sc.characterName.trim().toLocaleLowerCase('vi') === oldKey
+        );
+        if (hasMatchingStatusChange) {
+          const existsOtherCharWithOldName =
+            (currentProject.nodes || []).some(
+              (n) =>
+                n.type === 'character' &&
+                n.name.trim().toLocaleLowerCase('vi') === oldKey
+            ) ||
+            suggestedNodes.some(
+              (n) =>
+                n.localId !== normalizedNode.localId &&
+                n.type === 'character' &&
+                n.name.trim().toLocaleLowerCase('vi') === oldKey
+            );
+
+          const retargetStatusChanges = () => {
+            setStatusChanges((prev) =>
+              prev.map((sc) =>
+                sc.characterName.trim().toLocaleLowerCase('vi') === oldKey
+                  ? { ...sc, characterName: trimmedNewName }
+                  : sc
+              )
+            );
+          };
+
+          if (!existsOtherCharWithOldName) {
+            retargetStatusChanges();
+          } else {
+            const confirmMsg = `Trong danh sách cập nhật trạng thái có mục đang nhắm tới "${oldNameTrimmed}", nhưng đồ thị vẫn còn nhân vật khác mang tên này.\n\nBạn có muốn chuyển các cập nhật trạng thái đó sang "${trimmedNewName}" không?`;
+            if (Platform.OS === 'web') {
+              if (window.confirm(confirmMsg)) {
+                retargetStatusChanges();
+              }
+            } else {
+              Alert.alert('Đồng bộ cập nhật trạng thái?', confirmMsg, [
+                { text: 'Giữ tên cũ', style: 'cancel' },
+                { text: `Đổi sang "${trimmedNewName}"`, onPress: retargetStatusChanges },
+              ]);
+            }
+          }
+        }
       }
     }
     setEditingNode(null);
@@ -1181,7 +1357,7 @@ export default function TextCheckerScreen() {
     setIsAnalysisStale(false);
     analyzedTextSnapshotRef.current = null;
     setContextOmissions(null);
-    activeSaveChapterIdRef.current = null;
+    activeSaveAttemptRef.current = null;
     chapterNumberTouchedRef.current = false;
     setSaveSuccessInfo(null);
   };

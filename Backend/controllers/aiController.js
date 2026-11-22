@@ -1354,6 +1354,12 @@ async function analyzeChapterText(req, res, next) {
     const allItems = safeNodes.filter((n) => n.type === 'item' && n.name);
     const allFactions = safeNodes.filter((n) => n.type === 'faction' && n.name);
     const allEvents = safeNodes.filter((n) => n.type === 'event' && n.name);
+    const eligibleChapters = safeChapters
+      .filter((c) => {
+        const num = Number(c.chapterNumber);
+        return Number.isFinite(num) && num < resolvedChapterNumber;
+      })
+      .sort((a, b) => (Number(a.chapterNumber) || 0) - (Number(b.chapterNumber) || 0));
 
     const MAX_CTX_CHARACTERS = 50;
     const MAX_CTX_LOCATIONS = 35;
@@ -1369,7 +1375,7 @@ async function analyzeChapterText(req, res, next) {
       omittedItems: Math.max(0, allItems.length - MAX_CTX_ITEMS),
       omittedFactions: Math.max(0, allFactions.length - MAX_CTX_FACTIONS),
       omittedEvents: Math.max(0, allEvents.length - MAX_CTX_EVENTS),
-      omittedChapters: Math.max(0, safeChapters.length - MAX_CTX_CHAPTERS),
+      omittedChapters: Math.max(0, eligibleChapters.length - MAX_CTX_CHAPTERS),
       omittedLinks: Math.max(0, safeLinks.length - MAX_CTX_LINKS),
       totalOmitted: 0,
     };
@@ -1469,7 +1475,7 @@ async function analyzeChapterText(req, res, next) {
           .join(' | ')
       );
 
-    const chapterLines = safeChapters
+    const chapterLines = eligibleChapters
       .slice(-MAX_CTX_CHAPTERS)
       .map(
         (c) =>
