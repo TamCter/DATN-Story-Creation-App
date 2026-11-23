@@ -747,8 +747,12 @@ async function generateChapterAndEvents(req, res, next) {
       .map((n) => n.name);
     const items = nodes
       .filter((n) => n.type === 'item')
-      .slice(0, 8)
+      .slice(0, 12)
       .map((n) => n.name);
+    const previousEvents = nodes
+      .filter((n) => n.type === 'event' && n.name)
+      .slice(-10)
+      .map((n) => `${n.name}${n.arcName ? ` [Arc: ${n.arcName}]` : ''}`);
 
     const contextPrompt = `Bạn là trợ lý AI sáng tạo cốt truyện tài hoa cho tiểu thuyết thể loại: ${writingStyle}.
 Dự án tiểu thuyết: "${projectTitle}".
@@ -758,20 +762,29 @@ Các thực thể hiện có trong truyện:
 - Địa điểm: ${locations.join(', ') || 'Chưa có'}
 - Tổ chức / Nhóm: ${factions.join(', ') || 'Chưa có'}
 - Vật phẩm: ${items.join(', ') || 'Chưa có'}
+- Sự kiện trước đó: ${previousEvents.join(', ') || 'Chưa có'}
 
 Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
-2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật và địa điểm hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
+2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật, địa điểm, vật phẩm, tổ chức hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
 
-QUY TẮC THỐNG NHẤT QUAN HỆ & CHI TIẾT SỰ KIỆN (BẮT BUỘC):
-- Mỗi sự kiện phải có trường "charactersInvolved" là một mảng tên nhân vật, không được bỏ trống trường hoặc trả về null.
-- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện; ưu tiên dùng chính xác tên nhân vật hiện có trong danh sách ở trên.
-- Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
-- Ghi chính xác tên địa điểm vào "location" (nối quan hệ Sự kiện diễn ra tại Địa điểm), tên các vật phẩm liên quan vào mảng "itemsInvolved" (nối quan hệ Sự kiện liên quan Vật phẩm), tên các tổ chức/phe phái liên quan vào mảng "factionsInvolved" (nối quan hệ Sự kiện liên quan Tổ chức).
-- Nếu sự kiện bắt nguồn trực tiếp từ một sự kiện trước, ghi tên sự kiện đó hoặc nguyên nhân rõ ràng vào "cause".
-- Phân loại rõ "eventType", "importance", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "arcName", "sequenceOrder", "conflict", "outcome", "consequences", "characterRoles".
-- Mỗi sự kiện phải có "characterStatusChanges" là một mảng. Chỉ thêm nhân vật vào đây khi sự kiện trong chương làm thay đổi trạng thái thực sự của họ: dùng "Đã chết" khi họ chết thật sự trong diễn biến hiện tại, hoặc "Hồi sinh" khi họ được hồi sinh. Không đánh dấu chết vì tin đồn, giả chết, hồi tưởng, nguy cơ hay cách nói ẩn dụ. Dùng [] khi không có thay đổi.
-- Mỗi thay đổi phải có "characterName" (tên chính xác), "status" ("Đã chết" hoặc "Hồi sinh"), và "statusEvent" là tên sự kiện này. Nhân vật có thay đổi trạng thái phải có trong "charactersInvolved".
+QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN (BẮT BUỘC):
+- MỖI sự kiện BẮT BUỘC phải điền ĐẦY ĐỦ và CỤ THỂ (KHÔNG ĐƯỢC ĐỂ TRỐNG) tất cả các trường: "name", "desc", "eventType", "importance", "arcName", "sequenceOrder", "location", "time", "timelineType", "duration", "cause", "conflict", "outcome", "consequences", "impact", "charactersInvolved", "characterRoles".
+- "charactersInvolved": mảng tên tất cả nhân vật tham gia trực tiếp; ưu tiên dùng chính xác tên nhân vật hiện có ở trên. Nếu tên nhân vật xuất hiện trong tên/mô tả sự kiện thì bắt buộc đưa vào mảng này.
+- "characterRoles": ghi ngắn gọn vai trò từng nhân vật tham gia (VD: "Lăng Tiêu: Chủ động điều tra; Mộc Lan: Hỗ trợ").
+- "location": tên địa điểm cụ thể (ưu tiên địa điểm đã có ở trên) để nối quan hệ Diễn ra tại (EVENT_LOCATION).
+- "itemsInvolved": mảng tên các vật phẩm liên quan/xuất hiện trong sự kiện (ưu tiên tên vật phẩm đã có ở trên, [] nếu không có).
+- "factionsInvolved": mảng tên các tổ chức/phe phái liên quan (ưu tiên tên tổ chức đã có ở trên, [] nếu không có).
+- "cause": nguyên nhân trực tiếp dẫn đến sự kiện (nếu bắt nguồn từ một sự kiện trước đó ở trên, ghi chính xác tên sự kiện đó để nối quan hệ CAUSED_BY).
+- "conflict": xung đột/vấn đề chính diễn ra trong sự kiện.
+- "outcome": kết quả trực tiếp ngay khi sự kiện kết thúc.
+- "consequences": hệ quả cụ thể (thay đổi trạng thái nhân vật, vật phẩm, quan hệ phe phái...).
+- "impact": tác động lâu dài tới mạch truyện các chương sau.
+- "eventType": chọn 1 trong: "Chiến đấu", "Đối thoại / Đàm phán", "Tiết lộ bí mật", "Du hành", "Biến cố / Hy sinh", "Giao dịch / Vật phẩm", "Hồi tưởng", "Khác".
+- "importance": chọn 1 trong: "Nút thắt chính", "Bước ngoặt", "Gieo mầm", "Sự kiện phụ".
+- "timelineType": chọn 1 trong: "Hiện tại", "Hồi tưởng", "Tiên tri / Giấc mơ", "Lời kể gián tiếp".
+- "duration": thời lượng ước tính cụ thể (VD: "30 phút", "Một đêm", "2 giờ").
+- "characterStatusChanges": mảng ghi nhận khi sự kiện thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" trong diễn biến hiện tại (dùng [] nếu không có). Nhân vật thay đổi trạng thái phải có trong "charactersInvolved".
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
 BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
@@ -904,24 +917,57 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       );
     };
 
+    const itemNodes = nodes.filter(
+      (n) => n && n.type === 'item' && typeof n.name === 'string' && n.name.trim()
+    );
+    const factionNodes = nodes.filter(
+      (n) => n && n.type === 'faction' && typeof n.name === 'string' && n.name.trim()
+    );
+
     const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event, idx) => {
       const cleanLocation = cleanEventScalar(event.location);
       const cleanCharacters = cleanEventList(event.charactersInvolved);
+      const eventTextLower = `${event.name || ''} ${event.desc || ''}`.toLocaleLowerCase('vi');
+
+      const matchedItems = cleanEventList(event.itemsInvolved);
+      for (const itemNode of itemNodes) {
+        const itemName = itemNode.name.trim();
+        if (
+          itemName.length >= 2 &&
+          eventTextLower.includes(itemName.toLocaleLowerCase('vi')) &&
+          !matchedItems.some((existing) => existing.toLocaleLowerCase('vi') === itemName.toLocaleLowerCase('vi'))
+        ) {
+          matchedItems.push(itemName);
+        }
+      }
+
+      const matchedFactions = cleanEventList(event.factionsInvolved);
+      for (const facNode of factionNodes) {
+        const facName = facNode.name.trim();
+        if (
+          facName.length >= 2 &&
+          eventTextLower.includes(facName.toLocaleLowerCase('vi')) &&
+          !matchedFactions.some((existing) => existing.toLocaleLowerCase('vi') === facName.toLocaleLowerCase('vi'))
+        ) {
+          matchedFactions.push(facName);
+        }
+      }
+
       return {
         ...event,
-        eventType: cleanEventScalar(event.eventType),
-        importance: cleanEventScalar(event.importance),
-        arcName: cleanEventScalar(event.arcName),
+        eventType: cleanEventScalar(event.eventType) || 'Khác',
+        importance: cleanEventScalar(event.importance) || (idx === 0 ? 'Bước ngoặt' : 'Nút thắt chính'),
+        arcName: cleanEventScalar(event.arcName) || `Chương ${nextChapterNumber}`,
         sequenceOrder: cleanEventScalar(event.sequenceOrder) || String(idx + 1),
         timelineType: cleanEventScalar(event.timelineType) || 'Hiện tại',
-        duration: cleanEventScalar(event.duration),
+        duration: cleanEventScalar(event.duration) || 'Trong chương',
         cause: cleanEventScalar(event.cause),
         conflict: cleanEventScalar(event.conflict),
         outcome: cleanEventScalar(event.outcome),
         consequences: cleanEventScalar(event.consequences),
         characterRoles: cleanEventScalar(event.characterRoles),
-        itemsInvolved: cleanEventList(event.itemsInvolved),
-        factionsInvolved: cleanEventList(event.factionsInvolved),
+        itemsInvolved: matchedItems,
+        factionsInvolved: matchedFactions,
         location: cleanLocation,
         charactersInvolved: cleanCharacters,
         characterStatusChanges: event.characterStatusChanges.map((change) => ({
@@ -981,12 +1027,28 @@ async function generateChapterStory(req, res, next) {
     // Liệt kê chi tiết các sự kiện trong chương
     const eventsDetail = events
       .map((ev, idx) => {
-        let detail = `[Sự kiện ${idx + 1}]: ${ev.name || ev.title || 'Sự kiện'}\n- Diễn biến: ${ev.desc || 'Chưa có mô tả'}`;
+        let detail = `[Sự kiện ${ev.sequenceOrder || idx + 1}]: ${ev.name || ev.title || 'Sự kiện'}\n- Diễn biến: ${ev.desc || 'Chưa có mô tả'}`;
+        if (ev.eventType) detail += `\n- Phân loại: ${ev.eventType}`;
+        if (ev.importance) detail += `\n- Mức độ quan trọng: ${ev.importance}`;
+        if (ev.arcName) detail += `\n- Cung truyện (Arc): ${ev.arcName}`;
         if (ev.location) detail += `\n- Địa điểm: ${ev.location}`;
-        if (ev.time) detail += `\n- Thời gian: ${ev.time}`;
-        if (ev.impact) detail += `\n- Kết quả/Tác động: ${ev.impact}`;
+        if (ev.time) detail += `\n- Thời điểm: ${ev.time}`;
+        if (ev.timelineType) detail += `\n- Dòng thời gian: ${ev.timelineType}`;
+        if (ev.duration) detail += `\n- Thời lượng: ${ev.duration}`;
+        if (ev.cause) detail += `\n- Nguyên nhân: ${ev.cause}`;
+        if (ev.conflict) detail += `\n- Xung đột chính: ${ev.conflict}`;
+        if (ev.outcome) detail += `\n- Kết quả trực tiếp: ${ev.outcome}`;
+        if (ev.consequences) detail += `\n- Hệ quả cụ thể: ${ev.consequences}`;
+        if (ev.impact) detail += `\n- Tác động lâu dài: ${ev.impact}`;
         if (Array.isArray(ev.charactersInvolved) && ev.charactersInvolved.length > 0) {
           detail += `\n- Nhân vật tham gia: ${ev.charactersInvolved.join(', ')}`;
+        }
+        if (ev.characterRoles) detail += `\n- Vai trò nhân vật: ${ev.characterRoles}`;
+        if (Array.isArray(ev.itemsInvolved) && ev.itemsInvolved.length > 0) {
+          detail += `\n- Vật phẩm liên quan: ${ev.itemsInvolved.join(', ')}`;
+        }
+        if (Array.isArray(ev.factionsInvolved) && ev.factionsInvolved.length > 0) {
+          detail += `\n- Tổ chức liên quan: ${ev.factionsInvolved.join(', ')}`;
         }
         if (Array.isArray(ev.characterStatusChanges) && ev.characterStatusChanges.length > 0) {
           detail += `\n- Thay đổi trạng thái nhân vật: ${ev.characterStatusChanges
