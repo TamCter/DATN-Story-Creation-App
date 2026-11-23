@@ -59,16 +59,16 @@ Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j t�
 - Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
 - Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
 
-Nguyên tắc điền trường liên kết:
-- Nếu trong bản đồ node hiện tại của dự án ĐÃ CÓ thực thể phù hợp, bắt buộc dùng CHÍNH XÁC tên của node đó để nối đúng cạnh quan hệ.
-- Nếu thực thể liên quan CHƯA TỒN TẠI, chọn 1 trong 2 cách:
-  1. Đặt tên riêng cụ thể (ưu tiên dùng "create_nodes" để tạo kèm luôn node liên quan đó vào bản đồ, hoặc điền tên cụ thể để hệ thống tự tạo node và nối quan hệ).
-  2. Để chuỗi rỗng "" nếu thực thể không có hoặc chưa cần quan hệ đó.
+Nguyên tắc điền trường liên kết (RẤT QUAN TRỌNG ĐỂ KHÔNG SINH THÊM NODE ẨN):
+- Chỉ được phép điền tên node ĐÃ CÓ SẴN trong danh sách thực thể hiện tại của dự án, HOẶC tên một node nằm TRONG CHÍNH DANH SÁCH "nodes" mà bạn đang tạo ở lượt trả lời này.
+- TUYỆT ĐỐI KHÔNG tự bịa tên thực thể ngoài danh sách vào các trường liên kết (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location, charactersInvolved, itemsInvolved, factionsInvolved, statusEvent), vì làm vậy sẽ khiến hệ thống tự sinh thêm node thừa ngoài danh sách. Nếu thực thể liên quan chưa có và bạn không tạo nó trong mảng "nodes", hãy để chuỗi rỗng "".
 - TUYỆT ĐỐI KHÔNG điền các chữ giữ chỗ như "không rõ", "chưa rõ", "không xác định", "không có", "trống", "n/a".
+- TUYỆT ĐỐI KHÔNG tạo 2 node trùng nhau (cùng type và cùng name) trong cùng một câu trả lời, và KHÔNG tạo lại node đã có sẵn trong danh sách thực thể hiện có của dự án.
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, hỏi thêm thông tin nếu cần
-- Nếu người dùng yêu cầu tạo nhiều node (hoặc tạo 1 node kèm các node liên quan mới), hãy tạo tối đa 3 node trong cùng một lần trả lời.
+- Tạo đúng số lượng node mà người dùng yêu cầu (không giới hạn chỉ 3 node; nếu người dùng yêu cầu tạo 4, 5 hoặc nhiều hơn, hãy tạo đủ tất cả trong một mảng "nodes" duy nhất).
+- Trước khi tạo, luôn đối chiếu kỹ danh sách "Các thực thể đã có trong đồ thị" bên dưới để tránh tạo trùng tên và tận dụng đúng tên thực thể sẵn có cho các trường quan hệ.
 - Mỗi node phải có đầy đủ các trường thông tin cơ bản theo loại:
   character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
   item: name, type, desc, rarity, origin, element, holderOrLocation
@@ -77,8 +77,8 @@ Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo no
   event: name, type, desc, chapter, time, timelineType, duration, location, status, eventType, importance, arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 - Mọi trường phải là chuỗi vô hướng (danh sách nhiều tên như charactersInvolved, itemsInvolved, factionsInvolved viết thành chuỗi phân tách bằng dấu phẩy, không dùng object/array). Nếu tạo một node, trả về đúng một JSON:
   {"action":"create_node","node":{...}}
-- Nếu tạo từ 2 đến 3 node, trả về đúng một JSON:
-  {"action":"create_nodes","nodes":[{...node 1...},{...node 2...}]}
+- Nếu tạo từ 2 node trở lên, trả về đúng một JSON:
+  {"action":"create_nodes","nodes":[{...node 1...},{...node 2...},...]}
 - Đặt JSON sau phần giới thiệu; không đặt thêm JSON nào khác trong câu trả lời.
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
@@ -123,7 +123,7 @@ function extractCreateNodeResponse(responseText) {
                 ? parsed.nodes
                 : null;
 
-            if (Array.isArray(rawNodes) && rawNodes.length > 0 && rawNodes.length <= 3) {
+            if (Array.isArray(rawNodes) && rawNodes.length > 0) {
               const sanitizeNode = (node) => {
                 if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
                 const copy = { ...node };
@@ -138,7 +138,7 @@ function extractCreateNodeResponse(responseText) {
                 return copy;
               };
 
-              const nodes = rawNodes.map(sanitizeNode);
+              const sanitizedNodes = rawNodes.map(sanitizeNode);
               const isCompleteNode = (node) =>
                 node &&
                 typeof node === 'object' &&
@@ -157,8 +157,19 @@ function extractCreateNodeResponse(responseText) {
                   (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
                 );
 
-              if (nodes.every(isCompleteNode)) {
-                return { nodeData: nodes[0], nodeDataList: nodes, start, end: end + 1 };
+              if (sanitizedNodes.every(isCompleteNode)) {
+                // Khử trùng lặp nếu AI trả về 2 node giống nhau (cùng type + name)
+                const seenKeys = new Set();
+                const uniqueNodes = [];
+                for (const node of sanitizedNodes) {
+                  const key = `${node.type}::${node.name.trim().toLocaleLowerCase('vi')}`;
+                  if (seenKeys.has(key)) continue;
+                  seenKeys.add(key);
+                  uniqueNodes.push(node);
+                }
+                if (uniqueNodes.length > 0) {
+                  return { nodeData: uniqueNodes[0], nodeDataList: uniqueNodes, start, end: end + 1 };
+                }
               }
             }
           } catch {
@@ -209,12 +220,24 @@ function getNodeCreationRequest(messages) {
   const wantsNodes = latestUserIntent || hasPendingCreationIntent;
   if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
 
-  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)(?![\p{L}\p{N}])/iu;
+  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)(?![\p{L}\p{N}])/iu;
   const requestMessage = latestUserIntent ? latestUserMessage : (pendingUserMessage?.content || '');
   const countMatch = requestMessage.match(countPattern);
-  const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba)/iu)?.[1] || '1';
-  const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken.toLowerCase()] || 1;
-  return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
+  const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)/iu)?.[1] || '1';
+  const wordToNumber = {
+    một: 1,
+    hai: 2,
+    ba: 3,
+    bốn: 4,
+    năm: 5,
+    sáu: 6,
+    bảy: 7,
+    tám: 8,
+    chín: 9,
+    mười: 10,
+  };
+  const requestedCount = Number(countToken) || wordToNumber[countToken.toLowerCase()] || 1;
+  return { wantsNodes, requestedCount: Math.max(1, requestedCount) };
 }
 
 function normalizeEventCharacters(
@@ -426,14 +449,21 @@ async function chatWithAI(req, res, next) {
     if (projectContext.projectTitle) {
       contextText += `\n\nDự án hiện tại: "${projectContext.projectTitle}"`;
     }
+    const existingProjectNodeKeys = new Set(
+      (Array.isArray(projectContext.nodes) ? projectContext.nodes : [])
+        .filter((n) => n && n.type && n.name)
+        .map((n) => `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`)
+    );
+
     if (projectContext.nodes && projectContext.nodes.length > 0) {
+      const MAX_CHAT_CTX_NODES = 120;
       const nodesSummary = projectContext.nodes
-        .slice(0, 20)
+        .slice(0, MAX_CHAT_CTX_NODES)
         .map((n) => `- ${n.name} (${n.type})`)
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị: \n${nodesSummary}`;
-      if (projectContext.nodes.length > 20) {
-        contextText += `\n... và ${projectContext.nodes.length - 20} thực thể khác`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị (KHÔNG tạo trùng tên các thực thể này): \n${nodesSummary}`;
+      if (projectContext.nodes.length > MAX_CHAT_CTX_NODES) {
+        contextText += `\n... và ${projectContext.nodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
     }
 
@@ -477,6 +507,23 @@ async function chatWithAI(req, res, next) {
       nodeResponse = extractCreateNodeResponse(responseText);
       attemptedNodeCreation ||= creationActionPattern.test(responseText);
 
+      // Lọc bỏ các node đã tồn tại trong đồ thị hiện tại để không tạo trùng
+      if (nodeResponse && existingProjectNodeKeys.size > 0) {
+        const filteredNewNodes = nodeResponse.nodeDataList.filter((n) => {
+          const key = `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`;
+          return !existingProjectNodeKeys.has(key);
+        });
+        if (filteredNewNodes.length > 0) {
+          nodeResponse = {
+            ...nodeResponse,
+            nodeData: filteredNewNodes[0],
+            nodeDataList: filteredNewNodes,
+          };
+        } else {
+          nodeResponse = null;
+        }
+      }
+
       const generatedCount = nodeResponse?.nodeDataList.length || 0;
       if (!wantsNodes || (nodeResponse && generatedCount >= requestedCount)) {
         break;
@@ -484,8 +531,8 @@ async function chatWithAI(req, res, next) {
 
       if (attempt < MAX_NODE_GENERATION_ATTEMPTS) {
         const issue = !nodeResponse
-          ? 'Câu trả lời trước chưa có JSON node hợp lệ hoặc node thiếu trường bắt buộc.'
-          : `Bạn mới tạo ${generatedCount}/${requestedCount} node được yêu cầu.`;
+          ? 'Câu trả lời trước chưa có JSON node hợp lệ, thiếu trường bắt buộc, hoặc tạo trùng với node đã có trong đồ thị.'
+          : `Bạn mới tạo ${generatedCount}/${requestedCount} node mới không trùng lặp theo yêu cầu.`;
 
         console.warn(`[AI Controller] ${issue} Tự yêu cầu hoàn thiện lượt ${attempt + 1}/${MAX_NODE_GENERATION_ATTEMPTS}.`);
         attemptMessages = [
@@ -495,10 +542,10 @@ async function chatWithAI(req, res, next) {
             role: 'user',
             content:
               `${issue} Hãy tiếp tục ngay, không hỏi người dùng và không bỏ node nào. ` +
-              `Tạo đủ ít nhất ${requestedCount} node theo yêu cầu ban đầu; điền đầy đủ các trường cơ bản, ` +
-              'còn các trường quan hệ với node khác (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location) ' +
-              'thì chọn đúng tên node đã có, tạo tên node mới cụ thể, hoặc để chuỗi rỗng "" (tuyệt đối không ghi "không rõ"). ' +
-              'Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" cho một node hoặc "create_nodes" cho nhiều node, tối đa 3 node.',
+              `Tạo đủ ít nhất ${requestedCount} node MỚI hoàn toàn khác nhau và KHÔNG trùng tên với các thực thể đã có trong đồ thị; điền đầy đủ các trường cơ bản. ` +
+              'Với các trường quan hệ (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location, charactersInvolved, itemsInvolved, factionsInvolved), ' +
+              'CHỈ điền tên node đã có trong đồ thị hoặc node nằm trong chính mảng nodes này, tuyệt đối không bịa thêm tên ngoài danh sách (nếu không có hãy để chuỗi rỗng ""). ' +
+              'Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" cho một node hoặc "create_nodes" cho nhiều node.',
           },
         ];
       }

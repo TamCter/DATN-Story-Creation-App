@@ -206,7 +206,7 @@ const WELCOME_MSG: AIChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn cũng có thể yêu cầu tạo cùng lúc tối đa 3 thực thể.\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo một nhân vật, một tập hồ sơ và nơi họ gặp nhau"',
+    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn có thể yêu cầu tạo 1 hoặc nhiều thực thể cùng lúc.\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo 4 thực thể gồm nhân vật, vật phẩm, tổ chức và địa điểm"',
   timestamp: Date.now(),
 };
 
@@ -1784,6 +1784,8 @@ function MessageBubble({
   const isSystem = message.role === 'system';
   const [isAddingNodes, setIsAddingNodes] = useState(false);
   const [nodesAdded, setNodesAdded] = useState(false);
+  const isAddingRef = useRef(false);
+  const hasAddedRef = useRef(false);
   const nodeDataList = message.nodeDataList?.length
     ? message.nodeDataList
     : message.nodeData
@@ -1791,14 +1793,20 @@ function MessageBubble({
       : [];
 
   const handleAddAllNodes = async () => {
-    if (isAddingNodes || nodesAdded) return;
+    if (isAddingRef.current || hasAddedRef.current || isAddingNodes || nodesAdded) return;
+    isAddingRef.current = true;
     setIsAddingNodes(true);
     try {
-      setNodesAdded(await onConfirmCreateMany(nodeDataList));
+      const ok = await onConfirmCreateMany(nodeDataList);
+      if (ok) {
+        hasAddedRef.current = true;
+        setNodesAdded(true);
+      }
     } catch (error) {
       console.error('[AIChatPanel] Không thể thêm nhóm node:', error);
       Alert.alert('Không thể thêm node', 'Đã xảy ra lỗi khi thêm các node vào đồ thị.');
     } finally {
+      isAddingRef.current = false;
       setIsAddingNodes(false);
     }
   };
@@ -1862,13 +1870,19 @@ function MessageBubble({
               <Text style={styles.nodePreviewDesc} numberOfLines={2}>{nodeData.desc}</Text>
             ) : null}
             <Pressable
-              style={styles.createNodeBtn}
-              onPress={() => onConfirmCreate(nodeData)}>
-              <Text style={styles.createNodeBtnText}>+ Xem / chỉnh sửa node</Text>
+              style={[styles.createNodeBtn, (isAddingNodes || nodesAdded) && styles.sendBtnDisabled]}
+              disabled={isAddingNodes || nodesAdded}
+              onPress={() => {
+                if (isAddingRef.current || hasAddedRef.current) return;
+                onConfirmCreate(nodeData);
+              }}>
+              <Text style={styles.createNodeBtnText}>
+                {nodesAdded ? '✓ Đã thêm vào đồ thị' : '+ Xem / chỉnh sửa node'}
+              </Text>
             </Pressable>
           </View>
         ))}
-        {nodeDataList.length > 1 && (
+        {nodeDataList.length >= 1 && (
           <Pressable
             accessibilityRole="button"
             style={[styles.createAllNodesBtn, (isAddingNodes || nodesAdded) && styles.sendBtnDisabled]}
@@ -1878,7 +1892,11 @@ function MessageBubble({
               <ActivityIndicator size="small" color="#12100d" />
             ) : (
               <Text style={styles.createAllNodesBtnText}>
-                {nodesAdded ? '✓ Đã thêm tất cả node' : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
+                {nodesAdded
+                  ? '✓ Đã thêm vào đồ thị'
+                  : nodeDataList.length === 1
+                    ? '＋ Lưu node vào đồ thị'
+                    : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
               </Text>
             )}
           </Pressable>

@@ -521,56 +521,165 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   setAiChatOpen(false);
 };
 
+const isCreatingAINodesRef = useRef(false);
+
 const handleCreateNodesFromAI = async (
   nodeDataList: Partial<StoryNode>[]
 ): Promise<boolean> => {
+  if (isCreatingAINodesRef.current) {
+    return false;
+  }
+  isCreatingAINodesRef.current = true;
   const createdNodes: StoryNode[] = [];
-  const remainingNodes = [...nodeDataList];
+  const skippedDuplicates: string[] = [];
 
   try {
     const initialProject = await projectStore.getProject(currentProject.id);
-    const initialNodeIds = new Set((initialProject.nodes || []).map((n) => n.id));
+    const existingNodes = initialProject.nodes || [];
+    const initialNodeIds = new Set(existingNodes.map((n) => n.id));
+    const existingFullNodeKeys = new Set(
+      existingNodes
+        .filter((n) => n.autoCreatedStub !== true && n.name)
+        .map((n) => `${n.type}::${n.name.trim().toLocaleLowerCase('vi')}`)
+    );
 
-    for (let index = 0; index < remainingNodes.length; index += 1) {
-      const nodeData = remainingNodes[index];
-      const normalizedType = nodeData.type || 'character';
-      const normalizedName = (nodeData.name || '').trim();
-      const stableKey = `${normalizedType}:${normalizedName.toLocaleLowerCase('vi')}:${(nodeData.desc || '').trim()}`;
-      const alreadyCreated = createdNodes.some((createdNode) => {
-        const createdKey = `${createdNode.type}:${(createdNode.name || '').trim().toLocaleLowerCase('vi')}:${(createdNode.desc || '').trim()}`;
-        return createdKey === stableKey;
-      });
+    // 1. Khử trùng lặp ngay trong danh sách AI trả về và lọc các node đầy đủ đã có trong đồ thị
+    const seenBatchKeys = new Set<string>();
+    const nodesToProcess: Partial<StoryNode>[] = [];
+    for (const rawNode of nodeDataList) {
+      const normalizedType = (rawNode.type || 'character') as StoryNode['type'];
+      const normalizedName = (rawNode.name || '').trim();
+      if (!normalizedName) continue;
+      const key = `${normalizedType}::${normalizedName.toLocaleLowerCase('vi')}`;
+      if (seenBatchKeys.has(key)) continue;
+      seenBatchKeys.add(key);
 
-      if (alreadyCreated) {
+      if (existingFullNodeKeys.has(key)) {
+        skippedDuplicates.push(normalizedName);
         continue;
       }
+      nodesToProcess.push({ ...rawNode, type: normalizedType, name: normalizedName });
+    }
 
-      // Chỉ cập nhật (làm giàu) node stub được tự động tạo trước đó trong batch hoặc được đánh dấu autoCreatedStub;
-      // tuyệt đối không ghi đè node do tác giả tự tạo sẵn.
+    if (nodesToProcess.length === 0) {
+      const dupMsg =
+        skippedDuplicates.length > 0
+          ? `Các thực thể sau đã tồn tại trong đồ thị nên không tạo trùng:\n- ${skippedDuplicates.join('\n- ')}`
+          : 'Không có node mới hợp lệ để thêm vào đồ thị.';
+      if (Platform.OS === 'web') {
+        window.alert(dupMsg);
+      } else {
+        Alert.alert('Thực thể đã tồn tại', dupMsg);
+      }
+      return true;
+    }
+
+    // 2. Xây dựng tập tên hợp lệ theo từng loại = (node đã có trong đồ thị) U (node trong chính batch này)
+    // Mọi trường liên kết trỏ ra ngoài tập này sẽ được xóa để tránh backend tự sinh thêm node ẩn (node thứ 4)
+    const allowedNamesByType: Record<StoryNode['type'], Set<string>> = {
+      character: new Set<string>(),
+      item: new Set<string>(),
+      location: new Set<string>(),
+      faction: new Set<string>(),
+      event: new Set<string>(),
+    };
+    for (const n of existingNodes) {
+      if (n.type && n.name && allowedNamesByType[n.type]) {
+        allowedNamesByType[n.type].add(n.name.trim().toLocaleLowerCase('vi'));
+      }
+    }
+    for (const n of nodesToProcess) {
+      const t = (n.type || 'character') as StoryNode['type'];
+      if (n.name && allowedNamesByType[t]) {
+        allowedNamesByType[t].add(n.name.trim().toLocaleLowerCase('vi'));
+      }
+    }
+
+    const keepIfAllowed = (value: string | undefined, targetType: StoryNode['type']): string => {
+      const trimmed = (value || '').trim();
+      if (!trimmed) return '';
+      return allowedNamesByType[targetType].has(trimmed.toLocaleLowerCase('vi')) ? trimmed : '';
+    };
+
+    const filterAllowedList = (
+      value: string | string[] | undefined,
+      targetType: StoryNode['type']
+    ): string => {
+      const list = parseEventParticipants(value).filter((name) =>
+        allowedNamesByType[targetType].has(name.trim().toLocaleLowerCase('vi'))
+      );
+      return JSON.stringify(list);
+    };
+
+    const sanitizeBatchNode = (nodeData: Partial<StoryNode>): Partial<StoryNode> => {
+      const t = (nodeData.type || 'character') as StoryNode['type'];
+      const cleaned: Partial<StoryNode> = { ...nodeData, autoCreatedStub: false };
+      if (t === 'character') {
+        cleaned.weapon = keepIfAllowed(nodeData.weapon, 'item');
+        cleaned.birthplace = keepIfAllowed(nodeData.birthplace, 'location');
+        cleaned.sect = keepIfAllowed(nodeData.sect, 'faction');
+        cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
+      } else if (t === 'item') {
+        cleaned.holderOrLocation = keepIfAllowed(nodeData.holderOrLocation, 'character');
+        cleaned.origin = keepIfAllowed(nodeData.origin, 'location');
+      } else if (t === 'faction') {
+        cleaned.leader = keepIfAllowed(nodeData.leader, 'character');
+        cleaned.headquarters = keepIfAllowed(nodeData.headquarters, 'location');
+        cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
+      } else if (t === 'location') {
+        cleaned.ruler = keepIfAllowed(nodeData.ruler, 'faction');
+      } else if (t === 'event') {
+        cleaned.location = keepIfAllowed(nodeData.location, 'location');
+        cleaned.charactersInvolved = filterAllowedList(
+          nodeData.charactersInvolved || nodeData.characters,
+          'character'
+        );
+        cleaned.itemsInvolved = filterAllowedList(nodeData.itemsInvolved, 'item');
+        cleaned.factionsInvolved = filterAllowedList(nodeData.factionsInvolved, 'faction');
+      }
+      return cleaned;
+    };
+
+    // 3. Lưu tuần tự từng node trong batch; nếu là stub đã tự sinh trong chính batch thì update thay vì createNode mới
+    for (const rawNode of nodesToProcess) {
+      const nodeData = sanitizeBatchNode(rawNode);
+      const normalizedType = (nodeData.type || 'character') as StoryNode['type'];
+      const normalizedName = (nodeData.name || '').trim();
+
       const latestProject = await projectStore.getProject(currentProject.id);
-      const existingStubMatch = normalizedName
-        ? (latestProject.nodes || []).find(
-            (n) =>
-              n.type === normalizedType &&
-              n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi') &&
-              (n.autoCreatedStub === true || !initialNodeIds.has(n.id))
-          )
-        : undefined;
+      const existingMatch = (latestProject.nodes || []).find(
+        (n) =>
+          n.type === normalizedType &&
+          n.name.trim().toLocaleLowerCase('vi') === normalizedName.toLocaleLowerCase('vi')
+      );
 
-      const savedNode = existingStubMatch
-        ? await projectStore.updateNode(currentProject.id, existingStubMatch.id, {
-            ...nodeData,
-            autoCreatedStub: false,
-          })
-        : await projectStore.createNode(currentProject.id, {
-            ...nodeData,
-            autoCreatedStub: false,
-          });
-      createdNodes.push(savedNode);
+      if (existingMatch) {
+        if (existingMatch.autoCreatedStub === true || !initialNodeIds.has(existingMatch.id)) {
+          const savedNode = await projectStore.updateNode(
+            currentProject.id,
+            existingMatch.id,
+            nodeData
+          );
+          createdNodes.push(savedNode);
+        } else {
+          skippedDuplicates.push(normalizedName);
+        }
+      } else {
+        const savedNode = await projectStore.createNode(currentProject.id, nodeData);
+        createdNodes.push(savedNode);
+      }
     }
 
     await refreshGraphData(createdNodes[createdNodes.length - 1]?.id ?? null);
     setAiChatOpen(false);
+    if (skippedDuplicates.length > 0) {
+      const infoMsg = `Đã thêm ${createdNodes.length} node mới. Bỏ qua ${skippedDuplicates.length} node đã tồn tại trong đồ thị: ${skippedDuplicates.join(', ')}.`;
+      if (Platform.OS === 'web') {
+        window.alert(infoMsg);
+      } else {
+        Alert.alert('Đã đồng bộ node', infoMsg);
+      }
+    }
     return true;
   } catch (err: any) {
     if (createdNodes.length > 0) {
@@ -586,6 +695,8 @@ const handleCreateNodesFromAI = async (
       Alert.alert('Không thể thêm tất cả node', message);
     }
     return false;
+  } finally {
+    isCreatingAINodesRef.current = false;
   }
 };
 
