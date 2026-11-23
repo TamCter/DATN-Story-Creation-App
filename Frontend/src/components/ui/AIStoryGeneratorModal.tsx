@@ -89,8 +89,21 @@ export default function AIStoryGeneratorModal({
     Array<{
       name: string;
       desc: string;
+      eventType?: string;
+      importance?: string;
+      arcName?: string;
+      sequenceOrder?: string;
       location?: string;
       time?: string;
+      timelineType?: string;
+      duration?: string;
+      cause?: string;
+      conflict?: string;
+      outcome?: string;
+      consequences?: string;
+      characterRoles?: string;
+      itemsInvolved?: string[];
+      factionsInvolved?: string[];
       charactersInvolved?: string[];
       characterStatusChanges?: Array<{
         characterName: string;
@@ -422,6 +435,19 @@ export default function AIStoryGeneratorModal({
                 chapter: generatedChapter.title,
                 location: ev.location || '',
                 time: ev.time || '',
+                timelineType: ev.timelineType || 'Hiện tại',
+                duration: ev.duration || '',
+                eventType: ev.eventType || '',
+                importance: ev.importance || '',
+                arcName: ev.arcName || '',
+                sequenceOrder: ev.sequenceOrder || String(eventIndex + 1),
+                cause: ev.cause || '',
+                conflict: ev.conflict || '',
+                outcome: ev.outcome || '',
+                consequences: ev.consequences || '',
+                characterRoles: ev.characterRoles || '',
+                itemsInvolved: JSON.stringify(ev.itemsInvolved || []),
+                factionsInvolved: JSON.stringify(ev.factionsInvolved || []),
                 impact: ev.impact || '',
                 role: 'BIẾN CỐ',
                 status: 'Đã diễn ra',

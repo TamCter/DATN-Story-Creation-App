@@ -40,6 +40,19 @@ export interface StoryNode {
   impact?: string;
   charactersInvolved?: string;
   characters?: string;
+  eventType?: string;
+  importance?: string;
+  arcName?: string;
+  sequenceOrder?: string;
+  cause?: string;
+  conflict?: string;
+  outcome?: string;
+  consequences?: string;
+  itemsInvolved?: string;
+  factionsInvolved?: string;
+  characterRoles?: string;
+  timelineType?: string;
+  duration?: string;
   statusEvent?: string;
   autoCreatedStub?: boolean;
   syncStatus?: 'synced' | 'pending';
@@ -780,6 +793,37 @@ export const GENDER_OPTIONS = [
   { label: 'Nam', value: 'Nam', icon: '♂️' },
   { label: 'Nữ', value: 'Nữ', icon: '♀️' },
   { label: 'Khác / Chưa rõ', value: 'Khác', icon: '⚧' },
+];
+
+export const EVENT_TYPE_OPTIONS = [
+  { label: 'Chiến đấu / Xung đột', value: 'Chiến đấu', icon: '⚔️' },
+  { label: 'Đối thoại / Đàm phán', value: 'Đối thoại / Đàm phán', icon: '💬' },
+  { label: 'Tiết lộ bí mật / Plot Twist', value: 'Tiết lộ bí mật', icon: '🕵️' },
+  { label: 'Du hành / Khám phá', value: 'Du hành', icon: '🧭' },
+  { label: 'Biến cố / Hy sinh', value: 'Biến cố / Hy sinh', icon: '💥' },
+  { label: 'Giao dịch / Vật phẩm', value: 'Giao dịch / Vật phẩm', icon: '🎁' },
+  { label: 'Hồi tưởng', value: 'Hồi tưởng', icon: '🕰️' },
+  { label: 'Khác', value: 'Khác', icon: '📌' },
+];
+
+export const EVENT_IMPORTANCE_OPTIONS = [
+  { label: 'Nút thắt chính (Major)', value: 'Nút thắt chính', icon: '🔥' },
+  { label: 'Bước ngoặt (Turning Point)', value: 'Bước ngoặt', icon: '⚡' },
+  { label: 'Gieo mầm (Foreshadowing)', value: 'Gieo mầm', icon: '🌱' },
+  { label: 'Sự kiện phụ (Minor)', value: 'Sự kiện phụ', icon: '🔹' },
+];
+
+export const EVENT_TIMELINE_OPTIONS = [
+  { label: 'Hiện tại', value: 'Hiện tại', icon: '⏱️' },
+  { label: 'Hồi tưởng (Flashback)', value: 'Hồi tưởng', icon: '⏪' },
+  { label: 'Tiên tri / Giấc mơ', value: 'Tiên tri / Giấc mơ', icon: '🔮' },
+  { label: 'Lời kể gián tiếp', value: 'Lời kể gián tiếp', icon: '📜' },
+];
+
+export const EVENT_STATUS_OPTIONS = [
+  { label: 'Đã diễn ra', value: 'Đã diễn ra', icon: '✅' },
+  { label: 'Đang diễn ra', value: 'Đang diễn ra', icon: '⏳' },
+  { label: 'Chưa diễn ra', value: 'Chưa diễn ra', icon: '📅' },
 ];
 
 

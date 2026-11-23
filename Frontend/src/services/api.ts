@@ -577,8 +577,21 @@ class ApiService {
       events: Array<{
         name: string;
         desc: string;
+        eventType?: string;
+        importance?: string;
+        arcName?: string;
+        sequenceOrder?: string;
         location?: string;
         time?: string;
+        timelineType?: string;
+        duration?: string;
+        cause?: string;
+        conflict?: string;
+        outcome?: string;
+        consequences?: string;
+        characterRoles?: string;
+        itemsInvolved?: string[];
+        factionsInvolved?: string[];
         charactersInvolved?: string[];
         characterStatusChanges?: Array<{
           characterName: string;
@@ -713,9 +726,22 @@ class ApiService {
       suggestedEvents: Array<{
         name: string;
         desc: string;
+        eventType?: string;
+        importance?: string;
+        arcName?: string;
+        sequenceOrder?: string;
         location?: string;
         time?: string;
+        timelineType?: string;
+        duration?: string;
+        cause?: string;
+        conflict?: string;
+        outcome?: string;
+        consequences?: string;
         impact?: string;
+        characterRoles?: string;
+        itemsInvolved?: string[];
+        factionsInvolved?: string[];
         charactersInvolved: string[];
       }>;
       characterStatusChanges: Array<{

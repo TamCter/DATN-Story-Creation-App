@@ -23,6 +23,9 @@ import { GraphSidebar } from '@/components/graph/GraphSidebar';
 import {
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
+  EVENT_IMPORTANCE_OPTIONS,
+  EVENT_TIMELINE_OPTIONS,
+  EVENT_TYPE_OPTIONS,
   eventBelongsToChapter,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
@@ -295,9 +298,22 @@ export default function GraphScreen() {
   // Sự kiện (Event)
   const [formChapter, setFormChapter] = useState('');
   const [formTime, setFormTime] = useState('');
+  const [formTimelineType, setFormTimelineType] = useState('Hiện tại');
+  const [formDuration, setFormDuration] = useState('');
+  const [formEventType, setFormEventType] = useState('');
+  const [formImportance, setFormImportance] = useState('');
+  const [formArcName, setFormArcName] = useState('');
+  const [formSequenceOrder, setFormSequenceOrder] = useState('');
+  const [formCause, setFormCause] = useState('');
+  const [formConflict, setFormConflict] = useState('');
+  const [formOutcome, setFormOutcome] = useState('');
+  const [formConsequences, setFormConsequences] = useState('');
+  const [formCharacterRoles, setFormCharacterRoles] = useState('');
   const [formLocation, setFormLocation] = useState('');
   const [formImpact, setFormImpact] = useState('');
   const [formCharactersInvolved, setFormCharactersInvolved] = useState<string[]>([]);
+  const [formItemsInvolved, setFormItemsInvolved] = useState<string[]>([]);
+  const [formFactionsInvolved, setFormFactionsInvolved] = useState<string[]>([]);
 
   const selectedNode = useMemo(() => {
     return nodes.find((n) => n.id === selectedNodeId) || null;
@@ -434,9 +450,22 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormAlignment('ĐỒNG MINH');
   setFormChapter(chapters[0]?.title || '');
   setFormTime(chapters[0]?.title || '');
+  setFormTimelineType('Hiện tại');
+  setFormDuration('');
+  setFormEventType('');
+  setFormImportance('');
+  setFormArcName('');
+  setFormSequenceOrder('');
+  setFormCause('');
+  setFormConflict('');
+  setFormOutcome('');
+  setFormConsequences('');
+  setFormCharacterRoles('');
   setFormLocation('');
   setFormImpact('');
   setFormCharactersInvolved([]);
+  setFormItemsInvolved([]);
+  setFormFactionsInvolved([]);
   setNodeModalOpen(true);
 };
 
@@ -471,11 +500,24 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   if (nodeData.alignment) setFormAlignment(nodeData.alignment);
   if (nodeData.chapter) setFormChapter(nodeData.chapter);
   if (nodeData.time) setFormTime(nodeData.time);
+  if (nodeData.timelineType) setFormTimelineType(nodeData.timelineType);
+  if (nodeData.duration) setFormDuration(nodeData.duration);
+  if (nodeData.eventType) setFormEventType(nodeData.eventType);
+  if (nodeData.importance) setFormImportance(nodeData.importance);
+  if (nodeData.arcName) setFormArcName(nodeData.arcName);
+  if (nodeData.sequenceOrder) setFormSequenceOrder(nodeData.sequenceOrder);
+  if (nodeData.cause) setFormCause(nodeData.cause);
+  if (nodeData.conflict) setFormConflict(nodeData.conflict);
+  if (nodeData.outcome) setFormOutcome(nodeData.outcome);
+  if (nodeData.consequences) setFormConsequences(nodeData.consequences);
+  if (nodeData.characterRoles) setFormCharacterRoles(nodeData.characterRoles);
   if (nodeData.location) setFormLocation(nodeData.location);
   if (nodeData.impact) setFormImpact(nodeData.impact);
   setFormCharactersInvolved(
     parseEventParticipants(nodeData.charactersInvolved || nodeData.characters)
   );
+  setFormItemsInvolved(parseEventParticipants(nodeData.itemsInvolved));
+  setFormFactionsInvolved(parseEventParticipants(nodeData.factionsInvolved));
   setAiChatOpen(false);
 };
 
@@ -579,11 +621,24 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormHeadquarters(node.headquarters || '');
   setFormMotto(node.motto || '');
   setFormAlignment(node.alignment || 'ĐỒNG MINH');
-  setFormChapter(node.chapter || node.time || '');
-  setFormTime(node.time || node.chapter || '');
+  setFormChapter(node.chapter || '');
+  setFormTime(node.time || '');
+  setFormTimelineType(node.timelineType || 'Hiện tại');
+  setFormDuration(node.duration || '');
+  setFormEventType(node.eventType || '');
+  setFormImportance(node.importance || '');
+  setFormArcName(node.arcName || '');
+  setFormSequenceOrder(node.sequenceOrder || '');
+  setFormCause(node.cause || '');
+  setFormConflict(node.conflict || '');
+  setFormOutcome(node.outcome || '');
+  setFormConsequences(node.consequences || '');
+  setFormCharacterRoles(node.characterRoles || '');
   setFormLocation(node.location || '');
   setFormImpact(node.impact || '');
   setFormCharactersInvolved(parseEventParticipants(node.charactersInvolved || node.characters));
+  setFormItemsInvolved(parseEventParticipants(node.itemsInvolved));
+  setFormFactionsInvolved(parseEventParticipants(node.factionsInvolved));
   setDetailModalOpen(false);
   setNodeModalOpen(true);
 };
@@ -659,12 +714,24 @@ const handleSaveNode = async () => {
     payload.role = formRole.trim() || 'BIẾN CỐ';
     payload.subType = formSubType.trim();
     payload.status = formStatus.trim() || 'Đã diễn ra';
-    const chVal = formChapter.trim() || formTime.trim();
-    payload.chapter = chVal;
-    payload.time = chVal;
+    payload.chapter = formChapter.trim();
+    payload.time = formTime.trim() || formChapter.trim();
+    payload.timelineType = formTimelineType.trim() || 'Hiện tại';
+    payload.duration = formDuration.trim();
+    payload.eventType = formEventType.trim();
+    payload.importance = formImportance.trim();
+    payload.arcName = formArcName.trim();
+    payload.sequenceOrder = formSequenceOrder.trim();
+    payload.cause = formCause.trim();
+    payload.conflict = formConflict.trim();
+    payload.outcome = formOutcome.trim();
+    payload.consequences = formConsequences.trim();
+    payload.characterRoles = formCharacterRoles.trim();
     payload.location = formLocation.trim();
     payload.impact = formImpact.trim();
     payload.charactersInvolved = JSON.stringify(formCharactersInvolved);
+    payload.itemsInvolved = JSON.stringify(formItemsInvolved);
+    payload.factionsInvolved = JSON.stringify(formFactionsInvolved);
   }
 
   try {
@@ -1452,6 +1519,55 @@ return (
                           <Text style={[styles.dynamicSectionHeader, { color: '#5b8ec2' }]}>
                             THÔNG TIN BIẾN CỐ / SỰ KIỆN
                           </Text>
+
+                          {/* Nhóm 1: Mạch truyện & Phân loại */}
+                          <View style={styles.formRow}>
+                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                              <Text style={styles.modalInputLabel}>Phân loại sự kiện</Text>
+                              <FormSelectField
+                                value={formEventType}
+                                onChange={setFormEventType}
+                                options={EVENT_TYPE_OPTIONS}
+                                placeholder="-- Chọn loại sự kiện --"
+                                allowCustom={true}
+                              />
+                            </View>
+                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                              <Text style={styles.modalInputLabel}>Mức độ quan trọng</Text>
+                              <FormSelectField
+                                value={formImportance}
+                                onChange={setFormImportance}
+                                options={EVENT_IMPORTANCE_OPTIONS}
+                                placeholder="-- Chọn mức độ --"
+                              />
+                            </View>
+                          </View>
+
+                          <View style={styles.formRow}>
+                            <View style={[styles.modalInputGroup, { flex: 2 }]}>
+                              <Text style={styles.modalInputLabel}>Cung truyện (Arc)</Text>
+                              <TextInput
+                                style={styles.modalInput}
+                                value={formArcName}
+                                onChangeText={setFormArcName}
+                                placeholder="VD: Arc Học viện, Arc Biên giới..."
+                                placeholderTextColor="#665f52"
+                              />
+                            </View>
+                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                              <Text style={styles.modalInputLabel}>Thứ tự</Text>
+                              <TextInput
+                                style={styles.modalInput}
+                                value={formSequenceOrder}
+                                onChangeText={setFormSequenceOrder}
+                                placeholder="1, 2, 3..."
+                                placeholderTextColor="#665f52"
+                                keyboardType="numeric"
+                              />
+                            </View>
+                          </View>
+
+                          {/* Chương & Địa điểm */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
                               <Text style={styles.modalInputLabel}>Chương</Text>
@@ -1483,6 +1599,106 @@ return (
                               />
                             </View>
                           </View>
+
+                          {/* Nhóm 4: Thời gian, Dòng thời gian & Thời lượng */}
+                          <View style={styles.formRow}>
+                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                              <Text style={styles.modalInputLabel}>Thời điểm</Text>
+                              <TextInput
+                                style={styles.modalInput}
+                                value={formTime}
+                                onChangeText={setFormTime}
+                                placeholder="VD: Đêm khuya, Đầu chương..."
+                                placeholderTextColor="#665f52"
+                              />
+                            </View>
+                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
+                              <Text style={styles.modalInputLabel}>Dòng thời gian</Text>
+                              <FormSelectField
+                                value={formTimelineType}
+                                onChange={setFormTimelineType}
+                                options={EVENT_TIMELINE_OPTIONS}
+                                placeholder="Hiện tại"
+                              />
+                            </View>
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Thời lượng</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formDuration}
+                              onChangeText={setFormDuration}
+                              placeholder="VD: 30 phút, Một đêm, 3 ngày..."
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          {/* Nhóm 2: Nhân quả & Mâu thuẫn */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Nguyên nhân / Ngòi nổ</Text>
+                            <FormSelectField
+                              value={formCause}
+                              onChange={setFormCause}
+                              options={eventNodes
+                                .filter((ev) => ev.id !== editingNodeId)
+                                .map((ev) => ({
+                                  label: ev.name,
+                                  value: ev.name,
+                                  subtitle: ev.time || 'Sự kiện trước',
+                                  icon: '🔗',
+                                }))}
+                              placeholder="-- Chọn sự kiện nguyên nhân hoặc nhập tự do --"
+                              allowCustom={true}
+                              customPlaceholder="Nhập nguyên nhân hoặc tên sự kiện..."
+                            />
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Xung đột chính</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formConflict}
+                              onChangeText={setFormConflict}
+                              placeholder="Ai đối đầu với ai / vấn đề cốt lõi cần giải quyết..."
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Kết quả trực tiếp</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formOutcome}
+                              onChangeText={setFormOutcome}
+                              placeholder="Ai thắng/thua, mục tiêu có đạt được không..."
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Hệ quả cụ thể / Thay đổi trạng thái</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formConsequences}
+                              onChangeText={setFormConsequences}
+                              placeholder="VD: Nhân vật A bị thương, vật phẩm B bị gãy..."
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Tác động lâu dài</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formImpact}
+                              onChangeText={setFormImpact}
+                              placeholder="Ảnh hưởng dài hạn đến mạch truyện..."
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          {/* Nhóm 3: Thực thể liên quan (Nhân vật, Vai trò, Vật phẩm, Tổ chức) */}
                           <View style={styles.modalInputGroup}>
                             <Text style={styles.modalInputLabel}>Nhân vật tham gia</Text>
                             {characterNodes.length > 0 ? (
@@ -1519,6 +1735,97 @@ return (
                             ) : (
                               <Text style={styles.eventCharacterEmpty}>
                                 Chưa có node nhân vật nào trong dự án.
+                              </Text>
+                            )}
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Vai trò nhân vật trong sự kiện</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formCharacterRoles}
+                              onChangeText={setFormCharacterRoles}
+                              placeholder="VD: Lăng Tiêu: Chủ động; Mộc Lan: Chứng kiến"
+                              placeholderTextColor="#665f52"
+                            />
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Vật phẩm liên quan</Text>
+                            {itemNodes.length > 0 ? (
+                              <View style={styles.eventCharacterOptions}>
+                                {itemNodes.map((item) => {
+                                  const isSelected = formItemsInvolved.includes(item.name);
+                                  return (
+                                    <Pressable
+                                      key={item.id}
+                                      style={[
+                                        styles.eventCharacterChip,
+                                        isSelected && styles.eventCharacterChipSelected,
+                                      ]}
+                                      onPress={() =>
+                                        setFormItemsInvolved((selected) =>
+                                          isSelected
+                                            ? selected.filter((name) => name !== item.name)
+                                            : [...selected, item.name]
+                                        )
+                                      }
+                                      accessibilityRole="checkbox"
+                                      accessibilityState={{ checked: isSelected }}>
+                                      <Text
+                                        style={[
+                                          styles.eventCharacterChipText,
+                                          isSelected && styles.eventCharacterChipTextSelected,
+                                        ]}>
+                                        {isSelected ? '✓ ' : ''}{item.name}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            ) : (
+                              <Text style={styles.eventCharacterEmpty}>
+                                Chưa có node vật phẩm nào trong dự án.
+                              </Text>
+                            )}
+                          </View>
+
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Tổ chức / Phe phái liên quan</Text>
+                            {factionNodes.length > 0 ? (
+                              <View style={styles.eventCharacterOptions}>
+                                {factionNodes.map((faction) => {
+                                  const isSelected = formFactionsInvolved.includes(faction.name);
+                                  return (
+                                    <Pressable
+                                      key={faction.id}
+                                      style={[
+                                        styles.eventCharacterChip,
+                                        isSelected && styles.eventCharacterChipSelected,
+                                      ]}
+                                      onPress={() =>
+                                        setFormFactionsInvolved((selected) =>
+                                          isSelected
+                                            ? selected.filter((name) => name !== faction.name)
+                                            : [...selected, faction.name]
+                                        )
+                                      }
+                                      accessibilityRole="checkbox"
+                                      accessibilityState={{ checked: isSelected }}>
+                                      <Text
+                                        style={[
+                                          styles.eventCharacterChipText,
+                                          isSelected && styles.eventCharacterChipTextSelected,
+                                        ]}>
+                                        {isSelected ? '✓ ' : ''}{faction.name}
+                                      </Text>
+                                    </Pressable>
+                                  );
+                                })}
+                              </View>
+                            ) : (
+                              <Text style={styles.eventCharacterEmpty}>
+                                Chưa có node tổ chức nào trong dự án.
                               </Text>
                             )}
                           </View>
@@ -1761,10 +2068,48 @@ return (
 
                             {selectedNode.type === 'event' && (
                               <>
+                                {selectedNode.eventType ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Phân loại:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.eventType}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.importance ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Mức độ:</Text>
+                                    <Text style={[styles.detailItemVal, { color: '#e5a93c' }]}>
+                                      {selectedNode.importance}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.arcName ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Cung truyện (Arc):</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.arcName}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.sequenceOrder ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Thứ tự:</Text>
+                                    <Text style={styles.detailItemVal}>#{selectedNode.sequenceOrder}</Text>
+                                  </View>
+                                ) : null}
                                 {selectedNode.time ? (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Thời điểm:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.time}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.timelineType ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Dòng thời gian:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.timelineType}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.duration ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Thời lượng:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.duration}</Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.location ? (
@@ -1773,9 +2118,33 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.location}</Text>
                                   </View>
                                 ) : null}
+                                {selectedNode.cause ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Nguyên nhân:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.cause}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.conflict ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Xung đột chính:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.conflict}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.outcome ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Kết quả:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.outcome}</Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.consequences ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Hệ quả cụ thể:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.consequences}</Text>
+                                  </View>
+                                ) : null}
                                 {selectedNode.impact ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Ảnh hưởng:</Text>
+                                    <Text style={styles.detailItemKey}>Tác động lâu dài:</Text>
                                     <Text style={styles.detailItemVal}>{selectedNode.impact}</Text>
                                   </View>
                                 ) : null}
@@ -1786,6 +2155,28 @@ return (
                                       {parseEventParticipants(
                                         selectedNode.charactersInvolved || selectedNode.characters
                                       ).join(', ')}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {selectedNode.characterRoles ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Vai trò nhân vật:</Text>
+                                    <Text style={styles.detailItemVal}>{selectedNode.characterRoles}</Text>
+                                  </View>
+                                ) : null}
+                                {parseEventParticipants(selectedNode.itemsInvolved).length > 0 ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Vật phẩm liên quan:</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      {parseEventParticipants(selectedNode.itemsInvolved).join(', ')}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {parseEventParticipants(selectedNode.factionsInvolved).length > 0 ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Tổ chức liên quan:</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      {parseEventParticipants(selectedNode.factionsInvolved).join(', ')}
                                     </Text>
                                   </View>
                                 ) : null}

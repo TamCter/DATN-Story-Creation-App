@@ -29,6 +29,9 @@ const RELATIONAL_NODE_FIELDS = [
   'chapter',
   'charactersInvolved',
   'characters',
+  'itemsInvolved',
+  'factionsInvolved',
+  'cause',
 ];
 const PLACEHOLDER_VALUE_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
 
@@ -40,14 +43,27 @@ Có 5 loại node:
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
 4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
-5. event (Sự kiện): name, type="event", desc, chapter, time, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), impact, charactersInvolved
+5. event (Sự kiện): name, type="event", desc, chapter, time, timelineType (Hiện tại/Hồi tưởng/Tiên tri / Giấc mơ/Lời kể gián tiếp), duration, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
-QUY TẮC QUAN TRỌNG VỀ CÁC TRƯỜNG LIÊN KẾT / MỐI QUAN HỆ VỚI NODE KHÁC:
-Các trường liên kết gồm: birthplace (Địa điểm), weapon (Vật phẩm), sect (Tổ chức), statusEvent (Sự kiện), origin (Địa điểm), holderOrLocation (Nhân vật), ruler (Tổ chức), leader (Nhân vật), headquarters (Địa điểm), location (Địa điểm).
-- Nếu trong bản đồ node hiện tại của dự án ĐÃ CÓ thực thể phù hợp, hãy dùng chính xác tên của node đó.
-- Nếu thực thể liên quan CHƯA TỒN TẠI trong bản đồ node của dự án, bạn chỉ chọn 1 trong 2 cách:
-  1. TẠO RA NODE MỚI: Đặt tên riêng cụ thể cho thực thể đó (và ưu tiên dùng "create_nodes" để tạo kèm luôn node liên quan đó vào bản đồ, hoặc điền tên cụ thể để hệ thống tự động tạo node mới và nối quan hệ).
-  2. BỎ TRỐNG: Để chuỗi rỗng "" cho trường liên kết đó nếu thực thể không có hoặc chưa cần mối quan hệ đó.
+QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
+Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
+- Nhân vật sở hữu / sử dụng vật phẩm: điền tên vật phẩm vào character.weapon (EQUIPPED) và/hoặc tên nhân vật vào item.holderOrLocation (OWNS).
+- Nhân vật thuộc tổ chức / lãnh đạo tổ chức: điền tên tổ chức vào character.sect (MEMBER_OF) và tên thủ lĩnh vào faction.leader (LEADER_OF).
+- Nhân vật sinh ra tại địa điểm: điền tên địa điểm vào character.birthplace (BIRTHPLACE).
+- Vật phẩm có nguồn gốc từ địa điểm: điền tên địa điểm vào item.origin (ORIGIN).
+- Tổ chức có trụ sở tại / cai quản địa điểm: điền tên địa điểm vào faction.headquarters (HEADQUARTERS) và tên tổ chức vào location.ruler (RULER_OF).
+- Nhân vật tham gia sự kiện: điền danh sách tên nhân vật (phân tách bằng dấu phẩy trong chuỗi) vào event.charactersInvolved (PARTICIPATED_IN).
+- Sự kiện diễn ra tại địa điểm: điền tên địa điểm vào event.location (EVENT_LOCATION).
+- Sự kiện liên quan vật phẩm: điền danh sách tên vật phẩm (phân tách bằng dấu phẩy trong chuỗi) vào event.itemsInvolved (INVOLVES_ITEM).
+- Sự kiện liên quan tổ chức: điền danh sách tên tổ chức (phân tách bằng dấu phẩy trong chuỗi) vào event.factionsInvolved (INVOLVES_FACTION).
+- Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
+- Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
+
+Nguyên tắc điền trường liên kết:
+- Nếu trong bản đồ node hiện tại của dự án ĐÃ CÓ thực thể phù hợp, bắt buộc dùng CHÍNH XÁC tên của node đó để nối đúng cạnh quan hệ.
+- Nếu thực thể liên quan CHƯA TỒN TẠI, chọn 1 trong 2 cách:
+  1. Đặt tên riêng cụ thể (ưu tiên dùng "create_nodes" để tạo kèm luôn node liên quan đó vào bản đồ, hoặc điền tên cụ thể để hệ thống tự tạo node và nối quan hệ).
+  2. Để chuỗi rỗng "" nếu thực thể không có hoặc chưa cần quan hệ đó.
 - TUYỆT ĐỐI KHÔNG điền các chữ giữ chỗ như "không rõ", "chưa rõ", "không xác định", "không có", "trống", "n/a".
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
@@ -58,8 +74,8 @@ Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo no
   item: name, type, desc, rarity, origin, element, holderOrLocation
   location: name, type, desc, region, climate, terrain, dangerLevel, ruler
   faction: name, type, desc, subType, alignment, status, leader, headquarters, motto
-  event: name, type, desc, chapter, time, location, status, impact
-- Mọi trường phải là chuỗi vô hướng, không dùng object/array. Nếu tạo một node, trả về đúng một JSON:
+  event: name, type, desc, chapter, time, timelineType, duration, location, status, eventType, importance, arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
+- Mọi trường phải là chuỗi vô hướng (danh sách nhiều tên như charactersInvolved, itemsInvolved, factionsInvolved viết thành chuỗi phân tách bằng dấu phẩy, không dùng object/array). Nếu tạo một node, trả về đúng một JSON:
   {"action":"create_node","node":{...}}
 - Nếu tạo từ 2 đến 3 node, trả về đúng một JSON:
   {"action":"create_nodes","nodes":[{...node 1...},{...node 2...}]}
@@ -610,14 +626,15 @@ Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
 2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật và địa điểm hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
 
-QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN (BẮT BUỘC):
+QUY TẮC THỐNG NHẤT QUAN HỆ & CHI TIẾT SỰ KIỆN (BẮT BUỘC):
 - Mỗi sự kiện phải có trường "charactersInvolved" là một mảng tên nhân vật, không được bỏ trống trường hoặc trả về null.
-- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện.
-- Ưu tiên nhân vật đã có trong danh sách ở trên và dùng chính xác tên của họ; đối chiếu vai trò/mô tả để chọn đúng người, không gán nhân vật không liên quan.
+- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện; ưu tiên dùng chính xác tên nhân vật hiện có trong danh sách ở trên.
 - Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
-- Chỉ dùng mảng rỗng khi sự kiện thực sự không có nhân vật liên quan; nếu truyện đã có nhân vật thì mỗi sự kiện chính thông thường phải có ít nhất một nhân vật.
-- Mỗi sự kiện phải có "characterStatusChanges" là một mảng. Chỉ thêm nhân vật vào đây khi sự kiện trong chương làm thay đổi trạng thái thực sự của họ: dùng "Đã chết" khi họ chết thật sự trong diễn biến hiện tại, hoặc "Hồi sinh" khi họ được hồi sinh. Không đánh dấu chết vì tin đồn, giả chết, hồi tưởng, nguy cơ hay cách nói ẩn dụ. Không đưa nhân vật vào nếu trạng thái không đổi; dùng [] khi không có thay đổi.
-- Mỗi thay đổi phải có "characterName" (tên chính xác), "status" ("Đã chết" hoặc "Hồi sinh"), và "statusEvent" là tên sự kiện này. Nhân vật có thay đổi trạng thái phải có trong "charactersInvolved". Không tạo thay đổi trái với trạng thái hiện tại nếu mạch truyện không có sự kiện hồi sinh.
+- Ghi chính xác tên địa điểm vào "location" (nối quan hệ Sự kiện diễn ra tại Địa điểm), tên các vật phẩm liên quan vào mảng "itemsInvolved" (nối quan hệ Sự kiện liên quan Vật phẩm), tên các tổ chức/phe phái liên quan vào mảng "factionsInvolved" (nối quan hệ Sự kiện liên quan Tổ chức).
+- Nếu sự kiện bắt nguồn trực tiếp từ một sự kiện trước, ghi tên sự kiện đó hoặc nguyên nhân rõ ràng vào "cause".
+- Phân loại rõ "eventType", "importance", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "arcName", "sequenceOrder", "conflict", "outcome", "consequences", "characterRoles".
+- Mỗi sự kiện phải có "characterStatusChanges" là một mảng. Chỉ thêm nhân vật vào đây khi sự kiện trong chương làm thay đổi trạng thái thực sự của họ: dùng "Đã chết" khi họ chết thật sự trong diễn biến hiện tại, hoặc "Hồi sinh" khi họ được hồi sinh. Không đánh dấu chết vì tin đồn, giả chết, hồi tưởng, nguy cơ hay cách nói ẩn dụ. Dùng [] khi không có thay đổi.
+- Mỗi thay đổi phải có "characterName" (tên chính xác), "status" ("Đã chết" hoặc "Hồi sinh"), và "statusEvent" là tên sự kiện này. Nhân vật có thay đổi trạng thái phải có trong "charactersInvolved".
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
 BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
@@ -632,17 +649,30 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
     {
       "name": "<Tên sự kiện ngắn gọn, hành động>",
       "desc": "<Mô tả chi tiết sự kiện diễn ra thế nào>",
+      "eventType": "<Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác>",
+      "importance": "<Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ>",
+      "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
+      "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm nơi diễn ra>",
       "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
-      "charactersInvolved": ["<Tên chính xác nhân vật hiện có hoặc nhân vật mới có vai trò trực tiếp>", "<Tên nhân vật khác nếu có>"],
+      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
+      "duration": "<Thời lượng, ví dụ: 30 phút / Một đêm / 2 ngày>",
+      "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới sự kiện này>",
+      "conflict": "<Xung đột chính trong sự kiện>",
+      "outcome": "<Kết quả trực tiếp của sự kiện>",
+      "consequences": "<Hệ quả cụ thể / thay đổi trạng thái nhân vật, vật phẩm, phe phái>",
+      "impact": "<Tác động lâu dài tới cốt truyện>",
+      "charactersInvolved": ["<Tên chính xác nhân vật tham gia>"],
+      "characterRoles": "<Vai trò ngắn gọn từng nhân vật, VD: A: Chủ động; B: Chứng kiến>",
+      "itemsInvolved": ["<Tên vật phẩm xuất hiện/chuyển giao nếu có>"],
+      "factionsInvolved": ["<Tên tổ chức/phe phái liên quan nếu có>"],
       "characterStatusChanges": [
         {
           "characterName": "<Tên nhân vật có trạng thái thay đổi>",
           "status": "Đã chết",
           "statusEvent": "<Tên sự kiện này>"
         }
-      ],
-      "impact": "<Tác động hoặc hậu quả sau sự kiện>"
+      ]
     }
   ]
 }
@@ -717,16 +747,44 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       });
     }
 
-    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event) => {
-      const rawLoc = typeof event.location === 'string' ? event.location.trim() : '';
-      const cleanLocation = PLACEHOLDER_VALUE_PATTERN.test(rawLoc) ? '' : rawLoc;
-      const cleanCharacters = Array.isArray(event.charactersInvolved)
-        ? event.charactersInvolved
-            .map((name) => String(name).trim())
-            .filter((name) => name && !PLACEHOLDER_VALUE_PATTERN.test(name))
-        : [];
+    const cleanEventScalar = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val).trim();
+      return PLACEHOLDER_VALUE_PATTERN.test(str) ? '' : str;
+    };
+    const cleanEventList = (val) => {
+      const arr = Array.isArray(val)
+        ? val
+        : typeof val === 'string' && val.trim()
+          ? val.split(/[,;\n]+/)
+          : [];
+      return Array.from(
+        new Set(
+          arr
+            .map((item) => String(item).trim())
+            .filter((item) => item && !PLACEHOLDER_VALUE_PATTERN.test(item))
+        )
+      );
+    };
+
+    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event, idx) => {
+      const cleanLocation = cleanEventScalar(event.location);
+      const cleanCharacters = cleanEventList(event.charactersInvolved);
       return {
         ...event,
+        eventType: cleanEventScalar(event.eventType),
+        importance: cleanEventScalar(event.importance),
+        arcName: cleanEventScalar(event.arcName),
+        sequenceOrder: cleanEventScalar(event.sequenceOrder) || String(idx + 1),
+        timelineType: cleanEventScalar(event.timelineType) || 'Hiện tại',
+        duration: cleanEventScalar(event.duration),
+        cause: cleanEventScalar(event.cause),
+        conflict: cleanEventScalar(event.conflict),
+        outcome: cleanEventScalar(event.outcome),
+        consequences: cleanEventScalar(event.consequences),
+        characterRoles: cleanEventScalar(event.characterRoles),
+        itemsInvolved: cleanEventList(event.itemsInvolved),
+        factionsInvolved: cleanEventList(event.factionsInvolved),
         location: cleanLocation,
         charactersInvolved: cleanCharacters,
         characterStatusChanges: event.characterStatusChanges.map((change) => ({
@@ -1464,10 +1522,18 @@ async function analyzeChapterText(req, res, next) {
         [
           n.name,
           n.chapter && `chương=${n.chapter}`,
+          n.eventType && `loại=${n.eventType}`,
+          n.importance && `mức độ=${n.importance}`,
+          n.arcName && `arc=${n.arcName}`,
           n.time && `thời gian=${n.time}`,
+          n.timelineType && `dòng thời gian=${n.timelineType}`,
+          n.duration && `thời lượng=${n.duration}`,
           n.location && `địa điểm=${n.location}`,
           (n.charactersInvolved || n.characters) &&
             `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          n.itemsInvolved && `vật phẩm=${String(n.itemsInvolved).slice(0, 120)}`,
+          n.factionsInvolved && `tổ chức=${String(n.factionsInvolved).slice(0, 120)}`,
+          n.outcome && `kết quả=${String(n.outcome).slice(0, 120)}`,
           n.impact && `tác động=${String(n.impact).slice(0, 120)}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
         ]
@@ -1512,14 +1578,24 @@ Phân loại mức độ severity:
 - "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, nhân vật hành xử khác thường).
 - "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn.
 
-2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes):
+2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes) & QUY TẮC THỐNG NHẤT QUAN HỆ:
 - Trích xuất các thực thể MỚI xuất hiện rõ ràng trong chương thuộc 4 loại: "character", "item", "location", "faction" mà CHƯA CÓ trong danh sách thực thể hiện có ở dưới (so khớp không phân biệt hoa/thường).
 - KHÔNG tạo lại node đã tồn tại.
-- Điền đầy đủ các trường thông tin suy ra được từ văn bản; các trường liên kết (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters) CHỈ điền tên cụ thể hoặc chuỗi rỗng "", TUYỆT ĐỐI KHÔNG dùng chữ giữ chỗ như "không rõ", "chưa xác định", "n/a".
+- Điền đầy đủ các trường thông tin suy ra được từ văn bản để hệ thống tự động tạo đúng các cạnh quan hệ đồ thị:
+  + Nhân vật sở hữu/dùng vật phẩm -> điền tên vật phẩm vào character.weapon và/hoặc tên nhân vật vào item.holderOrLocation.
+  + Nhân vật thuộc tổ chức / lãnh đạo tổ chức -> character.sect và faction.leader.
+  + Nhân vật sinh tại địa điểm -> character.birthplace.
+  + Vật phẩm có nguồn gốc từ địa điểm -> item.origin.
+  + Tổ chức có trụ sở / cai quản địa điểm -> faction.headquarters và location.ruler.
+- Các trường liên kết CHỈ điền tên cụ thể (khớp chính xác tên node đã có nếu tồn tại) hoặc chuỗi rỗng "", TUYỆT ĐỐI KHÔNG dùng chữ giữ chỗ như "không rõ", "chưa xác định", "n/a".
 
 3. TRÍCH XUẤT SỰ KIỆN CỦA CHƯƠNG (suggestedEvents) & THAY ĐỔI TRẠNG THÁI (characterStatusChanges):
 - Rút ra 1 đến 5 SỰ KIỆN CHÍNH theo đúng trình tự thời gian diễn ra trong chương này để gắn vào Chi tiết chương.
-- Mỗi sự kiện phải có: "name", "desc", "location" (tên địa điểm cụ thể hoặc ""), "time" (ví dụ: "Đầu chương", "Đêm khuya"...), "impact", và "charactersInvolved" (mảng tên chính xác các nhân vật tham gia trực tiếp, ưu tiên khớp tên nhân vật đã có trong đồ thị).
+- Mỗi sự kiện phải có đầy đủ các trường chi tiết sau (để lưu thông tin phong phú & tự nối quan hệ đồ thị):
+  + Cơ bản & Mạch truyện: "name", "desc", "eventType" (Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác), "importance" (Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ), "arcName", "sequenceOrder" ("1", "2",...).
+  + Thời gian & Địa điểm: "time", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
+  + Nhân quả & Mâu thuẫn: "cause" (nguyên nhân hoặc tên chính xác sự kiện trước để nối CAUSED_BY), "conflict", "outcome", "consequences", "impact".
+  + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (mảng tên vật phẩm liên quan để nối INVOLVES_ITEM), "factionsInvolved" (mảng tên tổ chức liên quan để nối INVOLVES_FACTION).
 - "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
 
 DỮ LIỆU ĐỒ THỊ HIỆN TẠI CỦA DỰ ÁN:
@@ -1593,10 +1669,23 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
     {
       "name": "<Tên sự kiện>",
       "desc": "<Mô tả diễn biến sự kiện>",
+      "eventType": "<Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác>",
+      "importance": "<Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ>",
+      "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
+      "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm hoặc chuỗi rỗng>",
       "time": "<Thời điểm diễn ra>",
-      "impact": "<Tác động của sự kiện>",
-      "charactersInvolved": ["<Tên nhân vật tham gia>"]
+      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
+      "duration": "<Thời lượng diễn ra>",
+      "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới>",
+      "conflict": "<Xung đột chính>",
+      "outcome": "<Kết quả trực tiếp>",
+      "consequences": "<Hệ quả cụ thể / thay đổi trạng thái>",
+      "impact": "<Tác động lâu dài của sự kiện>",
+      "charactersInvolved": ["<Tên nhân vật tham gia>"],
+      "characterRoles": "<Vai trò nhân vật trong sự kiện>",
+      "itemsInvolved": ["<Tên vật phẩm liên quan nếu có>"],
+      "factionsInvolved": ["<Tên tổ chức liên quan nếu có>"]
     }
   ],
   "characterStatusChanges": [
@@ -1731,16 +1820,44 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       ...safeNodes.filter((n) => n.type === 'character' && n.name),
       ...suggestedNodes.filter((n) => n.type === 'character'),
     ];
+    const cleanListField = (val) => {
+      const arr = Array.isArray(val)
+        ? val
+        : typeof val === 'string' && val.trim()
+          ? val.split(/[,;\n]+/)
+          : [];
+      return Array.from(
+        new Set(
+          arr
+            .map((item) => cleanField(item))
+            .filter(Boolean)
+        )
+      );
+    };
+
     const rawSuggestedEvents = (
       Array.isArray(parsed.suggestedEvents) ? parsed.suggestedEvents : []
     )
       .filter((ev) => ev && typeof ev === 'object' && String(ev.name || '').trim())
-      .map((ev) => ({
+      .map((ev, idx) => ({
         name: String(ev.name).trim(),
         desc: cleanField(ev.desc),
+        eventType: cleanField(ev.eventType),
+        importance: cleanField(ev.importance),
+        arcName: cleanField(ev.arcName),
+        sequenceOrder: cleanField(ev.sequenceOrder) || String(idx + 1),
         location: cleanField(ev.location),
         time: cleanField(ev.time),
+        timelineType: cleanField(ev.timelineType) || 'Hiện tại',
+        duration: cleanField(ev.duration),
+        cause: cleanField(ev.cause),
+        conflict: cleanField(ev.conflict),
+        outcome: cleanField(ev.outcome),
+        consequences: cleanField(ev.consequences),
         impact: cleanField(ev.impact),
+        characterRoles: cleanField(ev.characterRoles),
+        itemsInvolved: cleanListField(ev.itemsInvolved),
+        factionsInvolved: cleanListField(ev.factionsInvolved),
         charactersInvolved: Array.isArray(ev.charactersInvolved)
           ? ev.charactersInvolved.map((c) => String(c).trim()).filter(Boolean)
           : typeof ev.charactersInvolved === 'string'
@@ -1754,9 +1871,22 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
     }).map((ev) => ({
       name: ev.name,
       desc: ev.desc || '',
+      eventType: ev.eventType || '',
+      importance: ev.importance || '',
+      arcName: ev.arcName || '',
+      sequenceOrder: ev.sequenceOrder || '',
       location: ev.location || '',
       time: ev.time || '',
+      timelineType: ev.timelineType || 'Hiện tại',
+      duration: ev.duration || '',
+      cause: ev.cause || '',
+      conflict: ev.conflict || '',
+      outcome: ev.outcome || '',
+      consequences: ev.consequences || '',
       impact: ev.impact || '',
+      characterRoles: ev.characterRoles || '',
+      itemsInvolved: Array.isArray(ev.itemsInvolved) ? ev.itemsInvolved : [],
+      factionsInvolved: Array.isArray(ev.factionsInvolved) ? ev.factionsInvolved : [],
       charactersInvolved: Array.isArray(ev.charactersInvolved) ? ev.charactersInvolved : [],
     }));
 

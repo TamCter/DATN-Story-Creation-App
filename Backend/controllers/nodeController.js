@@ -158,6 +158,19 @@ const ALLOWED_NODE_SCALARS = new Set([
   'impact',
   'charactersInvolved',
   'characters',
+  'eventType',
+  'importance',
+  'arcName',
+  'sequenceOrder',
+  'cause',
+  'conflict',
+  'outcome',
+  'consequences',
+  'itemsInvolved',
+  'factionsInvolved',
+  'characterRoles',
+  'timelineType',
+  'duration',
   // Status Event cause
   'statusEvent',
 ]);
@@ -268,6 +281,12 @@ async function createNode(req, res, next) {
   }
   if (Array.isArray(body.characters)) {
     body.characters = JSON.stringify(body.characters);
+  }
+  if (Array.isArray(body.itemsInvolved)) {
+    body.itemsInvolved = JSON.stringify(body.itemsInvolved);
+  }
+  if (Array.isArray(body.factionsInvolved)) {
+    body.factionsInvolved = JSON.stringify(body.factionsInvolved);
   }
 
   // Reject invalid keys or non-scalar / nested values
@@ -406,6 +425,12 @@ async function updateNode(req, res, next) {
   }
   if (Array.isArray(body.characters)) {
     body.characters = JSON.stringify(body.characters);
+  }
+  if (Array.isArray(body.itemsInvolved)) {
+    body.itemsInvolved = JSON.stringify(body.itemsInvolved);
+  }
+  if (Array.isArray(body.factionsInvolved)) {
+    body.factionsInvolved = JSON.stringify(body.factionsInvolved);
   }
 
   for (const [key, value] of Object.entries(body)) {
@@ -706,11 +731,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           MATCH (item:StoryNode { id: $itemId })
           MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
           ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                        r.label = 'Vật dụng',
+                        r.label = 'Sở hữu / Sử dụng',
                         r.type = 'solid',
                         r.tone = 'possession',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Vật dụng',
+          ON MATCH SET r.label = 'Sở hữu / Sử dụng',
                        r.updatedAt = timestamp()
         `, { nodeId, itemId });
       } else {
@@ -1068,11 +1093,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           MATCH (loc:StoryNode { id: $locId })
           MERGE (ev)-[r:RELATES_TO { category: 'EVENT_LOCATION' }]->(loc)
           ON CREATE SET r.id = 'link-' + ev.id + '-' + loc.id + '-location',
-                        r.label = 'Nơi diễn ra',
+                        r.label = 'Diễn ra tại',
                         r.type = 'solid',
                         r.tone = 'event',
                         r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Nơi diễn ra',
+          ON MATCH SET r.label = 'Diễn ra tại',
                        r.updatedAt = timestamp()
         `, { nodeId, locId });
       } else {
@@ -1089,7 +1114,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         ...parseParticipantNames(nodeData.character),
       ];
 
-      const charNames = Array.from(new Set(rawChars.map((s) => String(s).trim()).filter(Boolean)));
+      const charNames = Array.from(new Set(rawChars.map((s) => cleanRelationalValue(s)).filter(Boolean)));
       const participantIds = [];
       for (const charName of charNames) {
         const charId = await findOrCreateProjectEntity(projectId, charName, 'character', {
@@ -1131,6 +1156,110 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         participantIds,
         revision: nodeData._participantSyncRevision || null,
       });
+
+      // 5.3 Vật phẩm liên quan -> Item (INVOLVES_ITEM)
+      const itemNames = Array.from(
+        new Set(
+          parseParticipantNames(nodeData.itemsInvolved)
+            .map((s) => cleanRelationalValue(s))
+            .filter(Boolean)
+        )
+      );
+      const itemIds = [];
+      for (const itemName of itemNames) {
+        const itemId = await findOrCreateProjectEntity(projectId, itemName, 'item', {
+          role: 'VẬT PHẨM',
+          rarity: 'Hiếm',
+          status: 'Nguyên vẹn',
+          desc: `Vật phẩm xuất hiện trong sự kiện ${nodeName}`,
+        });
+        itemIds.push(itemId);
+      }
+      await runQuery(`
+        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_ITEM' }]->(it:StoryNode)
+        WHERE NOT (it.id IN $itemIds)
+        DELETE old
+      `, { nodeId, projectId, itemIds });
+      if (itemIds.length > 0) {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })
+          MATCH (it:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+          WHERE it.id IN $itemIds
+          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_ITEM' }]->(it)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + it.id + '-item',
+                        r.label = 'Liên quan vật phẩm',
+                        r.type = 'dashed',
+                        r.tone = 'possession',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Liên quan vật phẩm',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, itemIds });
+      }
+
+      // 5.4 Tổ chức / Phe phái liên quan -> Faction (INVOLVES_FACTION)
+      const factionNames = Array.from(
+        new Set(
+          parseParticipantNames(nodeData.factionsInvolved)
+            .map((s) => cleanRelationalValue(s))
+            .filter(Boolean)
+        )
+      );
+      const factionIds = [];
+      for (const facName of factionNames) {
+        const facId = await findOrCreateProjectEntity(projectId, facName, 'faction', {
+          role: 'TỔ CHỨC',
+          subType: 'Trung lập',
+          alignment: 'TRUNG LẬP',
+          status: 'Đang hoạt động',
+          desc: `Tổ chức liên quan tới sự kiện ${nodeName}`,
+        });
+        factionIds.push(facId);
+      }
+      await runQuery(`
+        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_FACTION' }]->(fac:StoryNode)
+        WHERE NOT (fac.id IN $factionIds)
+        DELETE old
+      `, { nodeId, projectId, factionIds });
+      if (factionIds.length > 0) {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })
+          MATCH (fac:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+          WHERE fac.id IN $factionIds
+          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_FACTION' }]->(fac)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + fac.id + '-faction',
+                        r.label = 'Liên quan tổ chức',
+                        r.type = 'dashed',
+                        r.tone = 'sect',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Liên quan tổ chức',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, factionIds });
+      }
+
+      // 5.5 Nhân quả giữa các sự kiện -> Event (CAUSED_BY, chỉ nối nếu khớp tên/ID một Event đã tồn tại)
+      const causeText = cleanRelationalValue(nodeData.cause);
+      await runQuery(`
+        MATCH (ev:StoryNode { id: $nodeId })-[old:RELATES_TO { category: 'CAUSED_BY' }]->(:StoryNode)
+        DELETE old
+      `, { nodeId });
+      if (causeText) {
+        await runQuery(`
+          MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (causeEv:StoryNode { type: 'event' })-[:BELONGS_TO]->(p)
+          WHERE causeEv.id <> ev.id
+            AND (toLower(causeEv.name) = toLower($causeText) OR causeEv.id = $causeText)
+          MERGE (ev)-[r:RELATES_TO { category: 'CAUSED_BY' }]->(causeEv)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + causeEv.id + '-cause',
+                        r.label = 'Bắt nguồn từ',
+                        r.type = 'dashed',
+                        r.tone = 'event',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Bắt nguồn từ',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, causeText });
+      }
     }
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
