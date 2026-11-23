@@ -291,12 +291,15 @@ async function createNode(req, res, next) {
 
   // Reject invalid keys or non-scalar / nested values
   for (const [key, value] of Object.entries(body)) {
-    if (key !== 'id' && !ALLOWED_NODE_SCALARS.has(key)) {
+    if (key !== 'id' && key !== 'autoCreatedStub' && !ALLOWED_NODE_SCALARS.has(key)) {
       return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
     }
     if (value !== null && typeof value === 'object') {
       return res.status(400).json({ success: false, message: `Giá trị của trường '${key}' phải là kiểu dữ liệu vô hướng (scalar), không được lồng object/array` });
     }
+  }
+  if (body.autoCreatedStub !== undefined && typeof body.autoCreatedStub !== 'boolean') {
+    return res.status(400).json({ success: false, message: 'autoCreatedStub phải là giá trị boolean' });
   }
 
   const {
@@ -382,6 +385,9 @@ async function createNode(req, res, next) {
         nodeProperties[field] = body[field] !== null ? String(body[field]).trim() : '';
       }
     }
+    if (body.autoCreatedStub !== undefined) {
+      nodeProperties.autoCreatedStub = body.autoCreatedStub;
+    }
 
     const createQuery = `
       MATCH (p:Project { id: $projectId })
@@ -434,7 +440,7 @@ async function updateNode(req, res, next) {
   }
 
   for (const [key, value] of Object.entries(body)) {
-    if (!ALLOWED_NODE_SCALARS.has(key)) {
+    if (key !== 'autoCreatedStub' && key !== 'onlyIfStub' && !ALLOWED_NODE_SCALARS.has(key)) {
       return res.status(400).json({ success: false, message: `Trường '${key}' không hợp lệ trên Node` });
     }
     if (value !== null && typeof value === 'object') {

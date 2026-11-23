@@ -2368,25 +2368,27 @@ return (
         }}
       />
 
-      {/* Floating AI Action Buttons - Góc dưới bên phải */}
-      <View style={[styles.aiFabContainer, selectedNode && styles.aiFabContainerShifted]}>
-        <Pressable
-          style={styles.aiFabBtnSecondary}
-          onPress={() => setAiChatOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI Chat">
-          <Text style={styles.aiFabIcon}>💬</Text>
-          <Text style={styles.aiFabTextSecondary}>AI Chat</Text>
-        </Pressable>
-        <Pressable
-          style={styles.aiFabBtn}
-          onPress={() => setAiStoryModalOpen(true)}
-          accessibilityRole="button"
-          accessibilityLabel="Mở AI tạo truyện">
-          <Text style={styles.aiFabIcon}>✨</Text>
-          <Text style={styles.aiFabText}>AI Tạo truyện</Text>
-        </Pressable>
-      </View>
+      {/* Floating AI Action Buttons - Góc dưới bên phải (ẩn khi đang mở AI Chat hoặc AI Tạo truyện) */}
+      {!aiChatOpen && !aiStoryModalOpen && (
+        <View style={[styles.aiFabContainer, selectedNode && styles.aiFabContainerShifted]}>
+          <Pressable
+            style={styles.aiFabBtnSecondary}
+            onPress={() => setAiChatOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Mở AI Chat">
+            <Text style={styles.aiFabIcon}>💬</Text>
+            <Text style={styles.aiFabTextSecondary}>AI Chat</Text>
+          </Pressable>
+          <Pressable
+            style={styles.aiFabBtn}
+            onPress={() => setAiStoryModalOpen(true)}
+            accessibilityRole="button"
+            accessibilityLabel="Mở AI tạo truyện">
+            <Text style={styles.aiFabIcon}>✨</Text>
+            <Text style={styles.aiFabText}>AI Tạo truyện</Text>
+          </Pressable>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
