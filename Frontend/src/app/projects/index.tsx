@@ -31,6 +31,8 @@ export default function ProjectsScreen() {
   const [newTitle, setNewTitle] = useState('');
   const [newGenre, setNewGenre] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [projectToDelete, setProjectToDelete] = useState<StoryProject | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const displayName = user?.penName || 'Tác giả';
   const displayInitial = displayName.charAt(0).toUpperCase();
@@ -67,6 +69,25 @@ export default function ProjectsScreen() {
       pathname: '/graph' as any,
       params: { projectId: project.id },
     });
+  };
+
+  const handleConfirmDeleteProject = async () => {
+    if (!projectToDelete || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await projectStore.deleteProject(projectToDelete.id);
+      setProjects((prev) => prev.filter((p) => p.id !== projectToDelete.id));
+      setProjectToDelete(null);
+    } catch (err: any) {
+      const msg = err?.message || 'Không thể xóa dự án. Vui lòng thử lại.';
+      if (Platform.OS === 'web') {
+        window.alert(msg);
+      } else {
+        Alert.alert('Lỗi xóa dự án', msg);
+      }
+    } finally {
+      setIsDeleting(false);
+    }
   };
 
   // Tạo dự án mới gắn riêng cho User hiện tại
@@ -330,7 +351,45 @@ export default function ProjectsScreen() {
 
                 {/* Card Content */}
                 <View style={styles.cardContent}>
-                  <Text style={styles.cardNum}>{project.number || `№ 0${index + 1}`}</Text>
+                  <View style={styles.cardTopRow}>
+                    <Text style={styles.cardNum}>{project.number || `№ 0${index + 1}`}</Text>
+                    <Pressable
+                      style={({ pressed }) => [
+                        styles.deleteProjectBtn,
+                        pressed && styles.deleteProjectBtnPressed,
+                      ]}
+                      hitSlop={8}
+                      accessibilityLabel={`Xóa dự án ${project.title}`}
+                      onPress={(e) => {
+                        e.stopPropagation();
+                        setProjectToDelete(project);
+                      }}>
+                      <Svg width="15" height="15" viewBox="0 0 24 24" fill="none">
+                        <Path
+                          d="M3 6h18"
+                          stroke="#e07a5f"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                        />
+                        <Path
+                          d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"
+                          stroke="#e07a5f"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <Path
+                          d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"
+                          stroke="#e07a5f"
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        <Line x1="10" y1="11" x2="10" y2="17" stroke="#e07a5f" strokeWidth="2" strokeLinecap="round" />
+                        <Line x1="14" y1="11" x2="14" y2="17" stroke="#e07a5f" strokeWidth="2" strokeLinecap="round" />
+                      </Svg>
+                    </Pressable>
+                  </View>
                   <Text style={styles.cardTitle}>{project.title}</Text>
                   <Text style={styles.cardGenre}>{project.genre}</Text>
                   <Text style={styles.cardMeta}>
@@ -432,6 +491,62 @@ export default function ProjectsScreen() {
               onPress={() => setUserModalVisible(false)}>
               <Text style={styles.userModalCloseText}>Đóng</Text>
             </Pressable>
+          </Pressable>
+        </Pressable>
+      </Modal>
+
+      {/* Modal Cảnh báo Xóa Dự án */}
+      <Modal
+        visible={projectToDelete !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (!isDeleting) setProjectToDelete(null);
+        }}>
+        <Pressable
+          style={styles.deleteModalOverlay}
+          onPress={() => {
+            if (!isDeleting) setProjectToDelete(null);
+          }}>
+          <Pressable style={styles.deleteModalCard} onPress={(e) => e.stopPropagation()}>
+            <View style={styles.deleteModalIconWrap}>
+              <Text style={styles.deleteModalIcon}>⚠️</Text>
+            </View>
+            <Text style={styles.deleteModalTitle}>Xóa dự án truyện?</Text>
+            <Text style={styles.deleteModalProjectName} numberOfLines={2}>
+              “{projectToDelete?.title}”
+            </Text>
+            <View style={styles.deleteWarningBox}>
+              <Text style={styles.deleteWarningText}>
+                Cảnh báo: Hành động này sẽ xóa vĩnh viễn dự án cùng toàn bộ{' '}
+                <Text style={styles.deleteWarningHighlight}>
+                  {projectToDelete?.nodeCount || 0} node
+                </Text>{' '}
+                (nhân vật, vật phẩm, địa điểm, tổ chức, sự kiện), liên kết và chương truyện bên
+                trong.
+              </Text>
+              <Text style={styles.deleteWarningStrong}>
+                Dữ liệu đã xóa sẽ không thể khôi phục được!
+              </Text>
+            </View>
+            <View style={styles.modalActionRow}>
+              <Pressable
+                style={styles.modalCancelBtn}
+                disabled={isDeleting}
+                onPress={() => setProjectToDelete(null)}>
+                <Text style={styles.modalCancelText}>Hủy</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.deleteConfirmBtn, isDeleting && { opacity: 0.6 }]}
+                disabled={isDeleting}
+                onPress={handleConfirmDeleteProject}>
+                {isDeleting ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Text style={styles.deleteConfirmText}>Xóa vĩnh viễn</Text>
+                )}
+              </Pressable>
+            </View>
           </Pressable>
         </Pressable>
       </Modal>
@@ -851,6 +966,111 @@ const styles = StyleSheet.create({
   userModalCloseText: {
     color: '#8f887b',
     fontSize: 14,
+    fontFamily: AppFonts.sans,
+  },
+  cardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  deleteProjectBtn: {
+    width: 28,
+    height: 28,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(217, 90, 56, 0.35)',
+    backgroundColor: 'rgba(217, 90, 56, 0.12)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteProjectBtnPressed: {
+    backgroundColor: 'rgba(217, 90, 56, 0.28)',
+  },
+  deleteModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deleteModalCard: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#181511',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: '#5c2b21',
+    padding: 22,
+  },
+  deleteModalIconWrap: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(217, 90, 56, 0.16)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 90, 56, 0.4)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'center',
+    marginBottom: 12,
+  },
+  deleteModalIcon: {
+    fontSize: 22,
+  },
+  deleteModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#f5eee6',
+    fontFamily: AppFonts.serif,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  deleteModalProjectName: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#e5a93c',
+    fontFamily: AppFonts.sans,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  deleteWarningBox: {
+    backgroundColor: 'rgba(217, 90, 56, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(217, 90, 56, 0.35)',
+    borderRadius: 10,
+    padding: 12,
+    marginBottom: 14,
+    gap: 6,
+  },
+  deleteWarningText: {
+    color: '#e8d8cc',
+    fontSize: 13.5,
+    lineHeight: 20,
+    fontFamily: AppFonts.sans,
+  },
+  deleteWarningHighlight: {
+    color: '#f5b0a8',
+    fontWeight: '700',
+  },
+  deleteWarningStrong: {
+    color: '#f08670',
+    fontSize: 13.5,
+    fontWeight: '700',
+    fontFamily: AppFonts.sans,
+  },
+  deleteConfirmBtn: {
+    flex: 1,
+    backgroundColor: '#c9452c',
+    borderRadius: 4,
+    paddingVertical: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  deleteConfirmText: {
+    color: '#ffffff',
+    fontWeight: '700',
+    fontSize: 14.5,
     fontFamily: AppFonts.sans,
   },
 });

@@ -688,6 +688,50 @@ export class ProjectStore {
   }
 
   /**
+   * Xóa vĩnh viễn một dự án trên Backend (Neo4j) và dọn sạch bộ nhớ đệm local
+   */
+  async deleteProject(
+    projectId: string,
+    context: AccountContext = this.captureAccountContext()
+  ): Promise<void> {
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+
+    try {
+      const res = await api.deleteProject(projectId);
+      if (!res.success) {
+        throw new Error(res.message || 'Không thể xóa dự án trên máy chủ.');
+      }
+    } catch (err) {
+      // Nếu dự án chỉ tồn tại ở local (chưa từng lưu lên server -> 404), vẫn cho phép dọn local
+      const isLocalOnly404 =
+        err instanceof ApiError &&
+        err.status === 404 &&
+        projectId.startsWith('project-');
+      if (!isLocalOnly404) {
+        throw err;
+      }
+    }
+
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+
+    this.memoryProjects.delete(projectId);
+    this.projectVersions.delete(projectId);
+    this.graphRequestVersions.delete(projectId);
+
+    const cacheKey = this.getProjectCacheKey(projectId, context.accountId);
+    if (cacheKey) {
+      await AsyncStorage.removeItem(cacheKey);
+    }
+
+    const locals = await this.getLocalProjects(context.accountId);
+    const filteredLocals = locals.filter((p) => p.id !== projectId);
+    const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+    if (localProjectsKey) {
+      await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
+    }
+  }
+
+  /**
    * Tạo một Node mới trong Project
    */
   async createNode(projectId: string, nodeData: Partial<StoryNode>): Promise<StoryNode> {
