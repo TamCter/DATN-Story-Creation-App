@@ -188,6 +188,7 @@ export interface AIChatMessage {
   content: string;
   nodeData?: Partial<StoryNode> | null;
   nodeDataList?: Partial<StoryNode>[];
+  suggestedPrompt?: string | null;
   timestamp: number;
   canRetry?: boolean;
 }
@@ -206,7 +207,7 @@ const WELCOME_MSG: AIChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn có thể yêu cầu tạo 1 hoặc nhiều thực thể cùng lúc.\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo 4 thực thể gồm nhân vật, vật phẩm, tổ chức và địa điểm"',
+    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn có thể tạo cùng lúc tối đa 3 thực thể mỗi lượt (nếu cần nhiều hơn, tôi sẽ gợi ý prompt để bạn tạo tiếp).\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo một nhân vật, một vật phẩm và địa điểm họ gặp nhau"',
   timestamp: Date.now(),
 };
 
@@ -1240,6 +1241,7 @@ export default function AIChatPanel({
             : res.data.nodeData
               ? [res.data.nodeData]
               : [],
+          suggestedPrompt: res.data.suggestedPrompt || null,
           timestamp: Date.now(),
         };
         const nextHistory = [...currentHistory, aiMsg];
@@ -1696,6 +1698,7 @@ export default function AIChatPanel({
             onConfirmCreateMany={onCreateNodes}
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
+            onUseSuggestedPrompt={(prompt) => setInputText(prompt)}
             copied={copiedMessageId === msg.id}
             isLoading={isLoading || isScopeClearing}
           />
@@ -1769,6 +1772,7 @@ function MessageBubble({
   onConfirmCreateMany,
   onRetry,
   onCopy,
+  onUseSuggestedPrompt,
   copied,
   isLoading,
 }: {
@@ -1777,6 +1781,7 @@ function MessageBubble({
   onConfirmCreateMany: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
   onRetry?: () => void;
   onCopy?: (message: AIChatMessage) => void;
+  onUseSuggestedPrompt?: (prompt: string) => void;
   copied?: boolean;
   isLoading?: boolean;
 }) {
@@ -1899,6 +1904,25 @@ function MessageBubble({
                     : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
               </Text>
             )}
+          </Pressable>
+        )}
+        {!isUser && !!message.suggestedPrompt && onUseSuggestedPrompt && (
+          <Pressable
+            accessibilityRole="button"
+            style={[
+              styles.retryBtn,
+              {
+                marginTop: 8,
+                borderColor: 'rgba(229, 169, 60, 0.45)',
+                backgroundColor: 'rgba(229, 169, 60, 0.12)',
+              },
+              isLoading && { opacity: 0.5 },
+            ]}
+            disabled={isLoading}
+            onPress={() => onUseSuggestedPrompt(message.suggestedPrompt!)}>
+            <Text style={[styles.retryBtnText, { color: '#f3d28e' }]}>
+              💡 Dùng gợi ý tạo tiếp: “{message.suggestedPrompt}”
+            </Text>
           </Pressable>
         )}
       </View>

@@ -456,7 +456,12 @@ class ApiService {
     projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
   }): Promise<{
     success: boolean;
-    data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+    data: {
+      message: string;
+      nodeData: any | null;
+      nodeDataList?: any[];
+      suggestedPrompt?: string | null;
+    };
     message?: string;
   }> {
     // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
@@ -552,7 +557,12 @@ class ApiService {
 
     return this.request<{
       success: boolean;
-      data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+      data: {
+        message: string;
+        nodeData: any | null;
+        nodeDataList?: any[];
+        suggestedPrompt?: string | null;
+      };
       message?: string;
     }>(
       '/ai/chat',
