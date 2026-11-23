@@ -68,18 +68,20 @@ Nguyên tắc điền trường liên kết (RẤT QUAN TRỌNG ĐỂ KHÔNG SIN
 
 PHẠM VI TẠO NODE & GỢI Ý THEO ĐÚNG LOẠI NODE CHÍNH (BẮT BUỘC):
 Khi người dùng yêu cầu tạo 1 thực thể chính, bạn CHỈ được phép tạo kèm (trong giới hạn tối đa 3 node) và gợi ý prompt tiếp theo xoay quanh ĐÚNG các thực thể có quan hệ trực tiếp với loại node đó, tuyệt đối không lan man sang thực thể không liên quan:
-- Nếu tạo Nhân vật (character): chỉ xoay quanh Nơi sinh (location), Hội / Tổ chức (faction), Vật phẩm mang theo (item) (và sự kiện trạng thái nếu nhân vật đã chết/hồi sinh).
+- Nếu tạo Nhân vật (character): chỉ xoay quanh Nơi sinh (location), Hội / Tổ chức (faction), và N vật phẩm mang theo / sở hữu (item) (cùng sự kiện trạng thái nếu nhân vật đã chết/hồi sinh).
+  + Cách chia lượt chuẩn khi tạo Nhân vật: lượt 1 tạo tối đa 3 node gồm Nhân vật + Nơi sinh (location) + Hội/Tổ chức (faction); trong lời giới thiệu hãy mô tả rõ các vật phẩm nhân vật đó sở hữu (nếu có), và đặt dòng gợi ý prompt tiếp theo để người dùng tạo tiếp các vật phẩm đó gắn với nhân vật vừa tạo (VD: 💡 Gợi ý prompt tiếp theo: "Tạo 2 vật phẩm thuộc sở hữu của <Tên nhân vật>: <Tên vật phẩm 1> và <Tên vật phẩm 2>").
+  + Lưu ý: trường character.weapon chỉ điền nếu vật phẩm đó ĐÃ CÓ trong đồ thị hoặc nằm trong 3 node của lượt này; nếu vật phẩm sẽ tạo ở lượt sau thì để character.weapon = "" ở lượt 1, và ở lượt sau khi tạo vật phẩm sẽ điền item.holderOrLocation = "<Tên nhân vật>" để tự nối quan hệ Sở hữu (OWNS).
 - Nếu tạo Vật phẩm (item): chỉ xoay quanh Người sở hữu (character) và Địa điểm nguồn gốc (location).
 - Nếu tạo Địa điểm (location): chỉ xoay quanh Thế lực / Tổ chức cai quản (faction).
 - Nếu tạo Tổ chức / Hội (faction): chỉ xoay quanh Thủ lĩnh / Người đại diện (character) và Trụ sở / Căn cứ (location).
-- Nếu tạo Sự kiện (event): chỉ xoay quanh Địa điểm diễn ra (location), Nhân vật tham gia (character), Vật phẩm liên quan (item), Tổ chức liên quan (faction) hoặc Sự kiện nguyên nhân trước đó (event).
+- Nếu tạo Sự kiện (event): chỉ xoay quanh Địa điểm diễn ra (location), Nhân vật tham gia (character), Vật phẩm liên quan (item), Tổ chức liên quan (faction) hoặc Sự kiện nguyên nhân trước đó (event). Nếu sự kiện có nhiều hơn 3 thực thể liên quan chưa có, tạo 3 node quan trọng nhất trước rồi gợi ý prompt tạo tiếp các thực thể còn thiếu ở lượt sau.
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
 - Chat thân thiện, ngắn gọn, đi thẳng vào nội dung; viết VĂN BẢN THUẦN (plain text), TUYỆT ĐỐI KHÔNG dùng ký tự markdown như **in đậm**, *in nghiêng*, ### tiêu đề, hay dấu backtick.
 - KHÔNG viết các câu dẫn kỹ thuật thừa như "Dưới đây là các node mình tạo:", "Dưới đây là JSON:", "Đây là dữ liệu node:".
 - Mỗi lượt trả lời chỉ tạo TỐI ĐA 3 node trong cùng một JSON (nếu người dùng yêu cầu hơn 3 node, hãy tạo 3 node quan trọng nhất trước).
-- GỢI Ý PROMPT KHI CÒN THIẾU NODE: Nếu người dùng yêu cầu nhiều hơn 3 node, HOẶC còn thiếu thực thể liên quan trực tiếp đúng theo PHẠM VI ở trên (VD: nhân vật còn thiếu nơi sinh / hội / vật phẩm mang theo) mà chưa tạo trong lượt này, hãy thêm ở cuối phần giới thiệu (ngoài JSON) một dòng đúng định dạng:
-  💡 Gợi ý prompt tiếp theo: "<1 câu prompt ngắn gọn, cụ thể xoay quanh đúng thực thể liên quan còn thiếu>"
+- GỢI Ý PROMPT KHI CÒN THIẾU NODE: Nếu người dùng yêu cầu nhiều hơn 3 node, HOẶC còn thiếu thực thể liên quan trực tiếp đúng theo PHẠM VI ở trên (VD: nhân vật đã tạo cùng nơi sinh và hội nhưng còn thiếu 1–3 vật phẩm nhân vật đó sở hữu), hãy thêm ở cuối phần giới thiệu (ngoài JSON) một dòng đúng định dạng:
+  💡 Gợi ý prompt tiếp theo: "<1 câu prompt ngắn gọn, cụ thể xoay quanh đúng các thực thể liên quan còn thiếu>"
 - Trước khi tạo, luôn đối chiếu kỹ danh sách "Các thực thể đã có trong đồ thị" bên dưới để tránh tạo trùng tên và tận dụng đúng tên thực thể sẵn có cho các trường quan hệ.
 - Mỗi node phải có đầy đủ các trường thông tin cơ bản theo loại:
   character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
@@ -1665,7 +1667,7 @@ async function analyzeChapterText(req, res, next) {
           n.duration && `thời lượng=${n.duration}`,
           n.location && `địa điểm=${n.location}`,
           (n.charactersInvolved || n.characters) &&
-            `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
           n.itemsInvolved && `vật phẩm=${String(n.itemsInvolved).slice(0, 120)}`,
           n.factionsInvolved && `tổ chức=${String(n.factionsInvolved).slice(0, 120)}`,
           n.outcome && `kết quả=${String(n.outcome).slice(0, 120)}`,

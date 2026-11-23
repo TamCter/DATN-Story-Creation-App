@@ -188,6 +188,7 @@ export interface AIChatMessage {
   content: string;
   nodeData?: Partial<StoryNode> | null;
   nodeDataList?: Partial<StoryNode>[];
+  nodesAdded?: boolean;
   suggestedPrompt?: string | null;
   timestamp: number;
   canRetry?: boolean;
@@ -921,9 +922,9 @@ export default function AIChatPanel({
           const localHasFullOfTruncatedServer = Boolean(localPayload?.serverTruncated);
           const pendingWriteAlreadyAcked = Boolean(
             hasUnackedLocalChanges &&
-              localPayload?.pendingWriteId &&
-              remoteLastWriteId &&
-              remoteLastWriteId === localPayload.pendingWriteId
+            localPayload?.pendingWriteId &&
+            remoteLastWriteId &&
+            remoteLastWriteId === localPayload.pendingWriteId
           );
 
           if (remoteMsgs.length > 0) {
@@ -1492,8 +1493,8 @@ export default function AIChatPanel({
         const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
         const resolvedClearBaseRev =
           lastLocalAck &&
-          lastLocalAck.opId < clearOpId &&
-          lastLocalAck.revision > capturedBaseRevision
+            lastLocalAck.opId < clearOpId &&
+            lastLocalAck.revision > capturedBaseRevision
             ? lastLocalAck.revision
             : capturedBaseRevision;
         const resolvedClearRecord: ClearIntentMarker = {
@@ -1584,6 +1585,53 @@ export default function AIChatPanel({
 
   const handleConfirmCreate = (nodeData: Partial<StoryNode>) => {
     onCreateNode(nodeData);
+  };
+
+  const existingFullNodeKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const node of existingNodes) {
+      if (node && node.type && node.name && node.autoCreatedStub !== true) {
+        keys.add(`${node.type}::${node.name.trim().toLocaleLowerCase('vi')}`);
+      }
+    }
+    return keys;
+  }, [existingNodes]);
+
+  const handleConfirmCreateMany = async (
+    messageId: string,
+    nodes: Partial<StoryNode>[]
+  ): Promise<boolean> => {
+    const ok = await onCreateNodes(nodes);
+    if (ok) {
+      const capturedScope = activeScopeRef.current;
+      setChatState((prev) =>
+        prev.scopeKey === capturedScope
+          ? {
+            ...prev,
+            messages: prev.messages.map((m) =>
+              m.id === messageId ? { ...m, nodesAdded: true } : m
+            ),
+          }
+          : prev
+      );
+      if (capturedScope) {
+        void AsyncStorage.getItem(capturedScope)
+          .then((raw) => {
+            if (!raw) return;
+            const parsed = JSON.parse(raw);
+            if (parsed && Array.isArray(parsed.messages)) {
+              parsed.messages = parsed.messages.map((m: AIChatMessage) =>
+                m.id === messageId ? { ...m, nodesAdded: true } : m
+              );
+              return AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
+            }
+          })
+          .catch(() => {
+            // Không chặn luồng chính nếu cập nhật cờ cache local thất bại
+          });
+      }
+    }
+    return ok;
   };
 
   if (!visible) return null;
@@ -1694,8 +1742,9 @@ export default function AIChatPanel({
           <MessageBubble
             key={msg.id}
             message={msg}
+            existingFullNodeKeys={existingFullNodeKeys}
             onConfirmCreate={handleConfirmCreate}
-            onConfirmCreateMany={onCreateNodes}
+            onConfirmCreateMany={(nodes) => handleConfirmCreateMany(msg.id, nodes)}
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
             onUseSuggestedPrompt={(prompt) => setInputText(prompt)}
@@ -1736,7 +1785,7 @@ export default function AIChatPanel({
             style={[
               styles.sendBtn,
               (!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing) &&
-                styles.sendBtnDisabled,
+              styles.sendBtnDisabled,
             ]}
             onPress={handleSend}
             disabled={!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing}>
@@ -1768,6 +1817,7 @@ export default function AIChatPanel({
 
 function MessageBubble({
   message,
+  existingFullNodeKeys,
   onConfirmCreate,
   onConfirmCreateMany,
   onRetry,
@@ -1777,6 +1827,7 @@ function MessageBubble({
   isLoading,
 }: {
   message: AIChatMessage;
+  existingFullNodeKeys: Set<string>;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
   onConfirmCreateMany: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
   onRetry?: () => void;
@@ -1787,15 +1838,26 @@ function MessageBubble({
 }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
-  const [isAddingNodes, setIsAddingNodes] = useState(false);
-  const [nodesAdded, setNodesAdded] = useState(false);
-  const isAddingRef = useRef(false);
-  const hasAddedRef = useRef(false);
   const nodeDataList = message.nodeDataList?.length
     ? message.nodeDataList
     : message.nodeData
       ? [message.nodeData]
       : [];
+  const allNodesAlreadyInGraph =
+    nodeDataList.length > 0 &&
+    nodeDataList.every((n) => {
+      const t = n.type || 'character';
+      const name = (n.name || '').trim().toLocaleLowerCase('vi');
+      return Boolean(name) && existingFullNodeKeys.has(`${t}::${name}`);
+    });
+  const [isAddingNodes, setIsAddingNodes] = useState(false);
+  const [localNodesAdded, setLocalNodesAdded] = useState(Boolean(message.nodesAdded));
+  const nodesAdded = Boolean(message.nodesAdded) || localNodesAdded || allNodesAlreadyInGraph;
+  const isAddingRef = useRef(false);
+  const hasAddedRef = useRef(nodesAdded);
+  if (nodesAdded) {
+    hasAddedRef.current = true;
+  }
 
   const handleAddAllNodes = async () => {
     if (isAddingRef.current || hasAddedRef.current || isAddingNodes || nodesAdded) return;
@@ -1805,7 +1867,7 @@ function MessageBubble({
       const ok = await onConfirmCreateMany(nodeDataList);
       if (ok) {
         hasAddedRef.current = true;
-        setNodesAdded(true);
+        setLocalNodesAdded(true);
       }
     } catch (error) {
       console.error('[AIChatPanel] Không thể thêm nhóm node:', error);
@@ -1830,7 +1892,7 @@ function MessageBubble({
           isSystem && styles.bubbleSystem,
         ]}>
         <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser, isSystem && styles.bubbleTextSystem]}>
-            {message.content}
+          {message.content}
         </Text>
 
         {isUser && onCopy && (
