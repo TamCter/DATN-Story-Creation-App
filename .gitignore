@@ -17,3 +17,8 @@ npm-debug.log*
 Thumbs.db
 .vscode/
 .idea/
+
+# Spec-Kit
+.specify/
+.agents/skills/speckit-*/
+specs/
