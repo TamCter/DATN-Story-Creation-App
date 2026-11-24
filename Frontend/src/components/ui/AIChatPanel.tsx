@@ -356,18 +356,30 @@ export default function AIChatPanel({
         let nextMessages: AIChatMessage[];
         if (typeof nextMessagesInput === 'function') {
           let baseMessages: AIChatMessage[] | null = null;
+          let rejectedPendingClearBase = false;
           try {
             const rawStored = await AsyncStorage.getItem(targetScopeKey);
             if (rawStored) {
               const parsedStored = JSON.parse(rawStored);
               if (parsedStored && Array.isArray(parsedStored.messages)) {
-                baseMessages = parsedStored.messages as AIChatMessage[];
+                if (
+                  supersededClearMarker?.localPending &&
+                  parsedStored.replacedClearId !== supersededClearMarker.clearId
+                ) {
+                  rejectedPendingClearBase = true;
+                } else {
+                  baseMessages = parsedStored.messages as AIChatMessage[];
+                }
               }
             }
           } catch {
             // Fallback sang state hiện tại nếu không đọc được cache
           }
-          if (!baseMessages && chatStateRef.current.scopeKey === targetScopeKey) {
+          if (
+            !baseMessages &&
+            !rejectedPendingClearBase &&
+            chatStateRef.current.scopeKey === targetScopeKey
+          ) {
             baseMessages = chatStateRef.current.messages;
           }
           if (!baseMessages) {
@@ -1279,11 +1291,13 @@ export default function AIChatPanel({
           suggestedPrompt: res.data.suggestedPrompt || null,
           timestamp: Date.now(),
         };
-        const nextHistory = [...currentHistory, aiMsg];
         bumpRevision(capturedScope);
         setChatState((prev) => ({
           scopeKey: capturedScope,
-          messages: nextHistory,
+          messages:
+            prev.scopeKey === capturedScope
+              ? [...prev.messages, aiMsg]
+              : [...currentHistory, aiMsg],
           loaded: true,
           baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
         }));
@@ -1294,7 +1308,7 @@ export default function AIChatPanel({
           capturedServerRev,
           capturedProjectId,
           capturedUserId,
-          nextHistory,
+          (latestMessages) => [...latestMessages, aiMsg],
           turnRevision
         );
         scrollToBottom();
@@ -1315,11 +1329,13 @@ export default function AIChatPanel({
         timestamp: Date.now(),
         canRetry: true,
       };
-      const nextHistory = [...currentHistory, errMsg];
       bumpRevision(capturedScope);
       setChatState((prev) => ({
         scopeKey: capturedScope,
-        messages: nextHistory,
+        messages:
+          prev.scopeKey === capturedScope
+            ? [...prev.messages, errMsg]
+            : [...currentHistory, errMsg],
         loaded: true,
         baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
       }));
@@ -1330,7 +1346,7 @@ export default function AIChatPanel({
         capturedServerRev,
         capturedProjectId,
         capturedUserId,
-        nextHistory,
+        (latestMessages) => [...latestMessages, errMsg],
         turnRevision
       );
       scrollToBottom();
@@ -1667,10 +1683,14 @@ export default function AIChatPanel({
           capturedServerRev,
           capturedProjectId,
           capturedUserId,
-          (latestMessages) =>
-            latestMessages.map((m) =>
+          (latestMessages) => {
+            if (!latestMessages.some((m) => m.id === messageId)) {
+              return null;
+            }
+            return latestMessages.map((m) =>
               m.id === messageId ? { ...m, nodesAdded: true } : m
-            ),
+            );
+          },
           turnRevision
         );
       }
