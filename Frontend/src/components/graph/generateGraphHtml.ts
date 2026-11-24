@@ -490,9 +490,9 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
           } else if (typeof val === 'string' && val.trim()) {
             try {
               var parsed = JSON.parse(val);
-              list = Array.isArray(parsed) ? parsed : val.split(/[,;\n]+/);
+              list = Array.isArray(parsed) ? parsed : val.split(/[,;\\n]+/);
             } catch (err) {
-              list = val.split(/[,;\n]+/);
+              list = val.split(/[,;\\n]+/);
             }
           }
           var set = new Set();
