@@ -839,6 +839,7 @@ export default function AIChatPanel({
             const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
             if (existingSnap && existingSnap.replacedClearId === latestMarker.clearId) {
               // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> giữ nguyên snapshot và hoàn tất cờ localPending
+              workingHistoryByScopeRef.current.set(targetScope, existingSnap.messages);
               if (latestMarker.serverPending) {
                 clearMarker = { ...latestMarker, localPending: false };
                 await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
@@ -850,6 +851,7 @@ export default function AIChatPanel({
               localCleanupPending = true;
               try {
                 await AsyncStorage.removeItem(targetScope);
+                workingHistoryByScopeRef.current.delete(targetScope);
                 localCleanupPending = false;
                 if (latestMarker.serverPending) {
                   clearMarker = { ...latestMarker, localPending: false };
@@ -1012,6 +1014,7 @@ export default function AIChatPanel({
                     } satisfies StoredChatPayload)
                   ).catch(() => undefined);
                   if (!isStillCurrent()) return;
+                  workingHistoryByScopeRef.current.set(targetScope, localPayload.messages);
                   setChatState({
                     scopeKey: targetScope,
                     messages: localPayload.messages,
@@ -1024,6 +1027,7 @@ export default function AIChatPanel({
 
                 // Nếu bản server ở cùng revision đã xác nhận và đang là bản rút gọn, giữ nguyên bản đầy đủ cục bộ
                 if (localHasFullOfTruncatedServer && remoteRevision === localServerRevision) {
+                  workingHistoryByScopeRef.current.set(targetScope, localPayload!.messages);
                   setChatState({
                     scopeKey: targetScope,
                     messages: localPayload!.messages,
@@ -1045,6 +1049,7 @@ export default function AIChatPanel({
                     } satisfies StoredChatPayload)
                   ).catch(() => undefined);
                   if (!isStillCurrent()) return;
+                  workingHistoryByScopeRef.current.set(targetScope, remoteMsgs);
                   setChatState({
                     scopeKey: targetScope,
                     messages: remoteMsgs,
@@ -1101,6 +1106,7 @@ export default function AIChatPanel({
                 await enqueueScopedWrite(targetScope, async () => {
                   if (!isStillCurrent()) return;
                   await AsyncStorage.removeItem(targetScope).catch(() => undefined);
+                  workingHistoryByScopeRef.current.delete(targetScope);
                   if (remoteRevision > 0) {
                     await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
                   }
