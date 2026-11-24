@@ -479,14 +479,77 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
           }
         }
 
-        // Active node neighbors set
+        // Active node neighbors set + highlight chuỗi Vật phẩm/Tổ chức qua Nhân vật tham gia khi chọn Sự kiện
         var connectedSet = new Set();
+        var highlightedEdgeIds = new Set();
+
+        function parseNameList(val) {
+          var list = [];
+          if (Array.isArray(val)) {
+            list = val;
+          } else if (typeof val === 'string' && val.trim()) {
+            try {
+              var parsed = JSON.parse(val);
+              list = Array.isArray(parsed) ? parsed : val.split(/[,;\n]+/);
+            } catch (err) {
+              list = val.split(/[,;\n]+/);
+            }
+          }
+          var set = new Set();
+          for (var k = 0; k < list.length; k++) {
+            var cleaned = String(list[k] || '').trim().toLowerCase();
+            if (cleaned) set.add(cleaned);
+          }
+          return set;
+        }
+
         if (selectedId) {
           connectedSet.add(selectedId);
           for (var eIdx = 0; eIdx < edges.length; eIdx++) {
             var e = edges[eIdx];
-            if (e.source === selectedId) connectedSet.add(e.target);
-            if (e.target === selectedId) connectedSet.add(e.source);
+            if (e.source === selectedId) {
+              connectedSet.add(e.target);
+              highlightedEdgeIds.add(e.id);
+            } else if (e.target === selectedId) {
+              connectedSet.add(e.source);
+              highlightedEdgeIds.add(e.id);
+            }
+          }
+
+          // Nếu đang chọn node Sự kiện: làm nổi bật chuỗi Z <--Sở hữu-- A --Tham gia--> Y và F <--Tổ chức-- A --Tham gia--> Y
+          var selectedNodeObj = nodeMap[selectedId];
+          if (selectedNodeObj && selectedNodeObj.type === 'event' && selectedNodeObj.raw) {
+            var eventItemNames = parseNameList(selectedNodeObj.raw.itemsInvolved);
+            var eventFactionNames = parseNameList(selectedNodeObj.raw.factionsInvolved);
+            if (eventItemNames.size > 0 || eventFactionNames.size > 0) {
+              var participantIds = new Set();
+              connectedSet.forEach(function(nid) {
+                var neighbor = nodeMap[nid];
+                if (neighbor && neighbor.type === 'character') {
+                  participantIds.add(nid);
+                }
+              });
+
+              for (var rIdx = 0; rIdx < edges.length; rIdx++) {
+                var relEdge = edges[rIdx];
+                var srcIsChar = participantIds.has(relEdge.source);
+                var tgtIsChar = participantIds.has(relEdge.target);
+                if (!srcIsChar && !tgtIsChar) continue;
+
+                var otherId = srcIsChar ? relEdge.target : relEdge.source;
+                var otherNode = nodeMap[otherId];
+                if (!otherNode) continue;
+                var otherNameLower = String(otherNode.name || '').trim().toLowerCase();
+
+                if (
+                  (otherNode.type === 'item' && eventItemNames.has(otherNameLower)) ||
+                  (otherNode.type === 'faction' && eventFactionNames.has(otherNameLower))
+                ) {
+                  connectedSet.add(otherId);
+                  highlightedEdgeIds.add(relEdge.id);
+                }
+              }
+            }
           }
         }
 
@@ -502,7 +565,7 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
             continue;
           }
 
-          var isEdgeConnected = selectedId && (edge.source === selectedId || edge.target === selectedId);
+          var isEdgeConnected = selectedId && highlightedEdgeIds.has(edge.id);
           var isDimmed = selectedId && !isEdgeConnected;
 
           var p1 = worldToScreen(src.x, src.y);

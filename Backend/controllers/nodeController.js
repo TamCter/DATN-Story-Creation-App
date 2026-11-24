@@ -1165,102 +1165,14 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         revision: nodeData._participantSyncRevision || null,
       });
 
-      // 5.3 Vật phẩm liên quan -> Item (INVOLVES_ITEM)
-      const itemNames = Array.from(
-        new Set(
-          parseParticipantNames(nodeData.itemsInvolved)
-            .map((s) => cleanRelationalValue(s))
-            .filter(Boolean)
-        )
-      );
-      const itemIds = [];
-      for (const itemName of itemNames) {
-        const itemId = await findOrCreateProjectEntity(projectId, itemName, 'item', {
-          role: 'VẬT PHẨM',
-          rarity: 'Hiếm',
-          status: 'Nguyên vẹn',
-          desc: `Vật phẩm xuất hiện trong sự kiện ${nodeName}`,
-        });
-        itemIds.push(itemId);
-      }
+      // 5.3 & 5.4 Vật phẩm & Tổ chức liên quan của sự kiện được nối qua Nhân vật tham gia
+      // (Z <--Sở hữu-- A --Tham gia--> Y và F <--Tổ chức-- A --Tham gia--> Y),
+      // nên dọn sạch các cạnh trực tiếp INVOLVES_ITEM / INVOLVES_FACTION cũ nếu có.
       await runQuery(`
-        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
-        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
-        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
-        OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_ITEM' }]->(it:StoryNode)
-        WHERE isCurrent AND NOT (it.id IN $itemIds)
-        WITH ev, isCurrent, collect(old) AS staleLinks
-        FOREACH (staleLink IN staleLinks | DELETE staleLink)
-        OPTIONAL MATCH (itemNode:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
-        WHERE isCurrent AND itemNode.id IN $itemIds
-        WITH ev, isCurrent, collect(itemNode) AS targetItems
-        FOREACH (targetItem IN targetItems |
-          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_ITEM' }]->(targetItem)
-          ON CREATE SET r.id = 'link-' + ev.id + '-' + targetItem.id + '-item',
-                        r.label = 'Liên quan vật phẩm',
-                        r.type = 'dashed',
-                        r.tone = 'possession',
-                        r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Liên quan vật phẩm',
-                       r.updatedAt = timestamp()
-        )
-        REMOVE ev._participantSyncLock
-        RETURN isCurrent
-      `, {
-        nodeId,
-        projectId,
-        itemIds,
-        revision: nodeData._participantSyncRevision || null,
-      });
-
-      // 5.4 Tổ chức / Phe phái liên quan -> Faction (INVOLVES_FACTION)
-      const factionNames = Array.from(
-        new Set(
-          parseParticipantNames(nodeData.factionsInvolved)
-            .map((s) => cleanRelationalValue(s))
-            .filter(Boolean)
-        )
-      );
-      const factionIds = [];
-      for (const facName of factionNames) {
-        const facId = await findOrCreateProjectEntity(projectId, facName, 'faction', {
-          role: 'TỔ CHỨC',
-          subType: 'Trung lập',
-          alignment: 'TRUNG LẬP',
-          status: 'Đang hoạt động',
-          desc: `Tổ chức liên quan tới sự kiện ${nodeName}`,
-        });
-        factionIds.push(facId);
-      }
-      await runQuery(`
-        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
-        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
-        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
-        OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_FACTION' }]->(fac:StoryNode)
-        WHERE isCurrent AND NOT (fac.id IN $factionIds)
-        WITH ev, isCurrent, collect(old) AS staleLinks
-        FOREACH (staleLink IN staleLinks | DELETE staleLink)
-        OPTIONAL MATCH (facNode:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
-        WHERE isCurrent AND facNode.id IN $factionIds
-        WITH ev, isCurrent, collect(facNode) AS targetFactions
-        FOREACH (targetFac IN targetFactions |
-          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_FACTION' }]->(targetFac)
-          ON CREATE SET r.id = 'link-' + ev.id + '-' + targetFac.id + '-faction',
-                        r.label = 'Liên quan tổ chức',
-                        r.type = 'dashed',
-                        r.tone = 'sect',
-                        r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Liên quan tổ chức',
-                       r.updatedAt = timestamp()
-        )
-        REMOVE ev._participantSyncLock
-        RETURN isCurrent
-      `, {
-        nodeId,
-        projectId,
-        factionIds,
-        revision: nodeData._participantSyncRevision || null,
-      });
+        MATCH (ev:StoryNode { id: $nodeId })-[old:RELATES_TO]->(:StoryNode)
+        WHERE old.category IN ['INVOLVES_ITEM', 'INVOLVES_FACTION']
+        DELETE old
+      `, { nodeId });
 
       // 5.5 Nhân quả giữa các sự kiện -> Event (CAUSED_BY, chỉ nối nếu khớp tên/ID một Event đã tồn tại)
       const causeText = cleanRelationalValue(nodeData.cause);

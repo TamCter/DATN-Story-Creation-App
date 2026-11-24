@@ -55,8 +55,10 @@ Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j t�
 - Tổ chức có trụ sở tại / cai quản địa điểm: điền tên địa điểm vào faction.headquarters (HEADQUARTERS) và tên tổ chức vào location.ruler (RULER_OF).
 - Nhân vật tham gia sự kiện: điền danh sách tên nhân vật (phân tách bằng dấu phẩy trong chuỗi) vào event.charactersInvolved (PARTICIPATED_IN).
 - Sự kiện diễn ra tại địa điểm: điền tên địa điểm vào event.location (EVENT_LOCATION).
-- Sự kiện liên quan vật phẩm: điền danh sách tên vật phẩm (phân tách bằng dấu phẩy trong chuỗi) vào event.itemsInvolved (INVOLVES_ITEM).
-- Sự kiện liên quan tổ chức: điền danh sách tên tổ chức (phân tách bằng dấu phẩy trong chuỗi) vào event.factionsInvolved (INVOLVES_FACTION).
+- Vật phẩm & Tổ chức trong sự kiện (NỐI QUA NHÂN VẬT THAM GIA): KHÔNG nối trực tiếp tách rời từ Sự kiện sang Vật phẩm/Tổ chức; đồ thị sẽ tự hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện và Tổ chức <--Tổ chức/Lãnh đạo-- Nhân vật --Tham gia--> Sự kiện. Do đó:
+  + Trong event.itemsInvolved, CHỈ điền chính xác tên những vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó (VD: nhân vật A sở hữu Z và X nhưng trong sự kiện Y chỉ cầm Z thì chỉ ghi Z).
+  + Trong event.factionsInvolved, CHỈ điền chính xác tên những tổ chức mà nhân vật tham gia đại diện / liên quan trong sự kiện đó.
+  + Bảo đảm nhân vật tham gia đã có quan hệ Sở hữu vật phẩm (character.weapon / item.holderOrLocation) và Tổ chức (character.sect / faction.leader).
 - Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
 - Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
 
@@ -779,8 +781,8 @@ QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN
 - "charactersInvolved": mảng tên tất cả nhân vật tham gia trực tiếp; ưu tiên dùng chính xác tên nhân vật hiện có ở trên. Nếu tên nhân vật xuất hiện trong tên/mô tả sự kiện thì bắt buộc đưa vào mảng này.
 - "characterRoles": ghi ngắn gọn vai trò từng nhân vật tham gia (VD: "Lăng Tiêu: Chủ động điều tra; Mộc Lan: Hỗ trợ").
 - "location": tên địa điểm cụ thể (ưu tiên địa điểm đã có ở trên) để nối quan hệ Diễn ra tại (EVENT_LOCATION).
-- "itemsInvolved": mảng tên các vật phẩm liên quan/xuất hiện trong sự kiện (ưu tiên tên vật phẩm đã có ở trên, [] nếu không có).
-- "factionsInvolved": mảng tên các tổ chức/phe phái liên quan (ưu tiên tên tổ chức đã có ở trên, [] nếu không có).
+- "itemsInvolved": mảng tên chính xác các vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó (ưu tiên vật phẩm nhân vật đó đang sở hữu ở danh sách trên, [] nếu không dùng vật phẩm nào; đồ thị sẽ nối chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện).
+- "factionsInvolved": mảng tên chính xác các tổ chức/phe phái mà nhân vật tham gia đại diện / liên quan trong sự kiện đó (ưu tiên tổ chức ở danh sách trên, [] nếu không có; đồ thị sẽ nối chuỗi Tổ chức <--Tổ chức-- Nhân vật --Tham gia--> Sự kiện).
 - "cause": nguyên nhân trực tiếp dẫn đến sự kiện (nếu bắt nguồn từ một sự kiện trước đó ở trên, ghi chính xác tên sự kiện đó để nối quan hệ CAUSED_BY).
 - "conflict": xung đột/vấn đề chính diễn ra trong sự kiện.
 - "outcome": kết quả trực tiếp ngay khi sự kiện kết thúc.
@@ -1810,7 +1812,7 @@ Phân loại mức độ severity:
   + Cơ bản & Mạch truyện: "name", "desc", "eventType" (Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác), "importance" (Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ), "arcName", "sequenceOrder" ("1", "2",...).
   + Thời gian & Địa điểm: "time", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
   + Nhân quả & Mâu thuẫn: "cause" (nguyên nhân hoặc tên chính xác sự kiện trước để nối CAUSED_BY), "conflict", "outcome", "consequences", "impact".
-  + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (mảng tên vật phẩm liên quan để nối INVOLVES_ITEM), "factionsInvolved" (mảng tên tổ chức liên quan để nối INVOLVES_FACTION).
+  + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (chỉ liệt kê tên các vật phẩm nhân vật tham gia thực sự mang theo/sử dụng trong sự kiện để hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện), "factionsInvolved" (chỉ liệt kê tên các tổ chức liên quan qua nhân vật tham gia để hiển thị chuỗi Tổ chức <--Tổ chức-- Nhân vật --Tham gia--> Sự kiện).
 - "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
 
 DỮ LIỆU ĐỒ THỊ HIỆN TẠI CỦA DỰ ÁN:

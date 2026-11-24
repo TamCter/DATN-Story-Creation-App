@@ -1194,31 +1194,31 @@ return (
                       showsVerticalScrollIndicator={false}
                       keyboardShouldPersistTaps="handled"
                       contentContainerStyle={{ gap: 14 }}>
-                      {/* Type Selector */}
-                      <View style={styles.modalInputGroup}>
-                        <Text style={styles.modalInputLabel}>Loại phân loại thực thể</Text>
-                        <View style={styles.typeSelectorRow}>
-                          {(
-                            [
-                              'character',
-                              'item',
-                              'location',
-                              'faction',
-                              'event',
-                            ] as const
-                          ).map((t) => (
-                            <Pressable
-                              key={t}
-                              style={[
-                                styles.typeOptionChip,
-                                formType === t && {
-                                  borderColor: NODE_TYPE_CONFIG[t]?.color || '#e5a93c',
-                                  backgroundColor: `${NODE_TYPE_CONFIG[t]?.color || '#e5a93c'}20`,
-                                },
-                              ]}
-                              onPress={() => {
-                                setFormType(t);
-                                if (!isEditingNode) {
+                      {/* Type Selector (chỉ hiển thị khi thêm mới, ẩn khi đang chỉnh sửa node) */}
+                      {!isEditingNode && (
+                        <View style={styles.modalInputGroup}>
+                          <Text style={styles.modalInputLabel}>Loại phân loại thực thể</Text>
+                          <View style={styles.typeSelectorRow}>
+                            {(
+                              [
+                                'character',
+                                'item',
+                                'location',
+                                'faction',
+                                'event',
+                              ] as const
+                            ).map((t) => (
+                              <Pressable
+                                key={t}
+                                style={[
+                                  styles.typeOptionChip,
+                                  formType === t && {
+                                    borderColor: NODE_TYPE_CONFIG[t]?.color || '#e5a93c',
+                                    backgroundColor: `${NODE_TYPE_CONFIG[t]?.color || '#e5a93c'}20`,
+                                  },
+                                ]}
+                                onPress={() => {
+                                  setFormType(t);
                                   setFormId(generateUniqueNodeId(t, nodes));
                                   setFormRole(t === 'character' ? 'CHÍNH DIỆN' : t === 'event' ? 'BIẾN CỐ' : '');
                                   if (t === 'character') {
@@ -1237,20 +1237,20 @@ return (
                                             ? 'Đang hoạt động'
                                             : 'Đã diễn ra'
                                   );
-                                }
-                              }}>
-                              <Text
-                                style={{
-                                  color: NODE_TYPE_CONFIG[t]?.color || '#e5a93c',
-                                  fontSize: 12,
-                                  fontWeight: '600',
                                 }}>
-                                {NODE_TYPE_CONFIG[t]?.symbol} {NODE_TYPE_CONFIG[t]?.label}
-                              </Text>
-                            </Pressable>
-                          ))}
+                                <Text
+                                  style={{
+                                    color: NODE_TYPE_CONFIG[t]?.color || '#e5a93c',
+                                    fontSize: 12,
+                                    fontWeight: '600',
+                                  }}>
+                                  {NODE_TYPE_CONFIG[t]?.symbol} {NODE_TYPE_CONFIG[t]?.label}
+                                </Text>
+                              </Pressable>
+                            ))}
+                          </View>
                         </View>
-                      </View>
+                      )}
 
                       {/* Name Input (Single Clean Input, no Auto Unique ID) */}
                       <View style={styles.modalInputGroup}>

@@ -283,34 +283,10 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(ch.id, node.id, 'PARTICIPATED_IN', 'Tham gia', 'dashed');
     }
 
+    // Vật phẩm & Tổ chức liên quan của sự kiện được hiển thị nối qua Nhân vật tham gia,
+    // nên dọn các cạnh trực tiếp INVOLVES_ITEM / INVOLVES_FACTION cũ nếu còn tồn tại.
     removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_ITEM');
-    const rawItems = parseEventParticipants(node.itemsInvolved)
-      .map((s) => cleanRelationalVal(s))
-      .filter(Boolean);
-    for (const itemName of Array.from(new Set(rawItems))) {
-      const it = findOrAddNode(itemName, 'item', {
-        role: 'VẬT PHẨM',
-        rarity: 'Hiếm',
-        desc: `Vật phẩm xuất hiện trong sự kiện ${node.name}`,
-        status: 'Nguyên vẹn',
-      });
-      ensureLink(node.id, it.id, 'INVOLVES_ITEM', 'Liên quan vật phẩm', 'dashed');
-    }
-
     removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_FACTION');
-    const rawFactions = parseEventParticipants(node.factionsInvolved)
-      .map((s) => cleanRelationalVal(s))
-      .filter(Boolean);
-    for (const facName of Array.from(new Set(rawFactions))) {
-      const fac = findOrAddNode(facName, 'faction', {
-        role: 'TỔ CHỨC',
-        subType: 'Trung lập',
-        alignment: 'TRUNG LẬP',
-        desc: `Tổ chức liên quan tới sự kiện ${node.name}`,
-        status: 'Đang hoạt động',
-      });
-      ensureLink(node.id, fac.id, 'INVOLVES_FACTION', 'Liên quan tổ chức', 'dashed');
-    }
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'CAUSED_BY');
     const causeName = cleanRelationalVal(node.cause);

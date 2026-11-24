@@ -2095,37 +2095,41 @@ export default function TextCheckerScreen() {
             </Text>
             {editingNode && (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
-                <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
-                <View style={styles.typeChipsRow}>
-                  {(['character', 'item', 'location', 'faction'] as EntityType[]).map((t) => {
-                    const meta = ENTITY_TYPE_META[t];
-                    const active = editingNode.type === t;
-                    return (
-                      <Pressable
-                        key={t}
-                        style={[styles.typeChip, active && styles.typeChipActive]}
-                        onPress={() => {
-                          if (editingNode.type === t) return;
-                          setEditingNode({
-                            ...editingNode,
-                            type: t,
-                            status:
-                              t === 'character'
-                                ? 'Còn sống'
-                                : t === 'item'
-                                  ? 'Nguyên vẹn'
-                                  : t === 'faction'
-                                    ? 'Đang hoạt động'
-                                    : 'Hoạt động',
-                          });
-                        }}>
-                        <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
-                          {meta.icon} {meta.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                {isAddingNewNode && (
+                  <>
+                    <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
+                    <View style={styles.typeChipsRow}>
+                      {(['character', 'item', 'location', 'faction'] as EntityType[]).map((t) => {
+                        const meta = ENTITY_TYPE_META[t];
+                        const active = editingNode.type === t;
+                        return (
+                          <Pressable
+                            key={t}
+                            style={[styles.typeChip, active && styles.typeChipActive]}
+                            onPress={() => {
+                              if (editingNode.type === t) return;
+                              setEditingNode({
+                                ...editingNode,
+                                type: t,
+                                status:
+                                  t === 'character'
+                                    ? 'Còn sống'
+                                    : t === 'item'
+                                      ? 'Nguyên vẹn'
+                                      : t === 'faction'
+                                        ? 'Đang hoạt động'
+                                        : 'Hoạt động',
+                              });
+                            }}>
+                            <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
+                              {meta.icon} {meta.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
 
                 <Text style={styles.fieldLabel}>Tên thực thể *</Text>
                 <TextInput
