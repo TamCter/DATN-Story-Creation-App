@@ -95,6 +95,13 @@ Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo no
   {"action":"create_node","node":{...}}
 - Nếu tạo từ 2 đến 3 node, trả về đúng một JSON thuần (không bọc trong \`\`\`json):
   {"action":"create_nodes","nodes":[{...node 1...},{...node 2...}]}
+- NỐI / TẠO QUAN HỆ GIỮA CÁC NODE ĐÃ CÓ SẴN TRONG ĐỒ THỊ:
+  Khi người dùng muốn nối hoặc tạo mối quan hệ giữa 2 thực thể ĐÃ TỒN TẠI trong danh sách "Các thực thể đã có trong đồ thị" (KHÔNG tạo lại node), trả về đúng một JSON thuần:
+  + Tạo 1 quan hệ:
+    {"action":"create_link","link":{"sourceName":"<Tên chính xác node nguồn đã có>","targetName":"<Tên chính xác node đích đã có>","label":"<Nhãn ngắn gọn, VD: Sở hữu / Đồng minh / Thù địch / Tham gia / Thuộc tổ chức / Diễn ra tại>","category":"<OWNS|ALLY|HOSTILE|PARTICIPATED_IN|MEMBER_OF|EVENT_LOCATION|RELATED>","tone":"<loyalty|hostile|possession|sect|event|location>","type":"<solid|dashed>","contextNote":"<Ghi chú ngữ cảnh ngắn gọn>"}}
+  + Tạo nhiều quan hệ (tối đa 5 quan hệ):
+    {"action":"create_links","links":[{...link 1...},{...link 2...}]}
+  + BẮT BUỘC dùng chính xác tên của 2 node đã có trong đồ thị cho sourceName và targetName; không tự tạo node mới khi người dùng chỉ yêu cầu nối quan hệ giữa 2 node có sẵn.
 - Đặt JSON sau phần giới thiệu; không đặt thêm JSON nào khác trong câu trả lời.
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
@@ -249,13 +256,124 @@ function extractCreateNodeResponse(responseText) {
 }
 
 /**
+ * Extracts and validates link creation JSON (create_link / create_links) between existing nodes.
+ */
+function extractCreateLinkResponse(responseText, existingNodes = []) {
+  const validNodes = Array.isArray(existingNodes)
+    ? existingNodes.filter((n) => n && n.id && n.name)
+    : [];
+  if (validNodes.length < 2) return null;
+
+  const nodeById = new Map();
+  const nodeByNameLower = new Map();
+  for (const n of validNodes) {
+    nodeById.set(String(n.id), n);
+    nodeByNameLower.set(String(n.name).trim().toLocaleLowerCase('vi'), n);
+  }
+
+  const resolveNode = (idOrName) => {
+    if (typeof idOrName !== 'string') return null;
+    const trimmed = idOrName.trim();
+    if (!trimmed) return null;
+    return nodeById.get(trimmed) || nodeByNameLower.get(trimmed.toLocaleLowerCase('vi')) || null;
+  };
+
+  const VALID_TONES = new Set(['loyalty', 'hostile', 'possession', 'sect', 'event', 'location']);
+
+  for (let start = 0; start < responseText.length; start += 1) {
+    if (responseText[start] !== '{') continue;
+
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+
+    for (let end = start; end < responseText.length; end += 1) {
+      const character = responseText[end];
+
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === '\\') {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+
+      if (character === '"') {
+        inString = true;
+      } else if (character === '{') {
+        depth += 1;
+      } else if (character === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            const parsed = JSON.parse(responseText.slice(start, end + 1));
+            const rawLinks = parsed.action === 'create_link'
+              ? [parsed.link]
+              : parsed.action === 'create_links'
+                ? parsed.links
+                : null;
+
+            if (Array.isArray(rawLinks) && rawLinks.length > 0) {
+              const seenKeys = new Set();
+              const resolvedLinks = [];
+              for (const rawLink of rawLinks.slice(0, 5)) {
+                if (!rawLink || typeof rawLink !== 'object' || Array.isArray(rawLink)) continue;
+                const srcNode = resolveNode(rawLink.source || rawLink.sourceName);
+                const tgtNode = resolveNode(rawLink.target || rawLink.targetName);
+                if (!srcNode || !tgtNode || String(srcNode.id) === String(tgtNode.id)) continue;
+
+                const label = typeof rawLink.label === 'string' && rawLink.label.trim()
+                  ? rawLink.label.trim()
+                  : 'Liên kết';
+                const dedupKey = `${srcNode.id}::${tgtNode.id}::${label.toLocaleLowerCase('vi')}`;
+                if (seenKeys.has(dedupKey)) continue;
+                seenKeys.add(dedupKey);
+
+                const rawTone = typeof rawLink.tone === 'string' ? rawLink.tone.trim().toLowerCase() : '';
+                resolvedLinks.push({
+                  source: String(srcNode.id),
+                  target: String(tgtNode.id),
+                  sourceName: String(srcNode.name),
+                  targetName: String(tgtNode.name),
+                  label,
+                  category: typeof rawLink.category === 'string' ? rawLink.category.trim() : 'RELATED',
+                  tone: VALID_TONES.has(rawTone) ? rawTone : 'loyalty',
+                  type: rawLink.type === 'dashed' ? 'dashed' : 'solid',
+                  contextNote: typeof rawLink.contextNote === 'string' ? rawLink.contextNote.trim() : '',
+                });
+              }
+
+              if (resolvedLinks.length > 0) {
+                return { linkDataList: resolvedLinks, start, end: end + 1 };
+              }
+            }
+          } catch {
+            // Ignore braces that are not a valid link JSON payload.
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Determines whether the latest user turn explicitly requests story nodes.
  */
 function getNodeCreationRequest(messages) {
+  const linkIntentPattern = /(?<![\p{L}\p{N}])(?:quan hệ|mối quan hệ|liên kết|nối|kết nối|link|relation)(?![\p{L}\p{N}])/iu;
   const creationIntentPattern = /(?<![\p{L}\p{N}])(?:tạo|thêm|generate|create|add)(?![\p{L}\p{N}])/iu;
   const nodeTopicPattern = /(?<![\p{L}\p{N}])(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức(?!\s+(?:một|các|những|buổi|sự kiện|hoạt động|cuộc họp|chương trình|lễ))|nhóm|phe phái|sự kiện|character|item|location|faction|event)(?![\p{L}\p{N}])/iu;
   const latestUserIndex = messages.map((message) => message.role === 'user').lastIndexOf(true);
   const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex].content || '' : '';
+  if (linkIntentPattern.test(latestUserMessage)) {
+    return { wantsNodes: false, requestedCount: 1 };
+  }
 
   const previousAssistantIndex = (() => {
     for (let index = latestUserIndex - 1; index >= 0; index -= 1) {
@@ -633,6 +751,7 @@ async function chatWithAI(req, res, next) {
 
     cleanMessage = sanitizeAIChatDisplayText(responseText);
     let suggestedPrompt = null;
+    let linkDataList = [];
     if (nodeResponse) {
       nodeData = nodeResponse.nodeData;
       nodeDataList = nodeResponse.nodeDataList;
@@ -671,6 +790,25 @@ async function chatWithAI(req, res, next) {
         suggestedPrompt = `Tạo tiếp ${nextBatchCount} node còn lại liên kết với ${createdNames || 'các thực thể vừa tạo'}`;
         cleanMessage += `\n\n💡 Mỗi lượt chỉ tạo tối đa ${MAX_NODES_PER_CHAT_TURN} node (còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
       }
+    } else {
+      const linkResponse = extractCreateLinkResponse(responseText, projectContext.nodes);
+      if (linkResponse) {
+        linkDataList = linkResponse.linkDataList;
+        const beforeJson = responseText
+          .slice(0, linkResponse.start)
+          .replace(/```(?:json)?\s*$/i, '')
+          .trim();
+        const afterJson = responseText
+          .slice(linkResponse.end)
+          .replace(/^\s*```/i, '')
+          .trim();
+        cleanMessage = sanitizeAIChatDisplayText(
+          [beforeJson, afterJson].filter(Boolean).join('\n\n')
+        );
+        if (!cleanMessage) {
+          cleanMessage = `🔗 Tôi đã thiết lập ${linkDataList.length > 1 ? `${linkDataList.length} mối quan hệ` : `mối quan hệ "${linkDataList[0].label}"`}. Bạn có thể xem trước và lưu vào đồ thị bên dưới!`;
+        }
+      }
     }
 
     return res.status(200).json({
@@ -679,6 +817,7 @@ async function chatWithAI(req, res, next) {
         message: cleanMessage,
         nodeData,
         nodeDataList,
+        linkDataList,
         suggestedPrompt,
         raw: responseText,
         model: usedModel,

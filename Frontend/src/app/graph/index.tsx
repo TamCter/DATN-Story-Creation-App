@@ -715,6 +715,80 @@ const handleCreateNodesFromAI = async (
   }
 };
 
+const isCreatingAILinksRef = useRef(false);
+
+const handleCreateLinksFromAI = async (
+  linkDataList: Array<{
+    source: string;
+    target: string;
+    sourceName?: string;
+    targetName?: string;
+    label: string;
+    category?: string;
+    tone?: StoryLink['tone'];
+    type?: 'solid' | 'dashed';
+    contextNote?: string;
+  }>
+): Promise<boolean> => {
+  if (isCreatingAILinksRef.current) {
+    return false;
+  }
+  isCreatingAILinksRef.current = true;
+  const createdLinks: StoryLink[] = [];
+
+  try {
+    const initialProject = await projectStore.getProject(currentProject.id);
+    const existingLinksList = initialProject.links || [];
+    const existingKeys = new Set(
+      existingLinksList.map(
+        (l) => `${l.source}::${l.target}::${(l.label || '').trim().toLocaleLowerCase('vi')}`
+      )
+    );
+
+    for (const linkData of linkDataList) {
+      if (!linkData.source || !linkData.target || linkData.source === linkData.target) continue;
+      const label = (linkData.label || 'Liên kết').trim();
+      const key = `${linkData.source}::${linkData.target}::${label.toLocaleLowerCase('vi')}`;
+      if (existingKeys.has(key)) continue;
+      existingKeys.add(key);
+
+      const saved = await projectStore.createLink(currentProject.id, {
+        source: linkData.source,
+        target: linkData.target,
+        label,
+        category: linkData.category || 'RELATED',
+        tone: linkData.tone || 'loyalty',
+        type: linkData.type === 'dashed' ? 'dashed' : 'solid',
+        contextNote: linkData.contextNote || '',
+      });
+      createdLinks.push(saved);
+    }
+
+    const focusLink = createdLinks[createdLinks.length - 1];
+    await refreshGraphData(focusLink?.source ?? null);
+    setAiChatOpen(false);
+    if (focusLink) {
+      setTimeout(() => {
+        graphRef.current?.focusRelation(focusLink.source, focusLink.target);
+      }, 200);
+    }
+    return true;
+  } catch (err: any) {
+    if (createdLinks.length > 0) {
+      await refreshGraphData(createdLinks[createdLinks.length - 1].source);
+    }
+    const message = err?.message || 'Không thể lưu quan hệ vào đồ thị.';
+    if (Platform.OS === 'web') {
+      window.alert(message);
+    } else {
+      Alert.alert('Không thể tạo quan hệ', message);
+    }
+    return false;
+  } finally {
+    isCreatingAILinksRef.current = false;
+  }
+};
+
 // Mở modal chỉnh sửa Node
 const handleOpenEditModal = (node: StoryNode) => {
   setIsEditingNode(true);
@@ -2368,9 +2442,11 @@ return (
                 onClose={() => setAiChatOpen(false)}
                 onCreateNode={handleCreateNodeFromAI}
                 onCreateNodes={handleCreateNodesFromAI}
+                onCreateLinks={handleCreateLinksFromAI}
                 projectId={currentProject.id}
                 projectTitle={currentProject.title}
                 existingNodes={nodes}
+                existingLinks={visibleLinks}
               />
 
       {/* AI Story Generator Modal */}
