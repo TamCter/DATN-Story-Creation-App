@@ -171,21 +171,21 @@ export default function AIStoryGeneratorModal({
       prev.map((ev, idx) =>
         idx === editingEventIndex
           ? {
-              ...ev,
-              name: trimmedName,
-              eventType: editingEventDraft.eventType.trim(),
-              importance: editingEventDraft.importance.trim(),
-              arcName: editingEventDraft.arcName.trim(),
-              sequenceOrder: editingEventDraft.sequenceOrder.trim() || String(idx + 1),
-              time: editingEventDraft.time.trim(),
-              timelineType: editingEventDraft.timelineType.trim() || 'Hiện tại',
-              duration: editingEventDraft.duration.trim(),
-              characterRoles: editingEventDraft.characterRoles.trim(),
-              characterStatusChanges: (ev.characterStatusChanges || []).map((change) => ({
-                ...change,
-                statusEvent: trimmedName,
-              })),
-            }
+            ...ev,
+            name: trimmedName,
+            eventType: editingEventDraft.eventType.trim(),
+            importance: editingEventDraft.importance.trim(),
+            arcName: editingEventDraft.arcName.trim(),
+            sequenceOrder: editingEventDraft.sequenceOrder.trim() || String(idx + 1),
+            time: editingEventDraft.time.trim(),
+            timelineType: editingEventDraft.timelineType.trim() || 'Hiện tại',
+            duration: editingEventDraft.duration.trim(),
+            characterRoles: editingEventDraft.characterRoles.trim(),
+            characterStatusChanges: (ev.characterStatusChanges || []).map((change) => ({
+              ...change,
+              statusEvent: trimmedName,
+            })),
+          }
           : ev
       )
     );
@@ -799,9 +799,6 @@ export default function AIStoryGeneratorModal({
                   <View style={styles.sectionHeaderRow}>
                     <Text style={styles.sectionHeaderTitle}>
                       CÁC SỰ KIỆN TRONG CHƯƠNG ({generatedEvents.length})
-                    </Text>
-                    <Text style={styles.sectionHeaderNote}>
-                      Sẽ được chuyển thành Node sự kiện trên đồ thị
                     </Text>
                   </View>
 
