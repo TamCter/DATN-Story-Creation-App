@@ -315,7 +315,9 @@ export default function AIChatPanel({
       targetServerRevKey: string,
       targetProjectId: string | undefined,
       targetUserId: string | undefined,
-      nextMessages: AIChatMessage[],
+      nextMessagesInput:
+        | AIChatMessage[]
+        | ((latestMessages: AIChatMessage[]) => AIChatMessage[] | null),
       turnRevision: { current: number },
       options?: { expectedLocalScopeRevision?: number; writeId?: string }
     ) => {
@@ -348,6 +350,36 @@ export default function AIChatPanel({
           }
         } catch {
           // Ignore marker read error
+        }
+
+        // Nếu truyền hàm biến đổi, đọc snapshot mới nhất đã tuần tự hóa của chính scope này
+        let nextMessages: AIChatMessage[];
+        if (typeof nextMessagesInput === 'function') {
+          let baseMessages: AIChatMessage[] | null = null;
+          try {
+            const rawStored = await AsyncStorage.getItem(targetScopeKey);
+            if (rawStored) {
+              const parsedStored = JSON.parse(rawStored);
+              if (parsedStored && Array.isArray(parsedStored.messages)) {
+                baseMessages = parsedStored.messages as AIChatMessage[];
+              }
+            }
+          } catch {
+            // Fallback sang state hiện tại nếu không đọc được cache
+          }
+          if (!baseMessages && chatStateRef.current.scopeKey === targetScopeKey) {
+            baseMessages = chatStateRef.current.messages;
+          }
+          if (!baseMessages) {
+            return;
+          }
+          const resolved = nextMessagesInput(baseMessages);
+          if (!resolved) {
+            return;
+          }
+          nextMessages = resolved;
+        } else {
+          nextMessages = nextMessagesInput;
         }
 
         // Nếu tiền nhiệm cục bộ (PUT trước hoặc DELETE vừa hoàn tất) đã được server xác nhận và snapshot này bao gồm tiền nhiệm đó,
@@ -1616,14 +1648,6 @@ export default function AIChatPanel({
     const ok = await onCreateNodes(nodes);
     if (ok) {
       bumpRevision(capturedScope);
-      const latestState = chatStateRef.current;
-      const nextMessagesForScope =
-        latestState.scopeKey === capturedScope
-          ? latestState.messages.map((m) =>
-              m.id === messageId ? { ...m, nodesAdded: true } : m
-            )
-          : null;
-
       setChatState((prev) =>
         prev.scopeKey === capturedScope
           ? {
@@ -1636,36 +1660,19 @@ export default function AIChatPanel({
       );
 
       if (capturedScope) {
-        if (nextMessagesForScope) {
-          void persistMessagesForScope(
-            capturedScope,
-            capturedPendingDelete,
-            capturedLocalCleanup,
-            capturedServerRev,
-            capturedProjectId,
-            capturedUserId,
-            nextMessagesForScope,
-            turnRevision
-          );
-        } else {
-          // Trường hợp người dùng đã chuyển sang scope khác trước khi onCreateNodes xong:
-          // vẫn tuần tự hóa cập nhật cờ trên snapshot của đúng scope khởi tạo.
-          void enqueueScopedWrite(capturedScope, async () => {
-            try {
-              const raw = await AsyncStorage.getItem(capturedScope);
-              if (!raw) return;
-              const parsed = JSON.parse(raw);
-              if (parsed && Array.isArray(parsed.messages)) {
-                parsed.messages = parsed.messages.map((m: AIChatMessage) =>
-                  m.id === messageId ? { ...m, nodesAdded: true } : m
-                );
-                await AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
-              }
-            } catch {
-              // Không chặn luồng chính nếu cập nhật cờ cache local thất bại
-            }
-          });
-        }
+        void persistMessagesForScope(
+          capturedScope,
+          capturedPendingDelete,
+          capturedLocalCleanup,
+          capturedServerRev,
+          capturedProjectId,
+          capturedUserId,
+          (latestMessages) =>
+            latestMessages.map((m) =>
+              m.id === messageId ? { ...m, nodesAdded: true } : m
+            ),
+          turnRevision
+        );
       }
     }
     return ok;
