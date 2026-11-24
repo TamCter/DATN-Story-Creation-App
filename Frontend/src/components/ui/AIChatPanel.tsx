@@ -264,6 +264,7 @@ export default function AIChatPanel({
   const prevVisibleRef = useRef<boolean>(visible);
   const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
   const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const workingHistoryByScopeRef = useRef<Map<string, AIChatMessage[]>>(new Map());
   const clearingScopesRef = useRef<Set<string>>(new Set());
   // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET) kèm opId
   const lastLocalWriteAckRef = useRef<
@@ -277,6 +278,14 @@ export default function AIChatPanel({
   }, []);
 
   useLayoutEffect(() => {
+    const prevScope = activeScopeRef.current;
+    const prevUserId = activeUserIdRef.current;
+    if (prevScope !== storageKey || prevUserId !== user?.id) {
+      workingHistoryByScopeRef.current.delete(prevScope);
+      if (prevUserId !== user?.id) {
+        workingHistoryByScopeRef.current.clear();
+      }
+    }
     activeScopeRef.current = storageKey;
     activeUserIdRef.current = user?.id;
   }, [storageKey, user?.id]);
@@ -352,28 +361,32 @@ export default function AIChatPanel({
           // Ignore marker read error
         }
 
-        // Nếu truyền hàm biến đổi, đọc snapshot mới nhất đã tuần tự hóa của chính scope này
+        // Nếu truyền hàm biến đổi, ưu tiên dùng working history đã tuần tự hóa của scope này
+        // (giữ đủ các lượt ghi đã được chấp nhận kể cả khi ghi AsyncStorage trước đó thất bại)
         let nextMessages: AIChatMessage[];
         if (typeof nextMessagesInput === 'function') {
-          let baseMessages: AIChatMessage[] | null = null;
+          let baseMessages: AIChatMessage[] | null =
+            workingHistoryByScopeRef.current.get(targetScopeKey) || null;
           let rejectedPendingClearBase = false;
-          try {
-            const rawStored = await AsyncStorage.getItem(targetScopeKey);
-            if (rawStored) {
-              const parsedStored = JSON.parse(rawStored);
-              if (parsedStored && Array.isArray(parsedStored.messages)) {
-                if (
-                  supersededClearMarker?.localPending &&
-                  parsedStored.replacedClearId !== supersededClearMarker.clearId
-                ) {
-                  rejectedPendingClearBase = true;
-                } else {
-                  baseMessages = parsedStored.messages as AIChatMessage[];
+          if (!baseMessages) {
+            try {
+              const rawStored = await AsyncStorage.getItem(targetScopeKey);
+              if (rawStored) {
+                const parsedStored = JSON.parse(rawStored);
+                if (parsedStored && Array.isArray(parsedStored.messages)) {
+                  if (
+                    supersededClearMarker?.localPending &&
+                    parsedStored.replacedClearId !== supersededClearMarker.clearId
+                  ) {
+                    rejectedPendingClearBase = true;
+                  } else {
+                    baseMessages = parsedStored.messages as AIChatMessage[];
+                  }
                 }
               }
+            } catch {
+              // Fallback sang state hiện tại nếu không đọc được cache
             }
-          } catch {
-            // Fallback sang state hiện tại nếu không đọc được cache
           }
           if (
             !baseMessages &&
@@ -393,6 +406,7 @@ export default function AIChatPanel({
         } else {
           nextMessages = nextMessagesInput;
         }
+        workingHistoryByScopeRef.current.set(targetScopeKey, nextMessages);
 
         // Nếu tiền nhiệm cục bộ (PUT trước hoặc DELETE vừa hoàn tất) đã được server xác nhận và snapshot này bao gồm tiền nhiệm đó,
         // dùng revision đã xác nhận đó (tuyệt đối không dùng revision chỉ quan sát từ GET)
@@ -1514,6 +1528,7 @@ export default function AIChatPanel({
         return;
       }
 
+      workingHistoryByScopeRef.current.delete(capturedScope);
       bumpRevision(capturedScope);
       // Chỉ vô hiệu hóa generation và đặt lại trạng thái hiển thị/loading khi cuộc hội thoại này vẫn đang mở
       if (activeScopeRef.current === capturedScope) {
@@ -1537,6 +1552,7 @@ export default function AIChatPanel({
         if (currentMarker && currentMarker.opId > clearOpId) {
           return;
         }
+        workingHistoryByScopeRef.current.delete(capturedScope);
 
         // Chốt baseRevision khi tác vụ xóa bắt đầu chạy trong hàng đợi:
         // chỉ nâng theo xác nhận từ thao tác ghi cục bộ liền trước (opId < clearOpId), không dùng revision từ GET.
