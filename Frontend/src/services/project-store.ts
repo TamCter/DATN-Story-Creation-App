@@ -495,11 +495,13 @@ export class ProjectStore {
     const prev = this.localProjectsTails.get(accountId) || Promise.resolve();
     const next = prev.catch(() => {}).then(task);
     this.localProjectsTails.set(accountId, next);
-    void next.finally(() => {
-      if (this.localProjectsTails.get(accountId) === next) {
-        this.localProjectsTails.delete(accountId);
-      }
-    });
+    void next
+      .finally(() => {
+        if (this.localProjectsTails.get(accountId) === next) {
+          this.localProjectsTails.delete(accountId);
+        }
+      })
+      .catch(() => {});
     return next;
   }
 

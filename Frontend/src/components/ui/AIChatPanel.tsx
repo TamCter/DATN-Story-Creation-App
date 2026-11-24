@@ -254,6 +254,8 @@ export default function AIChatPanel({
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
 
   // Quản lý scope đang commit, phiên tài khoản, generation, revision, thứ tự thao tác bền vững và hàng đợi ghi tuần tự
+  const chatStateRef = useRef(chatState);
+  chatStateRef.current = chatState;
   const activeScopeRef = useRef(storageKey);
   const activeUserIdRef = useRef<string | undefined>(user?.id);
   const scopeGenerationRef = useRef(0);
@@ -1613,18 +1615,25 @@ export default function AIChatPanel({
 
     const ok = await onCreateNodes(nodes);
     if (ok) {
-      let nextMessagesForScope: AIChatMessage[] | null = null;
       bumpRevision(capturedScope);
-      setChatState((prev) => {
-        if (prev.scopeKey !== capturedScope) return prev;
-        nextMessagesForScope = prev.messages.map((m) =>
-          m.id === messageId ? { ...m, nodesAdded: true } : m
-        );
-        return {
-          ...prev,
-          messages: nextMessagesForScope,
-        };
-      });
+      const latestState = chatStateRef.current;
+      const nextMessagesForScope =
+        latestState.scopeKey === capturedScope
+          ? latestState.messages.map((m) =>
+              m.id === messageId ? { ...m, nodesAdded: true } : m
+            )
+          : null;
+
+      setChatState((prev) =>
+        prev.scopeKey === capturedScope
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === messageId ? { ...m, nodesAdded: true } : m
+              ),
+            }
+          : prev
+      );
 
       if (capturedScope) {
         if (nextMessagesForScope) {

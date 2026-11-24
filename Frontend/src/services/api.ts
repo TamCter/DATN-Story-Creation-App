@@ -110,7 +110,11 @@ class ApiService {
 
     // AI có thể cần vài lượt để hoàn thiện đủ node; provider có timeout riêng cho từng lượt.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
       console.log(`[API] 📡 ${options.method || 'GET'} ${url}`);
@@ -121,9 +125,12 @@ class ApiService {
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
-      const data = await response.json().catch(() => null);
+      const data = await response.json().catch((parseErr: any) => {
+        if (timedOut || parseErr?.name === 'AbortError') {
+          throw parseErr;
+        }
+        return null;
+      });
 
       if (!response.ok) {
         const errorMsg =
@@ -134,9 +141,7 @@ class ApiService {
 
       return data as T;
     } catch (error: any) {
-      clearTimeout(timeoutId);
-
-      if (error.name === 'AbortError') {
+      if (timedOut || error?.name === 'AbortError') {
         throw new Error(
           `Yêu cầu tới máy chủ bị quá thời gian chờ (${Math.round(timeoutMs / 1000)}s) hoặc đã bị hủy. Vui lòng thử lại.`
         );
@@ -151,6 +156,8 @@ class ApiService {
         );
       }
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
