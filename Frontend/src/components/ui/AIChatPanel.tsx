@@ -188,6 +188,8 @@ export interface AIChatMessage {
   content: string;
   nodeData?: Partial<StoryNode> | null;
   nodeDataList?: Partial<StoryNode>[];
+  nodesAdded?: boolean;
+  suggestedPrompt?: string | null;
   timestamp: number;
   canRetry?: boolean;
 }
@@ -206,7 +208,7 @@ const WELCOME_MSG: AIChatMessage = {
   id: 'welcome',
   role: 'assistant',
   content:
-    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn cũng có thể yêu cầu tạo cùng lúc tối đa 3 thực thể.\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo một nhân vật, một tập hồ sơ và nơi họ gặp nhau"',
+    '✨ Xin chào! Tôi là trợ lý AI sáng tác truyện.\n\nHãy mô tả nhân vật, vật phẩm, địa điểm, tổ chức hoặc sự kiện bạn muốn thêm vào câu chuyện – tôi sẽ gợi ý các chi tiết còn thiếu. Bạn có thể tạo cùng lúc tối đa 3 thực thể mỗi lượt (nếu cần nhiều hơn, tôi sẽ gợi ý prompt để bạn tạo tiếp).\n\nVí dụ: "Tạo một phóng viên điều tra có quá khứ bí ẩn" hoặc "Tạo một nhân vật, một vật phẩm và địa điểm họ gặp nhau"',
   timestamp: Date.now(),
 };
 
@@ -252,6 +254,8 @@ export default function AIChatPanel({
   const slideAnim = useRef(new Animated.Value(visible ? 0 : 400)).current;
 
   // Quản lý scope đang commit, phiên tài khoản, generation, revision, thứ tự thao tác bền vững và hàng đợi ghi tuần tự
+  const chatStateRef = useRef(chatState);
+  chatStateRef.current = chatState;
   const activeScopeRef = useRef(storageKey);
   const activeUserIdRef = useRef<string | undefined>(user?.id);
   const scopeGenerationRef = useRef(0);
@@ -260,6 +264,7 @@ export default function AIChatPanel({
   const prevVisibleRef = useRef<boolean>(visible);
   const scopeRevisionsRef = useRef<Map<string, number>>(new Map());
   const saveQueuesRef = useRef<Map<string, Promise<void>>>(new Map());
+  const workingHistoryByScopeRef = useRef<Map<string, AIChatMessage[]>>(new Map());
   const clearingScopesRef = useRef<Set<string>>(new Set());
   // Lưu revision đã xác nhận bởi chính chuỗi ghi cục bộ (PUT/DELETE, không bao gồm GET) kèm opId
   const lastLocalWriteAckRef = useRef<
@@ -273,6 +278,14 @@ export default function AIChatPanel({
   }, []);
 
   useLayoutEffect(() => {
+    const prevScope = activeScopeRef.current;
+    const prevUserId = activeUserIdRef.current;
+    if (prevScope !== storageKey || prevUserId !== user?.id) {
+      workingHistoryByScopeRef.current.delete(prevScope);
+      if (prevUserId !== user?.id) {
+        workingHistoryByScopeRef.current.clear();
+      }
+    }
     activeScopeRef.current = storageKey;
     activeUserIdRef.current = user?.id;
   }, [storageKey, user?.id]);
@@ -311,7 +324,9 @@ export default function AIChatPanel({
       targetServerRevKey: string,
       targetProjectId: string | undefined,
       targetUserId: string | undefined,
-      nextMessages: AIChatMessage[],
+      nextMessagesInput:
+        | AIChatMessage[]
+        | ((latestMessages: AIChatMessage[]) => AIChatMessage[] | null),
       turnRevision: { current: number },
       options?: { expectedLocalScopeRevision?: number; writeId?: string }
     ) => {
@@ -345,6 +360,53 @@ export default function AIChatPanel({
         } catch {
           // Ignore marker read error
         }
+
+        // Nếu truyền hàm biến đổi, ưu tiên dùng working history đã tuần tự hóa của scope này
+        // (giữ đủ các lượt ghi đã được chấp nhận kể cả khi ghi AsyncStorage trước đó thất bại)
+        let nextMessages: AIChatMessage[];
+        if (typeof nextMessagesInput === 'function') {
+          let baseMessages: AIChatMessage[] | null =
+            workingHistoryByScopeRef.current.get(targetScopeKey) || null;
+          let rejectedPendingClearBase = false;
+          if (!baseMessages) {
+            try {
+              const rawStored = await AsyncStorage.getItem(targetScopeKey);
+              if (rawStored) {
+                const parsedStored = JSON.parse(rawStored);
+                if (parsedStored && Array.isArray(parsedStored.messages)) {
+                  if (
+                    supersededClearMarker?.localPending &&
+                    parsedStored.replacedClearId !== supersededClearMarker.clearId
+                  ) {
+                    rejectedPendingClearBase = true;
+                  } else {
+                    baseMessages = parsedStored.messages as AIChatMessage[];
+                  }
+                }
+              }
+            } catch {
+              // Fallback sang state hiện tại nếu không đọc được cache
+            }
+          }
+          if (
+            !baseMessages &&
+            !rejectedPendingClearBase &&
+            chatStateRef.current.scopeKey === targetScopeKey
+          ) {
+            baseMessages = chatStateRef.current.messages;
+          }
+          if (!baseMessages) {
+            return;
+          }
+          const resolved = nextMessagesInput(baseMessages);
+          if (!resolved) {
+            return;
+          }
+          nextMessages = resolved;
+        } else {
+          nextMessages = nextMessagesInput;
+        }
+        workingHistoryByScopeRef.current.set(targetScopeKey, nextMessages);
 
         // Nếu tiền nhiệm cục bộ (PUT trước hoặc DELETE vừa hoàn tất) đã được server xác nhận và snapshot này bao gồm tiền nhiệm đó,
         // dùng revision đã xác nhận đó (tuyệt đối không dùng revision chỉ quan sát từ GET)
@@ -777,6 +839,7 @@ export default function AIChatPanel({
             const existingSnap = existingRaw ? parseStoredChatPayload(existingRaw) : null;
             if (existingSnap && existingSnap.replacedClearId === latestMarker.clearId) {
               // Snapshot thay thế đã được ghi bền vững gắn với đúng clearId này -> giữ nguyên snapshot và hoàn tất cờ localPending
+              workingHistoryByScopeRef.current.set(targetScope, existingSnap.messages);
               if (latestMarker.serverPending) {
                 clearMarker = { ...latestMarker, localPending: false };
                 await AsyncStorage.setItem(targetLocalCleanup, JSON.stringify(clearMarker)).catch(() => undefined);
@@ -788,6 +851,7 @@ export default function AIChatPanel({
               localCleanupPending = true;
               try {
                 await AsyncStorage.removeItem(targetScope);
+                workingHistoryByScopeRef.current.delete(targetScope);
                 localCleanupPending = false;
                 if (latestMarker.serverPending) {
                   clearMarker = { ...latestMarker, localPending: false };
@@ -920,9 +984,9 @@ export default function AIChatPanel({
           const localHasFullOfTruncatedServer = Boolean(localPayload?.serverTruncated);
           const pendingWriteAlreadyAcked = Boolean(
             hasUnackedLocalChanges &&
-              localPayload?.pendingWriteId &&
-              remoteLastWriteId &&
-              remoteLastWriteId === localPayload.pendingWriteId
+            localPayload?.pendingWriteId &&
+            remoteLastWriteId &&
+            remoteLastWriteId === localPayload.pendingWriteId
           );
 
           if (remoteMsgs.length > 0) {
@@ -950,6 +1014,7 @@ export default function AIChatPanel({
                     } satisfies StoredChatPayload)
                   ).catch(() => undefined);
                   if (!isStillCurrent()) return;
+                  workingHistoryByScopeRef.current.set(targetScope, localPayload.messages);
                   setChatState({
                     scopeKey: targetScope,
                     messages: localPayload.messages,
@@ -962,6 +1027,7 @@ export default function AIChatPanel({
 
                 // Nếu bản server ở cùng revision đã xác nhận và đang là bản rút gọn, giữ nguyên bản đầy đủ cục bộ
                 if (localHasFullOfTruncatedServer && remoteRevision === localServerRevision) {
+                  workingHistoryByScopeRef.current.set(targetScope, localPayload!.messages);
                   setChatState({
                     scopeKey: targetScope,
                     messages: localPayload!.messages,
@@ -983,6 +1049,7 @@ export default function AIChatPanel({
                     } satisfies StoredChatPayload)
                   ).catch(() => undefined);
                   if (!isStillCurrent()) return;
+                  workingHistoryByScopeRef.current.set(targetScope, remoteMsgs);
                   setChatState({
                     scopeKey: targetScope,
                     messages: remoteMsgs,
@@ -1039,6 +1106,7 @@ export default function AIChatPanel({
                 await enqueueScopedWrite(targetScope, async () => {
                   if (!isStillCurrent()) return;
                   await AsyncStorage.removeItem(targetScope).catch(() => undefined);
+                  workingHistoryByScopeRef.current.delete(targetScope);
                   if (remoteRevision > 0) {
                     await AsyncStorage.setItem(targetServerRev, String(remoteRevision)).catch(() => undefined);
                   }
@@ -1240,13 +1308,16 @@ export default function AIChatPanel({
             : res.data.nodeData
               ? [res.data.nodeData]
               : [],
+          suggestedPrompt: res.data.suggestedPrompt || null,
           timestamp: Date.now(),
         };
-        const nextHistory = [...currentHistory, aiMsg];
         bumpRevision(capturedScope);
         setChatState((prev) => ({
           scopeKey: capturedScope,
-          messages: nextHistory,
+          messages:
+            prev.scopeKey === capturedScope
+              ? [...prev.messages, aiMsg]
+              : [...currentHistory, aiMsg],
           loaded: true,
           baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
         }));
@@ -1257,7 +1328,7 @@ export default function AIChatPanel({
           capturedServerRev,
           capturedProjectId,
           capturedUserId,
-          nextHistory,
+          (latestMessages) => [...latestMessages, aiMsg],
           turnRevision
         );
         scrollToBottom();
@@ -1278,11 +1349,13 @@ export default function AIChatPanel({
         timestamp: Date.now(),
         canRetry: true,
       };
-      const nextHistory = [...currentHistory, errMsg];
       bumpRevision(capturedScope);
       setChatState((prev) => ({
         scopeKey: capturedScope,
-        messages: nextHistory,
+        messages:
+          prev.scopeKey === capturedScope
+            ? [...prev.messages, errMsg]
+            : [...currentHistory, errMsg],
         loaded: true,
         baseRevision: prev.scopeKey === capturedScope ? prev.baseRevision : turnRevision.current,
       }));
@@ -1293,7 +1366,7 @@ export default function AIChatPanel({
         capturedServerRev,
         capturedProjectId,
         capturedUserId,
-        nextHistory,
+        (latestMessages) => [...latestMessages, errMsg],
         turnRevision
       );
       scrollToBottom();
@@ -1461,6 +1534,7 @@ export default function AIChatPanel({
         return;
       }
 
+      workingHistoryByScopeRef.current.delete(capturedScope);
       bumpRevision(capturedScope);
       // Chỉ vô hiệu hóa generation và đặt lại trạng thái hiển thị/loading khi cuộc hội thoại này vẫn đang mở
       if (activeScopeRef.current === capturedScope) {
@@ -1484,14 +1558,15 @@ export default function AIChatPanel({
         if (currentMarker && currentMarker.opId > clearOpId) {
           return;
         }
+        workingHistoryByScopeRef.current.delete(capturedScope);
 
         // Chốt baseRevision khi tác vụ xóa bắt đầu chạy trong hàng đợi:
         // chỉ nâng theo xác nhận từ thao tác ghi cục bộ liền trước (opId < clearOpId), không dùng revision từ GET.
         const lastLocalAck = lastLocalWriteAckRef.current.get(capturedScope);
         const resolvedClearBaseRev =
           lastLocalAck &&
-          lastLocalAck.opId < clearOpId &&
-          lastLocalAck.revision > capturedBaseRevision
+            lastLocalAck.opId < clearOpId &&
+            lastLocalAck.revision > capturedBaseRevision
             ? lastLocalAck.revision
             : capturedBaseRevision;
         const resolvedClearRecord: ClearIntentMarker = {
@@ -1582,6 +1657,67 @@ export default function AIChatPanel({
 
   const handleConfirmCreate = (nodeData: Partial<StoryNode>) => {
     onCreateNode(nodeData);
+  };
+
+  const existingFullNodeKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const node of existingNodes) {
+      if (node && node.type && node.name && node.autoCreatedStub !== true) {
+        keys.add(`${node.type}::${node.name.trim().toLocaleLowerCase('vi')}`);
+      }
+    }
+    return keys;
+  }, [existingNodes]);
+
+  const handleConfirmCreateMany = async (
+    messageId: string,
+    nodes: Partial<StoryNode>[]
+  ): Promise<boolean> => {
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const turnRevision = {
+      current: chatState.scopeKey === capturedScope ? chatState.baseRevision : 0,
+    };
+
+    const ok = await onCreateNodes(nodes);
+    if (ok) {
+      bumpRevision(capturedScope);
+      setChatState((prev) =>
+        prev.scopeKey === capturedScope
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === messageId ? { ...m, nodesAdded: true } : m
+              ),
+            }
+          : prev
+      );
+
+      if (capturedScope) {
+        void persistMessagesForScope(
+          capturedScope,
+          capturedPendingDelete,
+          capturedLocalCleanup,
+          capturedServerRev,
+          capturedProjectId,
+          capturedUserId,
+          (latestMessages) => {
+            if (!latestMessages.some((m) => m.id === messageId)) {
+              return null;
+            }
+            return latestMessages.map((m) =>
+              m.id === messageId ? { ...m, nodesAdded: true } : m
+            );
+          },
+          turnRevision
+        );
+      }
+    }
+    return ok;
   };
 
   if (!visible) return null;
@@ -1692,10 +1828,12 @@ export default function AIChatPanel({
           <MessageBubble
             key={msg.id}
             message={msg}
+            existingFullNodeKeys={existingFullNodeKeys}
             onConfirmCreate={handleConfirmCreate}
-            onConfirmCreateMany={onCreateNodes}
+            onConfirmCreateMany={(nodes) => handleConfirmCreateMany(msg.id, nodes)}
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
+            onUseSuggestedPrompt={(prompt) => setInputText(prompt)}
             copied={copiedMessageId === msg.id}
             isLoading={isLoading || isScopeClearing}
           />
@@ -1733,7 +1871,7 @@ export default function AIChatPanel({
             style={[
               styles.sendBtn,
               (!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing) &&
-                styles.sendBtnDisabled,
+              styles.sendBtnDisabled,
             ]}
             onPress={handleSend}
             disabled={!inputText.trim() || isLoading || !isScopeLoaded || isScopeClearing}>
@@ -1765,40 +1903,63 @@ export default function AIChatPanel({
 
 function MessageBubble({
   message,
+  existingFullNodeKeys,
   onConfirmCreate,
   onConfirmCreateMany,
   onRetry,
   onCopy,
+  onUseSuggestedPrompt,
   copied,
   isLoading,
 }: {
   message: AIChatMessage;
+  existingFullNodeKeys: Set<string>;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
   onConfirmCreateMany: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
   onRetry?: () => void;
   onCopy?: (message: AIChatMessage) => void;
+  onUseSuggestedPrompt?: (prompt: string) => void;
   copied?: boolean;
   isLoading?: boolean;
 }) {
   const isUser = message.role === 'user';
   const isSystem = message.role === 'system';
-  const [isAddingNodes, setIsAddingNodes] = useState(false);
-  const [nodesAdded, setNodesAdded] = useState(false);
   const nodeDataList = message.nodeDataList?.length
     ? message.nodeDataList
     : message.nodeData
       ? [message.nodeData]
       : [];
+  const allNodesAlreadyInGraph =
+    nodeDataList.length > 0 &&
+    nodeDataList.every((n) => {
+      const t = n.type || 'character';
+      const name = (n.name || '').trim().toLocaleLowerCase('vi');
+      return Boolean(name) && existingFullNodeKeys.has(`${t}::${name}`);
+    });
+  const [isAddingNodes, setIsAddingNodes] = useState(false);
+  const [localNodesAdded, setLocalNodesAdded] = useState(Boolean(message.nodesAdded));
+  const nodesAdded = Boolean(message.nodesAdded) || localNodesAdded || allNodesAlreadyInGraph;
+  const isAddingRef = useRef(false);
+  const hasAddedRef = useRef(nodesAdded);
+  if (nodesAdded) {
+    hasAddedRef.current = true;
+  }
 
   const handleAddAllNodes = async () => {
-    if (isAddingNodes || nodesAdded) return;
+    if (isAddingRef.current || hasAddedRef.current || isAddingNodes || nodesAdded) return;
+    isAddingRef.current = true;
     setIsAddingNodes(true);
     try {
-      setNodesAdded(await onConfirmCreateMany(nodeDataList));
+      const ok = await onConfirmCreateMany(nodeDataList);
+      if (ok) {
+        hasAddedRef.current = true;
+        setLocalNodesAdded(true);
+      }
     } catch (error) {
       console.error('[AIChatPanel] Không thể thêm nhóm node:', error);
       Alert.alert('Không thể thêm node', 'Đã xảy ra lỗi khi thêm các node vào đồ thị.');
     } finally {
+      isAddingRef.current = false;
       setIsAddingNodes(false);
     }
   };
@@ -1817,7 +1978,7 @@ function MessageBubble({
           isSystem && styles.bubbleSystem,
         ]}>
         <Text style={[styles.bubbleText, isUser && styles.bubbleTextUser, isSystem && styles.bubbleTextSystem]}>
-            {message.content}
+          {message.content}
         </Text>
 
         {isUser && onCopy && (
@@ -1862,13 +2023,19 @@ function MessageBubble({
               <Text style={styles.nodePreviewDesc} numberOfLines={2}>{nodeData.desc}</Text>
             ) : null}
             <Pressable
-              style={styles.createNodeBtn}
-              onPress={() => onConfirmCreate(nodeData)}>
-              <Text style={styles.createNodeBtnText}>+ Xem / chỉnh sửa node</Text>
+              style={[styles.createNodeBtn, (isAddingNodes || nodesAdded) && styles.sendBtnDisabled]}
+              disabled={isAddingNodes || nodesAdded}
+              onPress={() => {
+                if (isAddingRef.current || hasAddedRef.current) return;
+                onConfirmCreate(nodeData);
+              }}>
+              <Text style={styles.createNodeBtnText}>
+                {nodesAdded ? '✓ Đã thêm vào đồ thị' : '+ Xem / chỉnh sửa node'}
+              </Text>
             </Pressable>
           </View>
         ))}
-        {nodeDataList.length > 1 && (
+        {nodeDataList.length >= 1 && (
           <Pressable
             accessibilityRole="button"
             style={[styles.createAllNodesBtn, (isAddingNodes || nodesAdded) && styles.sendBtnDisabled]}
@@ -1878,9 +2045,32 @@ function MessageBubble({
               <ActivityIndicator size="small" color="#12100d" />
             ) : (
               <Text style={styles.createAllNodesBtnText}>
-                {nodesAdded ? '✓ Đã thêm tất cả node' : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
+                {nodesAdded
+                  ? '✓ Đã thêm vào đồ thị'
+                  : nodeDataList.length === 1
+                    ? '＋ Lưu node vào đồ thị'
+                    : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
               </Text>
             )}
+          </Pressable>
+        )}
+        {!isUser && !!message.suggestedPrompt && onUseSuggestedPrompt && (
+          <Pressable
+            accessibilityRole="button"
+            style={[
+              styles.retryBtn,
+              {
+                marginTop: 8,
+                borderColor: 'rgba(229, 169, 60, 0.45)',
+                backgroundColor: 'rgba(229, 169, 60, 0.12)',
+              },
+              isLoading && { opacity: 0.5 },
+            ]}
+            disabled={isLoading}
+            onPress={() => onUseSuggestedPrompt(message.suggestedPrompt!)}>
+            <Text style={[styles.retryBtnText, { color: '#f3d28e' }]}>
+              💡 Dùng gợi ý tạo tiếp: “{message.suggestedPrompt}”
+            </Text>
           </Pressable>
         )}
       </View>

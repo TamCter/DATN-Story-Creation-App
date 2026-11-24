@@ -4,6 +4,7 @@ const { runQuery } = require('../config/neo4j');
 const AIMLAPI_URL = 'https://api.aimlapi.com/v1/chat/completions';
 const AI_PROVIDER_TIMEOUT_MS = 150000;
 const MAX_NODE_GENERATION_ATTEMPTS = 3;
+const MAX_NODES_PER_CHAT_TURN = 3;
 const MAX_CHAT_MESSAGES = 40;
 const MAX_STORED_CHAT_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH = 4000;
@@ -29,6 +30,9 @@ const RELATIONAL_NODE_FIELDS = [
   'chapter',
   'charactersInvolved',
   'characters',
+  'itemsInvolved',
+  'factionsInvolved',
+  'cause',
 ];
 const PLACEHOLDER_VALUE_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
 
@@ -40,32 +44,93 @@ Có 5 loại node:
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
 4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
-5. event (Sự kiện): name, type="event", desc, chapter, time, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), impact, charactersInvolved
+5. event (Sự kiện): name, type="event", desc, chapter, time, timelineType (Hiện tại/Hồi tưởng/Tiên tri / Giấc mơ/Lời kể gián tiếp), duration, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
-QUY TẮC QUAN TRỌNG VỀ CÁC TRƯỜNG LIÊN KẾT / MỐI QUAN HỆ VỚI NODE KHÁC:
-Các trường liên kết gồm: birthplace (Địa điểm), weapon (Vật phẩm), sect (Tổ chức), statusEvent (Sự kiện), origin (Địa điểm), holderOrLocation (Nhân vật), ruler (Tổ chức), leader (Nhân vật), headquarters (Địa điểm), location (Địa điểm).
-- Nếu trong bản đồ node hiện tại của dự án ĐÃ CÓ thực thể phù hợp, hãy dùng chính xác tên của node đó.
-- Nếu thực thể liên quan CHƯA TỒN TẠI trong bản đồ node của dự án, bạn chỉ chọn 1 trong 2 cách:
-  1. TẠO RA NODE MỚI: Đặt tên riêng cụ thể cho thực thể đó (và ưu tiên dùng "create_nodes" để tạo kèm luôn node liên quan đó vào bản đồ, hoặc điền tên cụ thể để hệ thống tự động tạo node mới và nối quan hệ).
-  2. BỎ TRỐNG: Để chuỗi rỗng "" cho trường liên kết đó nếu thực thể không có hoặc chưa cần mối quan hệ đó.
+QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
+Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
+- Nhân vật sở hữu / sử dụng vật phẩm: điền tên vật phẩm vào character.weapon (EQUIPPED) và/hoặc tên nhân vật vào item.holderOrLocation (OWNS).
+- Nhân vật thuộc tổ chức / lãnh đạo tổ chức: điền tên tổ chức vào character.sect (MEMBER_OF) và tên thủ lĩnh vào faction.leader (LEADER_OF).
+- Nhân vật sinh ra tại địa điểm: điền tên địa điểm vào character.birthplace (BIRTHPLACE).
+- Vật phẩm có nguồn gốc từ địa điểm: điền tên địa điểm vào item.origin (ORIGIN).
+- Tổ chức có trụ sở tại / cai quản địa điểm: điền tên địa điểm vào faction.headquarters (HEADQUARTERS) và tên tổ chức vào location.ruler (RULER_OF).
+- Nhân vật tham gia sự kiện: điền danh sách tên nhân vật (phân tách bằng dấu phẩy trong chuỗi) vào event.charactersInvolved (PARTICIPATED_IN).
+- Sự kiện diễn ra tại địa điểm: điền tên địa điểm vào event.location (EVENT_LOCATION).
+- Sự kiện liên quan vật phẩm: điền danh sách tên vật phẩm (phân tách bằng dấu phẩy trong chuỗi) vào event.itemsInvolved (INVOLVES_ITEM).
+- Sự kiện liên quan tổ chức: điền danh sách tên tổ chức (phân tách bằng dấu phẩy trong chuỗi) vào event.factionsInvolved (INVOLVES_FACTION).
+- Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
+- Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
+
+Nguyên tắc điền trường liên kết (RẤT QUAN TRỌNG ĐỂ KHÔNG SINH THÊM NODE ẨN):
+- Chỉ được phép điền tên node ĐÃ CÓ SẴN trong danh sách thực thể hiện tại của dự án, HOẶC tên một node nằm TRONG CHÍNH DANH SÁCH "nodes" mà bạn đang tạo ở lượt trả lời này.
+- TUYỆT ĐỐI KHÔNG tự bịa tên thực thể ngoài danh sách vào các trường liên kết (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location, charactersInvolved, itemsInvolved, factionsInvolved, statusEvent), vì làm vậy sẽ khiến hệ thống tự sinh thêm node thừa ngoài danh sách. Nếu thực thể liên quan chưa có và bạn không tạo nó trong mảng "nodes", hãy để chuỗi rỗng "".
 - TUYỆT ĐỐI KHÔNG điền các chữ giữ chỗ như "không rõ", "chưa rõ", "không xác định", "không có", "trống", "n/a".
+- TUYỆT ĐỐI KHÔNG tạo 2 node trùng nhau (cùng type và cùng name) trong cùng một câu trả lời, và KHÔNG tạo lại node đã có sẵn trong danh sách thực thể hiện có của dự án.
+
+PHẠM VI TẠO NODE & GỢI Ý THEO ĐÚNG LOẠI NODE CHÍNH (BẮT BUỘC):
+Khi người dùng yêu cầu tạo 1 thực thể chính, bạn CHỈ được phép tạo kèm (trong giới hạn tối đa 3 node) và gợi ý prompt tiếp theo xoay quanh ĐÚNG các thực thể có quan hệ trực tiếp với loại node đó, tuyệt đối không lan man sang thực thể không liên quan:
+- Nếu tạo Nhân vật (character): chỉ xoay quanh Nơi sinh (location), Hội / Tổ chức (faction), và N vật phẩm mang theo / sở hữu (item) (cùng sự kiện trạng thái nếu nhân vật đã chết/hồi sinh).
+  + Cách chia lượt chuẩn khi tạo Nhân vật: lượt 1 tạo tối đa 3 node gồm Nhân vật + Nơi sinh (location) + Hội/Tổ chức (faction); trong lời giới thiệu hãy mô tả rõ các vật phẩm nhân vật đó sở hữu (nếu có), và đặt dòng gợi ý prompt tiếp theo để người dùng tạo tiếp các vật phẩm đó gắn với nhân vật vừa tạo (VD: 💡 Gợi ý prompt tiếp theo: "Tạo 2 vật phẩm thuộc sở hữu của <Tên nhân vật>: <Tên vật phẩm 1> và <Tên vật phẩm 2>").
+  + Lưu ý: trường character.weapon chỉ điền nếu vật phẩm đó ĐÃ CÓ trong đồ thị hoặc nằm trong 3 node của lượt này; nếu vật phẩm sẽ tạo ở lượt sau thì để character.weapon = "" ở lượt 1, và ở lượt sau khi tạo vật phẩm sẽ điền item.holderOrLocation = "<Tên nhân vật>" để tự nối quan hệ Sở hữu (OWNS).
+- Nếu tạo Vật phẩm (item): chỉ xoay quanh Người sở hữu (character) và Địa điểm nguồn gốc (location).
+- Nếu tạo Địa điểm (location): chỉ xoay quanh Thế lực / Tổ chức cai quản (faction).
+- Nếu tạo Tổ chức / Hội (faction): chỉ xoay quanh Thủ lĩnh / Người đại diện (character) và Trụ sở / Căn cứ (location).
+- Nếu tạo Sự kiện (event): chỉ xoay quanh Địa điểm diễn ra (location), Nhân vật tham gia (character), Vật phẩm liên quan (item), Tổ chức liên quan (faction) hoặc Sự kiện nguyên nhân trước đó (event). Nếu sự kiện có nhiều hơn 3 thực thể liên quan chưa có, tạo 3 node quan trọng nhất trước rồi gợi ý prompt tạo tiếp các thực thể còn thiếu ở lượt sau.
 
 Khi người dùng mô tả một thực thể hoặc hỏi về việc tạo node, hãy:
-- Chat thân thiện, hỏi thêm thông tin nếu cần
-- Nếu người dùng yêu cầu tạo nhiều node (hoặc tạo 1 node kèm các node liên quan mới), hãy tạo tối đa 3 node trong cùng một lần trả lời.
+- Chat thân thiện, ngắn gọn, đi thẳng vào nội dung; viết VĂN BẢN THUẦN (plain text), TUYỆT ĐỐI KHÔNG dùng ký tự markdown như **in đậm**, *in nghiêng*, ### tiêu đề, hay dấu backtick.
+- KHÔNG viết các câu dẫn kỹ thuật thừa như "Dưới đây là các node mình tạo:", "Dưới đây là JSON:", "Đây là dữ liệu node:".
+- Mỗi lượt trả lời chỉ tạo TỐI ĐA 3 node trong cùng một JSON (nếu người dùng yêu cầu hơn 3 node, hãy tạo 3 node quan trọng nhất trước).
+- GỢI Ý PROMPT KHI CÒN THIẾU NODE: Nếu người dùng yêu cầu nhiều hơn 3 node, HOẶC còn thiếu thực thể liên quan trực tiếp đúng theo PHẠM VI ở trên (VD: nhân vật đã tạo cùng nơi sinh và hội nhưng còn thiếu 1–3 vật phẩm nhân vật đó sở hữu), hãy thêm ở cuối phần giới thiệu (ngoài JSON) một dòng đúng định dạng:
+  💡 Gợi ý prompt tiếp theo: "<1 câu prompt ngắn gọn, cụ thể xoay quanh đúng các thực thể liên quan còn thiếu>"
+- Trước khi tạo, luôn đối chiếu kỹ danh sách "Các thực thể đã có trong đồ thị" bên dưới để tránh tạo trùng tên và tận dụng đúng tên thực thể sẵn có cho các trường quan hệ.
 - Mỗi node phải có đầy đủ các trường thông tin cơ bản theo loại:
   character: name, type, role, desc, gender, dob, birthplace, weapon, sect, personality, status
   item: name, type, desc, rarity, origin, element, holderOrLocation
   location: name, type, desc, region, climate, terrain, dangerLevel, ruler
   faction: name, type, desc, subType, alignment, status, leader, headquarters, motto
-  event: name, type, desc, chapter, time, location, status, impact
-- Mọi trường phải là chuỗi vô hướng, không dùng object/array. Nếu tạo một node, trả về đúng một JSON:
+  event: name, type, desc, chapter, time, timelineType, duration, location, status, eventType, importance, arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
+- Mọi trường phải là chuỗi vô hướng (danh sách nhiều tên như charactersInvolved, itemsInvolved, factionsInvolved viết thành chuỗi phân tách bằng dấu phẩy, không dùng object/array). Nếu tạo một node, trả về đúng một JSON thuần (không bọc trong \`\`\`json):
   {"action":"create_node","node":{...}}
-- Nếu tạo từ 2 đến 3 node, trả về đúng một JSON:
+- Nếu tạo từ 2 đến 3 node, trả về đúng một JSON thuần (không bọc trong \`\`\`json):
   {"action":"create_nodes","nodes":[{...node 1...},{...node 2...}]}
 - Đặt JSON sau phần giới thiệu; không đặt thêm JSON nào khác trong câu trả lời.
 - Nếu chỉ đang trò chuyện/hỏi ý kiến thì không cần trả về JSON
 - Trả lời bằng tiếng Việt`;
+
+/**
+ * Làm sạch văn bản hiển thị trong AI Chat: bỏ code fence rỗng, câu dẫn JSON thừa và ký tự markdown.
+ */
+function sanitizeAIChatDisplayText(rawText) {
+  if (typeof rawText !== 'string') return '';
+
+  let cleaned = rawText
+    // Xóa mọi khối code fence rỗng hoặc fence json còn sót lại sau khi đã cắt JSON
+    .replace(/```(?:json)?\s*```/gi, '')
+    .replace(/```(?:json)?\s*$/gim, '')
+    .replace(/^\s*```(?:json)?\s*$/gim, '');
+
+  // Xóa các câu dẫn kỹ thuật thừa như "Dưới đây là các node mình tạo:", "Đây là JSON:"
+  cleaned = cleaned.replace(
+    /^\s*(?:dưới đây|sau đây|đây)\s+là\s+[^\n]*(?:node|thực thể|json|dữ liệu|cấu trúc)[^\n]*:?\s*$/gim,
+    ''
+  );
+  cleaned = cleaned.replace(/^\s*(?:json|dữ liệu json)\s*:?\s*$/gim, '');
+
+  // Bóc ký tự markdown in đậm / in nghiêng / heading / inline code
+  cleaned = cleaned
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/\*\*([^*\n]+)\*\*/g, '$1')
+    .replace(/__([^_\n]+)__/g, '$1')
+    .replace(/`([^`\n]+)`/g, '$1')
+    .replace(/^\s*\*\s+/gm, '- ')
+    .replace(/(^|[\s(])\*([^*\n]+)\*(?=[\s).,!?:;]|$)/g, '$1$2')
+    .replace(/\*\*/g, '');
+
+  return cleaned
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
 
 /**
  * Extracts and validates node creation JSON from a model response.
@@ -107,7 +172,7 @@ function extractCreateNodeResponse(responseText) {
                 ? parsed.nodes
                 : null;
 
-            if (Array.isArray(rawNodes) && rawNodes.length > 0 && rawNodes.length <= 3) {
+            if (Array.isArray(rawNodes) && rawNodes.length > 0) {
               const sanitizeNode = (node) => {
                 if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
                 const copy = { ...node };
@@ -119,10 +184,14 @@ function extractCreateNodeResponse(responseText) {
                     copy[relField] = PLACEHOLDER_VALUE_PATTERN.test(trimmed) ? '' : trimmed;
                   }
                 }
+                if (typeof copy.sequenceOrder === 'number' && Number.isFinite(copy.sequenceOrder)) {
+                  copy.sequenceOrder = String(copy.sequenceOrder);
+                }
                 return copy;
               };
 
-              const nodes = rawNodes.map(sanitizeNode);
+              const NON_STRING_NODE_FIELDS = new Set(['x', 'y', 'autoCreatedStub']);
+              const sanitizedNodes = rawNodes.map(sanitizeNode);
               const isCompleteNode = (node) =>
                 node &&
                 typeof node === 'object' &&
@@ -137,12 +206,32 @@ function extractCreateNodeResponse(responseText) {
                 RELATIONAL_NODE_FIELDS.every(
                   (field) => !(field in node) || typeof node[field] === 'string'
                 ) &&
-                Object.values(node).every(
-                  (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-                );
+                Object.entries(node).every(([key, value]) => {
+                  if (key === 'x' || key === 'y') return typeof value === 'number' && Number.isFinite(value);
+                  if (key === 'autoCreatedStub') return typeof value === 'boolean';
+                  return !NON_STRING_NODE_FIELDS.has(key) && typeof value === 'string';
+                });
 
-              if (nodes.every(isCompleteNode)) {
-                return { nodeData: nodes[0], nodeDataList: nodes, start, end: end + 1 };
+              if (sanitizedNodes.every(isCompleteNode)) {
+                // Khử trùng lặp nếu AI trả về 2 node giống nhau (cùng type + name)
+                const seenKeys = new Set();
+                const uniqueNodes = [];
+                for (const node of sanitizedNodes) {
+                  const key = `${node.type}::${node.name.trim().toLocaleLowerCase('vi')}`;
+                  if (seenKeys.has(key)) continue;
+                  seenKeys.add(key);
+                  uniqueNodes.push(node);
+                }
+                if (uniqueNodes.length > 0) {
+                  const boundedNodes = uniqueNodes.slice(0, MAX_NODES_PER_CHAT_TURN);
+                  return {
+                    nodeData: boundedNodes[0],
+                    nodeDataList: boundedNodes,
+                    truncatedCount: Math.max(0, uniqueNodes.length - boundedNodes.length),
+                    start,
+                    end: end + 1,
+                  };
+                }
               }
             }
           } catch {
@@ -193,12 +282,28 @@ function getNodeCreationRequest(messages) {
   const wantsNodes = latestUserIntent || hasPendingCreationIntent;
   if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
 
-  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba)(?![\p{L}\p{N}])/iu;
+  const countPattern = /(?<![\p{L}\p{N}])(?:\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)\s*(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức|nhóm|phe phái|sự kiện)(?![\p{L}\p{N}])|(?<![\p{L}\p{N}])(?:node|nodes|thực thể)\s*(?:x|:)?\s*(\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)(?![\p{L}\p{N}])/iu;
   const requestMessage = latestUserIntent ? latestUserMessage : (pendingUserMessage?.content || '');
   const countMatch = requestMessage.match(countPattern);
-  const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba)/iu)?.[1] || '1';
-  const requestedCount = Number(countToken) || { một: 1, hai: 2, ba: 3 }[countToken.toLowerCase()] || 1;
-  return { wantsNodes, requestedCount: Math.min(3, requestedCount) };
+  const countToken = (countMatch?.[0] || '').match(/(\d+|một|hai|ba|bốn|năm|sáu|bảy|tám|chín|mười)/iu)?.[1] || '1';
+  const wordToNumber = {
+    một: 1,
+    hai: 2,
+    ba: 3,
+    bốn: 4,
+    năm: 5,
+    sáu: 6,
+    bảy: 7,
+    tám: 8,
+    chín: 9,
+    mười: 10,
+  };
+  const requestedCount = Math.max(1, Number(countToken) || wordToNumber[countToken.toLowerCase()] || 1);
+  return {
+    wantsNodes,
+    requestedCount: Math.min(MAX_NODES_PER_CHAT_TURN, requestedCount),
+    rawRequestedCount: requestedCount,
+  };
 }
 
 function normalizeEventCharacters(
@@ -410,14 +515,21 @@ async function chatWithAI(req, res, next) {
     if (projectContext.projectTitle) {
       contextText += `\n\nDự án hiện tại: "${projectContext.projectTitle}"`;
     }
+    const existingProjectNodeKeys = new Set(
+      (Array.isArray(projectContext.nodes) ? projectContext.nodes : [])
+        .filter((n) => n && n.type && n.name)
+        .map((n) => `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`)
+    );
+
     if (projectContext.nodes && projectContext.nodes.length > 0) {
+      const MAX_CHAT_CTX_NODES = 120;
       const nodesSummary = projectContext.nodes
-        .slice(0, 20)
+        .slice(0, MAX_CHAT_CTX_NODES)
         .map((n) => `- ${n.name} (${n.type})`)
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị: \n${nodesSummary}`;
-      if (projectContext.nodes.length > 20) {
-        contextText += `\n... và ${projectContext.nodes.length - 20} thực thể khác`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị (KHÔNG tạo trùng tên các thực thể này): \n${nodesSummary}`;
+      if (projectContext.nodes.length > MAX_CHAT_CTX_NODES) {
+        contextText += `\n... và ${projectContext.nodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
     }
 
@@ -446,7 +558,8 @@ async function chatWithAI(req, res, next) {
     let attemptedNodeCreation = false;
     let attemptMessages = normalizedMessages;
     let cleanMessage = '';
-    const { wantsNodes, requestedCount } = getNodeCreationRequest(normalizedMessages);
+    const { wantsNodes, requestedCount, rawRequestedCount = requestedCount } =
+      getNodeCreationRequest(normalizedMessages);
     const creationActionPattern = /"action"\s*:\s*"create_nodes?"/i;
 
     for (let attempt = 1; attempt <= MAX_NODE_GENERATION_ATTEMPTS; attempt += 1) {
@@ -461,6 +574,23 @@ async function chatWithAI(req, res, next) {
       nodeResponse = extractCreateNodeResponse(responseText);
       attemptedNodeCreation ||= creationActionPattern.test(responseText);
 
+      // Lọc bỏ các node đã tồn tại trong đồ thị hiện tại để không tạo trùng
+      if (nodeResponse && existingProjectNodeKeys.size > 0) {
+        const filteredNewNodes = nodeResponse.nodeDataList.filter((n) => {
+          const key = `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`;
+          return !existingProjectNodeKeys.has(key);
+        });
+        if (filteredNewNodes.length > 0) {
+          nodeResponse = {
+            ...nodeResponse,
+            nodeData: filteredNewNodes[0],
+            nodeDataList: filteredNewNodes,
+          };
+        } else {
+          nodeResponse = null;
+        }
+      }
+
       const generatedCount = nodeResponse?.nodeDataList.length || 0;
       if (!wantsNodes || (nodeResponse && generatedCount >= requestedCount)) {
         break;
@@ -468,8 +598,8 @@ async function chatWithAI(req, res, next) {
 
       if (attempt < MAX_NODE_GENERATION_ATTEMPTS) {
         const issue = !nodeResponse
-          ? 'Câu trả lời trước chưa có JSON node hợp lệ hoặc node thiếu trường bắt buộc.'
-          : `Bạn mới tạo ${generatedCount}/${requestedCount} node được yêu cầu.`;
+          ? 'Câu trả lời trước chưa có JSON node hợp lệ, thiếu trường bắt buộc, hoặc tạo trùng với node đã có trong đồ thị.'
+          : `Bạn mới tạo ${generatedCount}/${requestedCount} node mới không trùng lặp theo yêu cầu.`;
 
         console.warn(`[AI Controller] ${issue} Tự yêu cầu hoàn thiện lượt ${attempt + 1}/${MAX_NODE_GENERATION_ATTEMPTS}.`);
         attemptMessages = [
@@ -479,10 +609,10 @@ async function chatWithAI(req, res, next) {
             role: 'user',
             content:
               `${issue} Hãy tiếp tục ngay, không hỏi người dùng và không bỏ node nào. ` +
-              `Tạo đủ ít nhất ${requestedCount} node theo yêu cầu ban đầu; điền đầy đủ các trường cơ bản, ` +
-              'còn các trường quan hệ với node khác (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location) ' +
-              'thì chọn đúng tên node đã có, tạo tên node mới cụ thể, hoặc để chuỗi rỗng "" (tuyệt đối không ghi "không rõ"). ' +
-              'Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" cho một node hoặc "create_nodes" cho nhiều node, tối đa 3 node.',
+              `Tạo đủ ít nhất ${requestedCount} node MỚI hoàn toàn khác nhau và KHÔNG trùng tên với các thực thể đã có trong đồ thị (tối đa ${MAX_NODES_PER_CHAT_TURN} node trong lượt này); điền đầy đủ các trường cơ bản. ` +
+              'Với các trường quan hệ (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters, location, charactersInvolved, itemsInvolved, factionsInvolved), ' +
+              'CHỈ điền tên node đã có trong đồ thị hoặc node nằm trong chính mảng nodes này, tuyệt đối không bịa thêm tên ngoài danh sách (nếu không có hãy để chuỗi rỗng ""). ' +
+              `Trả lời bằng một JSON hợp lệ duy nhất với action "create_node" cho một node hoặc "create_nodes" cho 2 đến ${MAX_NODES_PER_CHAT_TURN} node.`,
           },
         ];
       }
@@ -499,17 +629,45 @@ async function chatWithAI(req, res, next) {
       nodeResponse = null;
     }
 
-    cleanMessage = responseText;
+    cleanMessage = sanitizeAIChatDisplayText(responseText);
+    let suggestedPrompt = null;
     if (nodeResponse) {
       nodeData = nodeResponse.nodeData;
       nodeDataList = nodeResponse.nodeDataList;
-      cleanMessage = [
-        responseText.slice(0, nodeResponse.start).trim(),
-        responseText.slice(nodeResponse.end).trim(),
-      ].filter(Boolean).join('\n\n');
+      const beforeJson = responseText
+        .slice(0, nodeResponse.start)
+        .replace(/```(?:json)?\s*$/i, '')
+        .trim();
+      const afterJson = responseText
+        .slice(nodeResponse.end)
+        .replace(/^\s*```/i, '')
+        .trim();
+      cleanMessage = sanitizeAIChatDisplayText(
+        [beforeJson, afterJson].filter(Boolean).join('\n\n')
+      );
 
       if (!cleanMessage) {
-        cleanMessage = `✨ Tôi đã thiết lập xong thực thể "${nodeData.name}". Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
+        cleanMessage = `✨ Tôi đã thiết lập xong ${nodeDataList.length > 1 ? `${nodeDataList.length} thực thể` : `thực thể "${nodeData.name}"`}. Bạn có thể xem trước và thêm vào đồ thị bên dưới!`;
+      }
+
+      // Trích xuất gợi ý prompt tiếp theo nếu AI có đề xuất
+      const promptMatch = cleanMessage.match(
+        /Gợi ý prompt tiếp theo\s*:\s*["“]?([^"”\n]+)["”]?/i
+      );
+      if (promptMatch && promptMatch[1]?.trim()) {
+        suggestedPrompt = sanitizeAIChatDisplayText(promptMatch[1].trim());
+      }
+
+      // Nếu người dùng yêu cầu hơn 3 node (hoặc bị giới hạn 3 node mỗi lượt), đảm bảo luôn có gợi ý prompt tiếp theo
+      const remainingToCreate = Math.max(
+        rawRequestedCount - nodeDataList.length,
+        nodeResponse.truncatedCount || 0
+      );
+      if (remainingToCreate > 0 && !suggestedPrompt) {
+        const createdNames = nodeDataList.map((n) => n.name).filter(Boolean).join(', ');
+        const nextBatchCount = Math.min(MAX_NODES_PER_CHAT_TURN, remainingToCreate);
+        suggestedPrompt = `Tạo tiếp ${nextBatchCount} node còn lại liên kết với ${createdNames || 'các thực thể vừa tạo'}`;
+        cleanMessage += `\n\n💡 Mỗi lượt chỉ tạo tối đa ${MAX_NODES_PER_CHAT_TURN} node (còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
       }
     }
 
@@ -519,6 +677,7 @@ async function chatWithAI(req, res, next) {
         message: cleanMessage,
         nodeData,
         nodeDataList,
+        suggestedPrompt,
         raw: responseText,
         model: usedModel,
       },
@@ -594,8 +753,12 @@ async function generateChapterAndEvents(req, res, next) {
       .map((n) => n.name);
     const items = nodes
       .filter((n) => n.type === 'item')
-      .slice(0, 8)
+      .slice(0, 12)
       .map((n) => n.name);
+    const previousEvents = nodes
+      .filter((n) => n.type === 'event' && n.name)
+      .slice(-10)
+      .map((n) => `${n.name}${n.arcName ? ` [Arc: ${n.arcName}]` : ''}`);
 
     const contextPrompt = `Bạn là trợ lý AI sáng tạo cốt truyện tài hoa cho tiểu thuyết thể loại: ${writingStyle}.
 Dự án tiểu thuyết: "${projectTitle}".
@@ -605,19 +768,29 @@ Các thực thể hiện có trong truyện:
 - Địa điểm: ${locations.join(', ') || 'Chưa có'}
 - Tổ chức / Nhóm: ${factions.join(', ') || 'Chưa có'}
 - Vật phẩm: ${items.join(', ') || 'Chưa có'}
+- Sự kiện trước đó: ${previousEvents.join(', ') || 'Chưa có'}
 
 Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
-2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật và địa điểm hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
+2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật, địa điểm, vật phẩm, tổ chức hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
 
-QUY TẮC NHÂN VẬT TRONG TỪNG SỰ KIỆN (BẮT BUỘC):
-- Mỗi sự kiện phải có trường "charactersInvolved" là một mảng tên nhân vật, không được bỏ trống trường hoặc trả về null.
-- Ghi đủ tất cả nhân vật có hành động, đối thoại, xuất hiện hoặc liên quan trực tiếp đến diễn biến sự kiện.
-- Ưu tiên nhân vật đã có trong danh sách ở trên và dùng chính xác tên của họ; đối chiếu vai trò/mô tả để chọn đúng người, không gán nhân vật không liên quan.
-- Nếu tên nhân vật hiện có xuất hiện trong tên hoặc mô tả sự kiện, bắt buộc đưa nhân vật đó vào "charactersInvolved".
-- Chỉ dùng mảng rỗng khi sự kiện thực sự không có nhân vật liên quan; nếu truyện đã có nhân vật thì mỗi sự kiện chính thông thường phải có ít nhất một nhân vật.
-- Mỗi sự kiện phải có "characterStatusChanges" là một mảng. Chỉ thêm nhân vật vào đây khi sự kiện trong chương làm thay đổi trạng thái thực sự của họ: dùng "Đã chết" khi họ chết thật sự trong diễn biến hiện tại, hoặc "Hồi sinh" khi họ được hồi sinh. Không đánh dấu chết vì tin đồn, giả chết, hồi tưởng, nguy cơ hay cách nói ẩn dụ. Không đưa nhân vật vào nếu trạng thái không đổi; dùng [] khi không có thay đổi.
-- Mỗi thay đổi phải có "characterName" (tên chính xác), "status" ("Đã chết" hoặc "Hồi sinh"), và "statusEvent" là tên sự kiện này. Nhân vật có thay đổi trạng thái phải có trong "charactersInvolved". Không tạo thay đổi trái với trạng thái hiện tại nếu mạch truyện không có sự kiện hồi sinh.
+QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN (BẮT BUỘC):
+- MỖI sự kiện BẮT BUỘC phải điền ĐẦY ĐỦ và CỤ THỂ (KHÔNG ĐƯỢC ĐỂ TRỐNG) tất cả các trường: "name", "desc", "eventType", "importance", "arcName", "sequenceOrder", "location", "time", "timelineType", "duration", "cause", "conflict", "outcome", "consequences", "impact", "charactersInvolved", "characterRoles".
+- "charactersInvolved": mảng tên tất cả nhân vật tham gia trực tiếp; ưu tiên dùng chính xác tên nhân vật hiện có ở trên. Nếu tên nhân vật xuất hiện trong tên/mô tả sự kiện thì bắt buộc đưa vào mảng này.
+- "characterRoles": ghi ngắn gọn vai trò từng nhân vật tham gia (VD: "Lăng Tiêu: Chủ động điều tra; Mộc Lan: Hỗ trợ").
+- "location": tên địa điểm cụ thể (ưu tiên địa điểm đã có ở trên) để nối quan hệ Diễn ra tại (EVENT_LOCATION).
+- "itemsInvolved": mảng tên các vật phẩm liên quan/xuất hiện trong sự kiện (ưu tiên tên vật phẩm đã có ở trên, [] nếu không có).
+- "factionsInvolved": mảng tên các tổ chức/phe phái liên quan (ưu tiên tên tổ chức đã có ở trên, [] nếu không có).
+- "cause": nguyên nhân trực tiếp dẫn đến sự kiện (nếu bắt nguồn từ một sự kiện trước đó ở trên, ghi chính xác tên sự kiện đó để nối quan hệ CAUSED_BY).
+- "conflict": xung đột/vấn đề chính diễn ra trong sự kiện.
+- "outcome": kết quả trực tiếp ngay khi sự kiện kết thúc.
+- "consequences": hệ quả cụ thể (thay đổi trạng thái nhân vật, vật phẩm, quan hệ phe phái...).
+- "impact": tác động lâu dài tới mạch truyện các chương sau.
+- "eventType": chọn 1 trong: "Chiến đấu", "Đối thoại / Đàm phán", "Tiết lộ bí mật", "Du hành", "Biến cố / Hy sinh", "Giao dịch / Vật phẩm", "Hồi tưởng", "Khác".
+- "importance": chọn 1 trong: "Nút thắt chính", "Bước ngoặt", "Gieo mầm", "Sự kiện phụ".
+- "timelineType": chọn 1 trong: "Hiện tại", "Hồi tưởng", "Tiên tri / Giấc mơ", "Lời kể gián tiếp".
+- "duration": thời lượng ước tính cụ thể (VD: "30 phút", "Một đêm", "2 giờ").
+- "characterStatusChanges": mảng ghi nhận khi sự kiện thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" trong diễn biến hiện tại (dùng [] nếu không có). Nhân vật thay đổi trạng thái phải có trong "charactersInvolved".
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
 BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời dẫn ngoài JSON), đúng cấu trúc sau:
@@ -632,17 +805,30 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
     {
       "name": "<Tên sự kiện ngắn gọn, hành động>",
       "desc": "<Mô tả chi tiết sự kiện diễn ra thế nào>",
+      "eventType": "<Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác>",
+      "importance": "<Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ>",
+      "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
+      "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm nơi diễn ra>",
       "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
-      "charactersInvolved": ["<Tên chính xác nhân vật hiện có hoặc nhân vật mới có vai trò trực tiếp>", "<Tên nhân vật khác nếu có>"],
+      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
+      "duration": "<Thời lượng, ví dụ: 30 phút / Một đêm / 2 ngày>",
+      "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới sự kiện này>",
+      "conflict": "<Xung đột chính trong sự kiện>",
+      "outcome": "<Kết quả trực tiếp của sự kiện>",
+      "consequences": "<Hệ quả cụ thể / thay đổi trạng thái nhân vật, vật phẩm, phe phái>",
+      "impact": "<Tác động lâu dài tới cốt truyện>",
+      "charactersInvolved": ["<Tên chính xác nhân vật tham gia>"],
+      "characterRoles": "<Vai trò ngắn gọn từng nhân vật, VD: A: Chủ động; B: Chứng kiến>",
+      "itemsInvolved": ["<Tên vật phẩm xuất hiện/chuyển giao nếu có>"],
+      "factionsInvolved": ["<Tên tổ chức/phe phái liên quan nếu có>"],
       "characterStatusChanges": [
         {
           "characterName": "<Tên nhân vật có trạng thái thay đổi>",
           "status": "Đã chết",
           "statusEvent": "<Tên sự kiện này>"
         }
-      ],
-      "impact": "<Tác động hoặc hậu quả sau sự kiện>"
+      ]
     }
   ]
 }
@@ -717,16 +903,87 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       });
     }
 
-    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event) => {
-      const rawLoc = typeof event.location === 'string' ? event.location.trim() : '';
-      const cleanLocation = PLACEHOLDER_VALUE_PATTERN.test(rawLoc) ? '' : rawLoc;
-      const cleanCharacters = Array.isArray(event.charactersInvolved)
-        ? event.charactersInvolved
-            .map((name) => String(name).trim())
-            .filter((name) => name && !PLACEHOLDER_VALUE_PATTERN.test(name))
-        : [];
+    const cleanEventScalar = (val) => {
+      if (val === null || val === undefined) return '';
+      const str = String(val).trim();
+      return PLACEHOLDER_VALUE_PATTERN.test(str) ? '' : str;
+    };
+    const cleanEventList = (val) => {
+      const arr = Array.isArray(val)
+        ? val
+        : typeof val === 'string' && val.trim()
+          ? val.split(/[,;\n]+/)
+          : [];
+      return Array.from(
+        new Set(
+          arr
+            .map((item) => String(item).trim())
+            .filter((item) => item && !PLACEHOLDER_VALUE_PATTERN.test(item))
+        )
+      );
+    };
+
+    const itemNodes = nodes.filter(
+      (n) => n && n.type === 'item' && typeof n.name === 'string' && n.name.trim()
+    );
+    const factionNodes = nodes.filter(
+      (n) => n && n.type === 'faction' && typeof n.name === 'string' && n.name.trim()
+    );
+
+    const hasWholeEntityMention = (text, entityName) => {
+      if (!text || !entityName) return false;
+      const escaped = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(
+        `(^|[^\\p{L}\\p{N}\\p{M}])${escaped}(?=$|[^\\p{L}\\p{N}\\p{M}])`,
+        'iu'
+      );
+      return pattern.test(text);
+    };
+
+    const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event, idx) => {
+      const cleanLocation = cleanEventScalar(event.location);
+      const cleanCharacters = cleanEventList(event.charactersInvolved);
+      const eventText = `${event.name || ''} ${event.desc || ''}`;
+
+      const matchedItems = cleanEventList(event.itemsInvolved);
+      for (const itemNode of itemNodes) {
+        const itemName = itemNode.name.trim();
+        if (
+          itemName.length >= 2 &&
+          hasWholeEntityMention(eventText, itemName) &&
+          !matchedItems.some((existing) => existing.toLocaleLowerCase('vi') === itemName.toLocaleLowerCase('vi'))
+        ) {
+          matchedItems.push(itemName);
+        }
+      }
+
+      const matchedFactions = cleanEventList(event.factionsInvolved);
+      for (const facNode of factionNodes) {
+        const facName = facNode.name.trim();
+        if (
+          facName.length >= 2 &&
+          hasWholeEntityMention(eventText, facName) &&
+          !matchedFactions.some((existing) => existing.toLocaleLowerCase('vi') === facName.toLocaleLowerCase('vi'))
+        ) {
+          matchedFactions.push(facName);
+        }
+      }
+
       return {
         ...event,
+        eventType: cleanEventScalar(event.eventType) || 'Khác',
+        importance: cleanEventScalar(event.importance) || (idx === 0 ? 'Bước ngoặt' : 'Nút thắt chính'),
+        arcName: cleanEventScalar(event.arcName) || `Chương ${nextChapterNumber}`,
+        sequenceOrder: cleanEventScalar(event.sequenceOrder) || String(idx + 1),
+        timelineType: cleanEventScalar(event.timelineType) || 'Hiện tại',
+        duration: cleanEventScalar(event.duration) || 'Trong chương',
+        cause: cleanEventScalar(event.cause),
+        conflict: cleanEventScalar(event.conflict),
+        outcome: cleanEventScalar(event.outcome),
+        consequences: cleanEventScalar(event.consequences),
+        characterRoles: cleanEventScalar(event.characterRoles),
+        itemsInvolved: matchedItems,
+        factionsInvolved: matchedFactions,
         location: cleanLocation,
         charactersInvolved: cleanCharacters,
         characterStatusChanges: event.characterStatusChanges.map((change) => ({
@@ -786,12 +1043,28 @@ async function generateChapterStory(req, res, next) {
     // Liệt kê chi tiết các sự kiện trong chương
     const eventsDetail = events
       .map((ev, idx) => {
-        let detail = `[Sự kiện ${idx + 1}]: ${ev.name || ev.title || 'Sự kiện'}\n- Diễn biến: ${ev.desc || 'Chưa có mô tả'}`;
+        let detail = `[Sự kiện ${ev.sequenceOrder || idx + 1}]: ${ev.name || ev.title || 'Sự kiện'}\n- Diễn biến: ${ev.desc || 'Chưa có mô tả'}`;
+        if (ev.eventType) detail += `\n- Phân loại: ${ev.eventType}`;
+        if (ev.importance) detail += `\n- Mức độ quan trọng: ${ev.importance}`;
+        if (ev.arcName) detail += `\n- Cung truyện (Arc): ${ev.arcName}`;
         if (ev.location) detail += `\n- Địa điểm: ${ev.location}`;
-        if (ev.time) detail += `\n- Thời gian: ${ev.time}`;
-        if (ev.impact) detail += `\n- Kết quả/Tác động: ${ev.impact}`;
+        if (ev.time) detail += `\n- Thời điểm: ${ev.time}`;
+        if (ev.timelineType) detail += `\n- Dòng thời gian: ${ev.timelineType}`;
+        if (ev.duration) detail += `\n- Thời lượng: ${ev.duration}`;
+        if (ev.cause) detail += `\n- Nguyên nhân: ${ev.cause}`;
+        if (ev.conflict) detail += `\n- Xung đột chính: ${ev.conflict}`;
+        if (ev.outcome) detail += `\n- Kết quả trực tiếp: ${ev.outcome}`;
+        if (ev.consequences) detail += `\n- Hệ quả cụ thể: ${ev.consequences}`;
+        if (ev.impact) detail += `\n- Tác động lâu dài: ${ev.impact}`;
         if (Array.isArray(ev.charactersInvolved) && ev.charactersInvolved.length > 0) {
           detail += `\n- Nhân vật tham gia: ${ev.charactersInvolved.join(', ')}`;
+        }
+        if (ev.characterRoles) detail += `\n- Vai trò nhân vật: ${ev.characterRoles}`;
+        if (Array.isArray(ev.itemsInvolved) && ev.itemsInvolved.length > 0) {
+          detail += `\n- Vật phẩm liên quan: ${ev.itemsInvolved.join(', ')}`;
+        }
+        if (Array.isArray(ev.factionsInvolved) && ev.factionsInvolved.length > 0) {
+          detail += `\n- Tổ chức liên quan: ${ev.factionsInvolved.join(', ')}`;
         }
         if (Array.isArray(ev.characterStatusChanges) && ev.characterStatusChanges.length > 0) {
           detail += `\n- Thay đổi trạng thái nhân vật: ${ev.characterStatusChanges
@@ -1464,10 +1737,18 @@ async function analyzeChapterText(req, res, next) {
         [
           n.name,
           n.chapter && `chương=${n.chapter}`,
+          n.eventType && `loại=${n.eventType}`,
+          n.importance && `mức độ=${n.importance}`,
+          n.arcName && `arc=${n.arcName}`,
           n.time && `thời gian=${n.time}`,
+          n.timelineType && `dòng thời gian=${n.timelineType}`,
+          n.duration && `thời lượng=${n.duration}`,
           n.location && `địa điểm=${n.location}`,
           (n.charactersInvolved || n.characters) &&
-            `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          n.itemsInvolved && `vật phẩm=${String(n.itemsInvolved).slice(0, 120)}`,
+          n.factionsInvolved && `tổ chức=${String(n.factionsInvolved).slice(0, 120)}`,
+          n.outcome && `kết quả=${String(n.outcome).slice(0, 120)}`,
           n.impact && `tác động=${String(n.impact).slice(0, 120)}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
         ]
@@ -1512,14 +1793,24 @@ Phân loại mức độ severity:
 - "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, nhân vật hành xử khác thường).
 - "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn.
 
-2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes):
+2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes) & QUY TẮC THỐNG NHẤT QUAN HỆ:
 - Trích xuất các thực thể MỚI xuất hiện rõ ràng trong chương thuộc 4 loại: "character", "item", "location", "faction" mà CHƯA CÓ trong danh sách thực thể hiện có ở dưới (so khớp không phân biệt hoa/thường).
 - KHÔNG tạo lại node đã tồn tại.
-- Điền đầy đủ các trường thông tin suy ra được từ văn bản; các trường liên kết (birthplace, weapon, sect, origin, holderOrLocation, ruler, leader, headquarters) CHỈ điền tên cụ thể hoặc chuỗi rỗng "", TUYỆT ĐỐI KHÔNG dùng chữ giữ chỗ như "không rõ", "chưa xác định", "n/a".
+- Điền đầy đủ các trường thông tin suy ra được từ văn bản để hệ thống tự động tạo đúng các cạnh quan hệ đồ thị:
+  + Nhân vật sở hữu/dùng vật phẩm -> điền tên vật phẩm vào character.weapon và/hoặc tên nhân vật vào item.holderOrLocation.
+  + Nhân vật thuộc tổ chức / lãnh đạo tổ chức -> character.sect và faction.leader.
+  + Nhân vật sinh tại địa điểm -> character.birthplace.
+  + Vật phẩm có nguồn gốc từ địa điểm -> item.origin.
+  + Tổ chức có trụ sở / cai quản địa điểm -> faction.headquarters và location.ruler.
+- Các trường liên kết CHỈ điền tên cụ thể (khớp chính xác tên node đã có nếu tồn tại) hoặc chuỗi rỗng "", TUYỆT ĐỐI KHÔNG dùng chữ giữ chỗ như "không rõ", "chưa xác định", "n/a".
 
 3. TRÍCH XUẤT SỰ KIỆN CỦA CHƯƠNG (suggestedEvents) & THAY ĐỔI TRẠNG THÁI (characterStatusChanges):
 - Rút ra 1 đến 5 SỰ KIỆN CHÍNH theo đúng trình tự thời gian diễn ra trong chương này để gắn vào Chi tiết chương.
-- Mỗi sự kiện phải có: "name", "desc", "location" (tên địa điểm cụ thể hoặc ""), "time" (ví dụ: "Đầu chương", "Đêm khuya"...), "impact", và "charactersInvolved" (mảng tên chính xác các nhân vật tham gia trực tiếp, ưu tiên khớp tên nhân vật đã có trong đồ thị).
+- Mỗi sự kiện phải có đầy đủ các trường chi tiết sau (để lưu thông tin phong phú & tự nối quan hệ đồ thị):
+  + Cơ bản & Mạch truyện: "name", "desc", "eventType" (Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác), "importance" (Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ), "arcName", "sequenceOrder" ("1", "2",...).
+  + Thời gian & Địa điểm: "time", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
+  + Nhân quả & Mâu thuẫn: "cause" (nguyên nhân hoặc tên chính xác sự kiện trước để nối CAUSED_BY), "conflict", "outcome", "consequences", "impact".
+  + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (mảng tên vật phẩm liên quan để nối INVOLVES_ITEM), "factionsInvolved" (mảng tên tổ chức liên quan để nối INVOLVES_FACTION).
 - "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
 
 DỮ LIỆU ĐỒ THỊ HIỆN TẠI CỦA DỰ ÁN:
@@ -1593,10 +1884,23 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
     {
       "name": "<Tên sự kiện>",
       "desc": "<Mô tả diễn biến sự kiện>",
+      "eventType": "<Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác>",
+      "importance": "<Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ>",
+      "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
+      "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm hoặc chuỗi rỗng>",
       "time": "<Thời điểm diễn ra>",
-      "impact": "<Tác động của sự kiện>",
-      "charactersInvolved": ["<Tên nhân vật tham gia>"]
+      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
+      "duration": "<Thời lượng diễn ra>",
+      "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới>",
+      "conflict": "<Xung đột chính>",
+      "outcome": "<Kết quả trực tiếp>",
+      "consequences": "<Hệ quả cụ thể / thay đổi trạng thái>",
+      "impact": "<Tác động lâu dài của sự kiện>",
+      "charactersInvolved": ["<Tên nhân vật tham gia>"],
+      "characterRoles": "<Vai trò nhân vật trong sự kiện>",
+      "itemsInvolved": ["<Tên vật phẩm liên quan nếu có>"],
+      "factionsInvolved": ["<Tên tổ chức liên quan nếu có>"]
     }
   ],
   "characterStatusChanges": [
@@ -1731,16 +2035,44 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       ...safeNodes.filter((n) => n.type === 'character' && n.name),
       ...suggestedNodes.filter((n) => n.type === 'character'),
     ];
+    const cleanListField = (val) => {
+      const arr = Array.isArray(val)
+        ? val
+        : typeof val === 'string' && val.trim()
+          ? val.split(/[,;\n]+/)
+          : [];
+      return Array.from(
+        new Set(
+          arr
+            .map((item) => cleanField(item))
+            .filter(Boolean)
+        )
+      );
+    };
+
     const rawSuggestedEvents = (
       Array.isArray(parsed.suggestedEvents) ? parsed.suggestedEvents : []
     )
       .filter((ev) => ev && typeof ev === 'object' && String(ev.name || '').trim())
-      .map((ev) => ({
+      .map((ev, idx) => ({
         name: String(ev.name).trim(),
         desc: cleanField(ev.desc),
+        eventType: cleanField(ev.eventType),
+        importance: cleanField(ev.importance),
+        arcName: cleanField(ev.arcName),
+        sequenceOrder: cleanField(ev.sequenceOrder) || String(idx + 1),
         location: cleanField(ev.location),
         time: cleanField(ev.time),
+        timelineType: cleanField(ev.timelineType) || 'Hiện tại',
+        duration: cleanField(ev.duration),
+        cause: cleanField(ev.cause),
+        conflict: cleanField(ev.conflict),
+        outcome: cleanField(ev.outcome),
+        consequences: cleanField(ev.consequences),
         impact: cleanField(ev.impact),
+        characterRoles: cleanField(ev.characterRoles),
+        itemsInvolved: cleanListField(ev.itemsInvolved),
+        factionsInvolved: cleanListField(ev.factionsInvolved),
         charactersInvolved: Array.isArray(ev.charactersInvolved)
           ? ev.charactersInvolved.map((c) => String(c).trim()).filter(Boolean)
           : typeof ev.charactersInvolved === 'string'
@@ -1754,9 +2086,22 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
     }).map((ev) => ({
       name: ev.name,
       desc: ev.desc || '',
+      eventType: ev.eventType || '',
+      importance: ev.importance || '',
+      arcName: ev.arcName || '',
+      sequenceOrder: ev.sequenceOrder || '',
       location: ev.location || '',
       time: ev.time || '',
+      timelineType: ev.timelineType || 'Hiện tại',
+      duration: ev.duration || '',
+      cause: ev.cause || '',
+      conflict: ev.conflict || '',
+      outcome: ev.outcome || '',
+      consequences: ev.consequences || '',
       impact: ev.impact || '',
+      characterRoles: ev.characterRoles || '',
+      itemsInvolved: Array.isArray(ev.itemsInvolved) ? ev.itemsInvolved : [],
+      factionsInvolved: Array.isArray(ev.factionsInvolved) ? ev.factionsInvolved : [],
       charactersInvolved: Array.isArray(ev.charactersInvolved) ? ev.charactersInvolved : [],
     }));
 

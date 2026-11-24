@@ -548,8 +548,8 @@ export function generateGraphHtml(options: GenerateGraphHtmlOptions): string {
           ctx.fillStyle = isEdgeConnected ? '#f0b84c' : 'rgba(229, 169, 60, 0.6)';
           ctx.fill();
 
-          // Label text on edge midpoint
-          if (edge.label && (isEdgeConnected || camera.zoom >= 0.95)) {
+          // Label text on edge midpoint (ẩn mặc định, chỉ hiện khi đang chọn một node có liên kết)
+          if (edge.label && selectedId && isEdgeConnected) {
             var midX = (p1.x + p2.x) / 2;
             var midY = (p1.y + p2.y) / 2;
             var labelText = edge.label;

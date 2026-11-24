@@ -21,6 +21,9 @@ import { FormSelectField } from '@/components/ui/FormSelectField';
 import {
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
+  EVENT_IMPORTANCE_OPTIONS,
+  EVENT_TIMELINE_OPTIONS,
+  EVENT_TYPE_OPTIONS,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
   getProjectChapters,
@@ -117,9 +120,22 @@ interface EditableSuggestedEvent {
   selected: boolean;
   name: string;
   desc: string;
+  eventType: string;
+  importance: string;
+  arcName: string;
+  sequenceOrder: string;
   location: string;
   time: string;
+  timelineType: string;
+  duration: string;
+  cause: string;
+  conflict: string;
+  outcome: string;
+  consequences: string;
   impact: string;
+  characterRoles: string;
+  itemsInvolved: string[];
+  factionsInvolved: string[];
   charactersInvolved: string[];
 }
 
@@ -339,9 +355,22 @@ function createEmptySuggestedEvent(): EditableSuggestedEvent {
     selected: true,
     name: '',
     desc: '',
+    eventType: '',
+    importance: '',
+    arcName: '',
+    sequenceOrder: '',
     location: '',
     time: '',
+    timelineType: 'Hiện tại',
+    duration: '',
+    cause: '',
+    conflict: '',
+    outcome: '',
+    consequences: '',
     impact: '',
+    characterRoles: '',
+    itemsInvolved: [],
+    factionsInvolved: [],
     charactersInvolved: [],
   };
 }
@@ -731,9 +760,24 @@ export default function TextCheckerScreen() {
         selected: true,
         name: ev.name || '',
         desc: ev.desc || '',
+        eventType: ev.eventType || '',
+        importance: ev.importance || '',
+        arcName: ev.arcName || '',
+        sequenceOrder: ev.sequenceOrder || String(idx + 1),
         location: ev.location || '',
         time: ev.time || '',
+        timelineType: ev.timelineType || 'Hiện tại',
+        duration: ev.duration || '',
+        cause: ev.cause || '',
+        conflict: ev.conflict || '',
+        outcome: ev.outcome || '',
+        consequences: ev.consequences || '',
         impact: ev.impact || '',
+        characterRoles: ev.characterRoles || '',
+        itemsInvolved: Array.isArray(ev.itemsInvolved) ? ev.itemsInvolved.filter(Boolean) : [],
+        factionsInvolved: Array.isArray(ev.factionsInvolved)
+          ? ev.factionsInvolved.filter(Boolean)
+          : [],
         charactersInvolved: Array.isArray(ev.charactersInvolved)
           ? ev.charactersInvolved.filter(Boolean)
           : [],
@@ -1114,9 +1158,22 @@ export default function TextCheckerScreen() {
             desc: ev.desc.trim() || `Sự kiện trong ${effectiveTitle}`,
             status: 'Đã diễn ra',
             chapter: savedChapter.id,
+            eventType: ev.eventType.trim(),
+            importance: ev.importance.trim(),
+            arcName: ev.arcName.trim(),
+            sequenceOrder: ev.sequenceOrder.trim(),
             location: ev.location.trim(),
             time: ev.time.trim(),
+            timelineType: ev.timelineType.trim() || 'Hiện tại',
+            duration: ev.duration.trim(),
+            cause: ev.cause.trim(),
+            conflict: ev.conflict.trim(),
+            outcome: ev.outcome.trim(),
+            consequences: ev.consequences.trim(),
             impact: ev.impact.trim(),
+            characterRoles: ev.characterRoles.trim(),
+            itemsInvolved: JSON.stringify(ev.itemsInvolved),
+            factionsInvolved: JSON.stringify(ev.factionsInvolved),
             charactersInvolved: JSON.stringify(ev.charactersInvolved),
             autoCreatedStub: false,
           }));
@@ -1921,10 +1978,19 @@ export default function TextCheckerScreen() {
                         </Pressable>
                         <View style={{ flex: 1 }}>
                           <Text style={styles.suggestionName}>
-                            #{index + 1} · {ev.name}
+                            #{ev.sequenceOrder || index + 1} · {ev.name}
                           </Text>
                           <Text style={styles.suggestionMeta}>
-                            {[ev.time, ev.location].filter(Boolean).join(' · ') || 'Diễn biến trong chương'}
+                            {[
+                              ev.eventType,
+                              ev.importance,
+                              ev.timelineType && ev.timelineType !== 'Hiện tại' ? ev.timelineType : '',
+                              ev.time,
+                              ev.duration,
+                              ev.location,
+                            ]
+                              .filter(Boolean)
+                              .join(' · ') || 'Diễn biến trong chương'}
                           </Text>
                         </View>
                         <Pressable
@@ -1935,6 +2001,8 @@ export default function TextCheckerScreen() {
                             setEditingEvent({
                               ...ev,
                               charactersInvolved: [...ev.charactersInvolved],
+                              itemsInvolved: [...ev.itemsInvolved],
+                              factionsInvolved: [...ev.factionsInvolved],
                             });
                             setCustomParticipantInput('');
                           }}>
@@ -1956,6 +2024,19 @@ export default function TextCheckerScreen() {
                         <Text style={styles.eventCharsText}>
                           👥 Nhân vật: {ev.charactersInvolved.join(', ')}
                         </Text>
+                      )}
+                      {ev.itemsInvolved.length > 0 && (
+                        <Text style={styles.eventCharsText}>
+                          ⚔️ Vật phẩm: {ev.itemsInvolved.join(', ')}
+                        </Text>
+                      )}
+                      {ev.factionsInvolved.length > 0 && (
+                        <Text style={styles.eventCharsText}>
+                          🏛️ Tổ chức: {ev.factionsInvolved.join(', ')}
+                        </Text>
+                      )}
+                      {!!ev.outcome && (
+                        <Text style={styles.eventCharsText}>🎯 Kết quả: {ev.outcome}</Text>
                       )}
                       {!!ev.impact && (
                         <Text style={styles.eventImpactText}>⚡ Tác động: {ev.impact}</Text>
@@ -2383,6 +2464,47 @@ export default function TextCheckerScreen() {
                     THÔNG TIN BIẾN CỐ / SỰ KIỆN
                   </Text>
 
+                  <Text style={styles.fieldLabel}>Phân loại sự kiện</Text>
+                  <FormSelectField
+                    value={editingEvent.eventType}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, eventType: v })}
+                    options={EVENT_TYPE_OPTIONS}
+                    allowCustom
+                    placeholder="-- Chọn loại sự kiện --"
+                  />
+
+                  <Text style={styles.fieldLabel}>Mức độ quan trọng</Text>
+                  <FormSelectField
+                    value={editingEvent.importance}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, importance: v })}
+                    options={EVENT_IMPORTANCE_OPTIONS}
+                    placeholder="-- Chọn mức độ --"
+                  />
+
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.fieldLabel}>Cung truyện (Arc)</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editingEvent.arcName}
+                        onChangeText={(v) => setEditingEvent({ ...editingEvent, arcName: v })}
+                        placeholder="VD: Arc Học viện..."
+                        placeholderTextColor="#6d6253"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Thứ tự</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editingEvent.sequenceOrder}
+                        onChangeText={(v) => setEditingEvent({ ...editingEvent, sequenceOrder: v })}
+                        placeholder="1, 2..."
+                        placeholderTextColor="#6d6253"
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+
                   <Text style={styles.fieldLabel}>Nơi diễn ra</Text>
                   <FormSelectField
                     value={editingEvent.location}
@@ -2393,12 +2515,70 @@ export default function TextCheckerScreen() {
                     customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
                   />
 
-                  <Text style={styles.fieldLabel}>Thời điểm diễn ra</Text>
+                  <View style={{ flexDirection: 'row', gap: 10 }}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Thời điểm diễn ra</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editingEvent.time}
+                        onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
+                        placeholder="VD: Đầu chương / Đêm khuya"
+                        placeholderTextColor="#6d6253"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.fieldLabel}>Thời lượng</Text>
+                      <TextInput
+                        style={styles.input}
+                        value={editingEvent.duration}
+                        onChangeText={(v) => setEditingEvent({ ...editingEvent, duration: v })}
+                        placeholder="VD: 30 phút / Một đêm"
+                        placeholderTextColor="#6d6253"
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={styles.fieldLabel}>Dòng thời gian</Text>
+                  <FormSelectField
+                    value={editingEvent.timelineType}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, timelineType: v })}
+                    options={EVENT_TIMELINE_OPTIONS}
+                    placeholder="Hiện tại"
+                  />
+
+                  <Text style={styles.fieldLabel}>Nguyên nhân / Ngòi nổ</Text>
                   <TextInput
                     style={styles.input}
-                    value={editingEvent.time}
-                    onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
-                    placeholder="VD: Đầu chương / Đêm khuya / Khi trăng tròn"
+                    value={editingEvent.cause}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, cause: v })}
+                    placeholder="Nguyên nhân hoặc tên sự kiện trước..."
+                    placeholderTextColor="#6d6253"
+                  />
+
+                  <Text style={styles.fieldLabel}>Xung đột chính</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.conflict}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, conflict: v })}
+                    placeholder="Xung đột trọng tâm trong sự kiện..."
+                    placeholderTextColor="#6d6253"
+                  />
+
+                  <Text style={styles.fieldLabel}>Kết quả trực tiếp</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.outcome}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, outcome: v })}
+                    placeholder="Kết quả ngay sau sự kiện..."
+                    placeholderTextColor="#6d6253"
+                  />
+
+                  <Text style={styles.fieldLabel}>Hệ quả cụ thể / Thay đổi trạng thái</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.consequences}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, consequences: v })}
+                    placeholder="Thay đổi cụ thể của nhân vật / vật phẩm / phe phái..."
                     placeholderTextColor="#6d6253"
                   />
 
@@ -2487,7 +2667,92 @@ export default function TextCheckerScreen() {
                     </Pressable>
                   </View>
 
-                  <Text style={styles.fieldLabel}>Tác động / Hậu quả</Text>
+                  <Text style={styles.fieldLabel}>Vai trò nhân vật trong sự kiện</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={editingEvent.characterRoles}
+                    onChangeText={(v) => setEditingEvent({ ...editingEvent, characterRoles: v })}
+                    placeholder="VD: A: Chủ động; B: Chứng kiến"
+                    placeholderTextColor="#6d6253"
+                  />
+
+                  <Text style={styles.fieldLabel}>Vật phẩm liên quan</Text>
+                  {itemOptions.length > 0 ? (
+                    <View style={styles.eventCharacterOptions}>
+                      {itemOptions.map((it) => {
+                        const isSelected = editingEvent.itemsInvolved.includes(it.value);
+                        return (
+                          <Pressable
+                            key={it.value}
+                            style={[
+                              styles.eventCharacterChip,
+                              isSelected && styles.eventCharacterChipSelected,
+                            ]}
+                            onPress={() =>
+                              setEditingEvent({
+                                ...editingEvent,
+                                itemsInvolved: isSelected
+                                  ? editingEvent.itemsInvolved.filter((n) => n !== it.value)
+                                  : [...editingEvent.itemsInvolved, it.value],
+                              })
+                            }
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: isSelected }}>
+                            <Text
+                              style={[
+                                styles.eventCharacterChipText,
+                                isSelected && styles.eventCharacterChipTextSelected,
+                              ]}>
+                              {isSelected ? '✓ ' : ''}
+                              {it.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.eventCharacterEmpty}>Chưa có vật phẩm nào trong dự án.</Text>
+                  )}
+
+                  <Text style={styles.fieldLabel}>Tổ chức / Phe phái liên quan</Text>
+                  {factionOptions.length > 0 ? (
+                    <View style={styles.eventCharacterOptions}>
+                      {factionOptions.map((fac) => {
+                        const isSelected = editingEvent.factionsInvolved.includes(fac.value);
+                        return (
+                          <Pressable
+                            key={fac.value}
+                            style={[
+                              styles.eventCharacterChip,
+                              isSelected && styles.eventCharacterChipSelected,
+                            ]}
+                            onPress={() =>
+                              setEditingEvent({
+                                ...editingEvent,
+                                factionsInvolved: isSelected
+                                  ? editingEvent.factionsInvolved.filter((n) => n !== fac.value)
+                                  : [...editingEvent.factionsInvolved, fac.value],
+                              })
+                            }
+                            accessibilityRole="checkbox"
+                            accessibilityState={{ checked: isSelected }}>
+                            <Text
+                              style={[
+                                styles.eventCharacterChipText,
+                                isSelected && styles.eventCharacterChipTextSelected,
+                              ]}>
+                              {isSelected ? '✓ ' : ''}
+                              {fac.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : (
+                    <Text style={styles.eventCharacterEmpty}>Chưa có tổ chức nào trong dự án.</Text>
+                  )}
+
+                  <Text style={styles.fieldLabel}>Tác động lâu dài</Text>
                   <TextInput
                     style={styles.input}
                     value={editingEvent.impact}

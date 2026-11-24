@@ -78,11 +78,13 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
     const sendGraphDataRef = useRef(sendGraphData);
     const onNodeClickRef = useRef(onNodeClick);
     const onCanvasClickRef = useRef(onCanvasClick);
+    const selectedNodeIdRef = useRef(selectedNodeId);
     useLayoutEffect(() => {
       sendGraphDataRef.current = sendGraphData;
       onNodeClickRef.current = onNodeClick;
       onCanvasClickRef.current = onCanvasClick;
-    }, [sendGraphData, onNodeClick, onCanvasClick]);
+      selectedNodeIdRef.current = selectedNodeId;
+    }, [sendGraphData, onNodeClick, onCanvasClick, selectedNodeId]);
 
     useImperativeHandle(ref, () => ({
       zoomIn: () => {
@@ -194,6 +196,13 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
               );
               pendingFocusNodeRef.current = null;
             }
+            iframeRef.current?.contentWindow?.postMessage(
+              JSON.stringify({
+                type: 'SELECT_NODE',
+                nodeId: selectedNodeIdRef.current || null,
+              }),
+              '*'
+            );
             iframeRef.current?.contentWindow?.postMessage(JSON.stringify({ type: 'READY' }), '*');
             return;
           }

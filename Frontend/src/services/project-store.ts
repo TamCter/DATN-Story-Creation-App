@@ -76,6 +76,9 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
     RULER_OF: ['ruler_of', 'ruler'],
     EVENT_LOCATION: ['event_location', 'location'],
     PARTICIPATED_IN: ['participated_in', 'participated'],
+    INVOLVES_ITEM: ['involves_item', 'item'],
+    INVOLVES_FACTION: ['involves_faction', 'faction'],
+    CAUSED_BY: ['caused_by', 'cause'],
   };
 
   const isGeneratedDerivedLink = (link: StoryLink, category: string): boolean => {
@@ -134,7 +137,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         desc: `Vật phẩm gắn liền với ${node.name}`,
         status: 'Nguyên vẹn',
       });
-      ensureLink(node.id, item.id, 'EQUIPPED', 'Vật dụng', 'solid');
+      ensureLink(node.id, item.id, 'EQUIPPED', 'Sở hữu / Sử dụng', 'solid');
     }
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'BIRTHPLACE');
@@ -260,7 +263,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         desc: `Địa danh diễn ra sự kiện ${node.name}`,
         status: 'Hoạt động',
       });
-      ensureLink(node.id, loc.id, 'EVENT_LOCATION', 'Nơi diễn ra', 'solid');
+      ensureLink(node.id, loc.id, 'EVENT_LOCATION', 'Diễn ra tại', 'solid');
     }
 
     removeObsoleteGeneratedLinks('incoming', node.id, 'PARTICIPATED_IN');
@@ -278,6 +281,49 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         status: 'Còn sống',
       });
       ensureLink(ch.id, node.id, 'PARTICIPATED_IN', 'Tham gia', 'dashed');
+    }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_ITEM');
+    const rawItems = parseEventParticipants(node.itemsInvolved)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    for (const itemName of Array.from(new Set(rawItems))) {
+      const it = findOrAddNode(itemName, 'item', {
+        role: 'VẬT PHẨM',
+        rarity: 'Hiếm',
+        desc: `Vật phẩm xuất hiện trong sự kiện ${node.name}`,
+        status: 'Nguyên vẹn',
+      });
+      ensureLink(node.id, it.id, 'INVOLVES_ITEM', 'Liên quan vật phẩm', 'dashed');
+    }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_FACTION');
+    const rawFactions = parseEventParticipants(node.factionsInvolved)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    for (const facName of Array.from(new Set(rawFactions))) {
+      const fac = findOrAddNode(facName, 'faction', {
+        role: 'TỔ CHỨC',
+        subType: 'Trung lập',
+        alignment: 'TRUNG LẬP',
+        desc: `Tổ chức liên quan tới sự kiện ${node.name}`,
+        status: 'Đang hoạt động',
+      });
+      ensureLink(node.id, fac.id, 'INVOLVES_FACTION', 'Liên quan tổ chức', 'dashed');
+    }
+
+    removeObsoleteGeneratedLinks('outgoing', node.id, 'CAUSED_BY');
+    const causeName = cleanRelationalVal(node.cause);
+    if (causeName) {
+      const causeEvent = (project.nodes || []).find(
+        (n) =>
+          n.type === 'event' &&
+          n.id !== node.id &&
+          (n.name.trim().toLocaleLowerCase() === causeName.toLocaleLowerCase() || n.id === causeName)
+      );
+      if (causeEvent) {
+        ensureLink(node.id, causeEvent.id, 'CAUSED_BY', 'Bắt nguồn từ', 'dashed');
+      }
     }
   }
 
@@ -322,6 +368,8 @@ export class ProjectStore {
   private accountVersion = 0;
   private projectVersions: Map<string, number> = new Map();
   private graphRequestVersions: Map<string, number> = new Map();
+  private deletedProjects: Map<string, symbol> = new Map();
+  private localProjectsTails: Map<string, Promise<void>> = new Map();
   private chapterMutationTails: Map<string, Promise<void>> = new Map();
 
   constructor() {
@@ -340,6 +388,7 @@ export class ProjectStore {
     this.memoryProjects.clear();
     this.projectVersions.clear();
     this.graphRequestVersions.clear();
+    this.deletedProjects.clear();
     for (const project of INITIAL_PROJECTS) {
       this.memoryProjects.set(project.id, cloneSeedProject(project));
     }
@@ -438,6 +487,24 @@ export class ProjectStore {
     return [];
   }
 
+  private enqueueLocalProjectsWrite(
+    accountId: string | null,
+    task: () => Promise<void>
+  ): Promise<void> {
+    if (!accountId) return task();
+    const prev = this.localProjectsTails.get(accountId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(task);
+    this.localProjectsTails.set(accountId, next);
+    void next
+      .finally(() => {
+        if (this.localProjectsTails.get(accountId) === next) {
+          this.localProjectsTails.delete(accountId);
+        }
+      })
+      .catch(() => {});
+    return next;
+  }
+
   /**
    * Lấy thông tin chi tiết dự án kèm Nodes và Links của dự án đó.
    * QUAN TRỌNG: Không bao giờ fallback sang dự án khác nếu không tìm thấy!
@@ -448,6 +515,10 @@ export class ProjectStore {
   ): Promise<StoryProject> {
     const accountId = this.accountId;
     const accountVersion = this.accountVersion;
+
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
+    }
 
     if (options.preferCache && this.memoryProjects.has(projectId)) {
       const cached = this.memoryProjects.get(projectId)!;
@@ -463,6 +534,9 @@ export class ProjectStore {
       const cached = await this.getCachedProjectLocally(projectId, accountId);
       if (this.accountVersion !== accountVersion) {
         throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+      }
+      if (this.deletedProjects.has(projectId)) {
+        throw new Error('Dự án đã bị xóa.');
       }
       if (cached) {
         this.memoryProjects.set(projectId, cached);
@@ -483,6 +557,9 @@ export class ProjectStore {
           this.memoryProjects.get(projectId) || (await this.getCachedProjectLocally(projectId, accountId));
         if (this.accountVersion !== accountVersion) {
           throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+        }
+        if (this.deletedProjects.has(projectId)) {
+          throw new Error('Dự án đã bị xóa.');
         }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
@@ -531,10 +608,21 @@ export class ProjectStore {
           edges: actualLinks,
           chapters: mergedChapters,
         };
+        if (this.deletedProjects.has(projectId)) {
+          throw new Error('Dự án đã bị xóa.');
+        }
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject, accountId);
         if (this.accountVersion !== accountVersion) {
           throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+        }
+        if (this.deletedProjects.has(projectId)) {
+          this.memoryProjects.delete(projectId);
+          const staleCacheKey = this.getProjectCacheKey(projectId, accountId);
+          if (staleCacheKey) {
+            await AsyncStorage.removeItem(staleCacheKey);
+          }
+          throw new Error('Dự án đã bị xóa.');
         }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
@@ -558,8 +646,15 @@ export class ProjectStore {
       if (this.accountVersion !== accountVersion) {
         throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
       }
+      if (this.deletedProjects.has(projectId)) {
+        throw new Error('Dự án đã bị xóa.');
+      }
       backendError = err;
       // Bỏ qua lỗi mạng, chuyển sang lấy từ cache / local storage
+    }
+
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
     }
 
     // 2. Kiểm tra bộ nhớ tạm (Memory Cache)
@@ -573,6 +668,9 @@ export class ProjectStore {
     const cached = await this.getCachedProjectLocally(projectId, accountId);
     if (this.accountVersion !== accountVersion) {
       throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+    }
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
     }
     if (cached) {
       this.memoryProjects.set(projectId, cached);
@@ -614,9 +712,17 @@ export class ProjectStore {
    */
   async saveProject(
     project: StoryProject,
-    context: AccountContext = this.captureAccountContext()
+    context: AccountContext = this.captureAccountContext(),
+    options: { allowRecreate?: boolean } = {}
   ): Promise<void> {
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+
+    const allowRecreate = Boolean(options.allowRecreate);
+    if (allowRecreate) {
+      this.deletedProjects.delete(project.id);
+    } else if (this.deletedProjects.has(project.id)) {
+      return;
+    }
 
     this.projectVersions.set(
       project.id,
@@ -625,20 +731,101 @@ export class ProjectStore {
     this.memoryProjects.set(project.id, { ...project });
     await this.cacheProjectLocally(project, context.accountId);
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+    if (!allowRecreate && this.deletedProjects.has(project.id)) {
+      this.memoryProjects.delete(project.id);
+      const staleCacheKey = this.getProjectCacheKey(project.id, context.accountId);
+      if (staleCacheKey) {
+        await AsyncStorage.removeItem(staleCacheKey);
+      }
+      return;
+    }
 
-    // Cập nhật danh sách local projects
-    const locals = await this.getLocalProjects(context.accountId);
-    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
-    const idx = locals.findIndex((p) => p.id === project.id);
-    if (idx >= 0) {
-      locals[idx] = { ...locals[idx], ...project };
-    } else {
-      locals.unshift(project);
+    // Tuần tự hóa cập nhật danh sách local projects theo từng tài khoản
+    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+      if (!allowRecreate && this.deletedProjects.has(project.id)) {
+        return;
+      }
+      const locals = await this.getLocalProjects(context.accountId);
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+      if (!allowRecreate && this.deletedProjects.has(project.id)) {
+        return;
+      }
+      const idx = locals.findIndex((p) => p.id === project.id);
+      if (idx >= 0) {
+        locals[idx] = { ...locals[idx], ...project };
+      } else {
+        locals.unshift(project);
+      }
+      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+      if (localProjectsKey) {
+        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
+      }
+    });
+  }
+
+  /**
+   * Xóa vĩnh viễn một dự án trên Backend (Neo4j) và dọn sạch bộ nhớ đệm local
+   */
+  async deleteProject(
+    projectId: string,
+    context: AccountContext = this.captureAccountContext()
+  ): Promise<void> {
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+
+    // Đánh dấu dự án đang bị xóa bằng token riêng để loại bỏ response cũ và bảo vệ quyền sở hữu marker
+    const deleteToken = Symbol('deleteProject');
+    this.deletedProjects.set(projectId, deleteToken);
+    this.graphRequestVersions.set(
+      projectId,
+      (this.graphRequestVersions.get(projectId) || 0) + 1
+    );
+    this.projectVersions.set(
+      projectId,
+      (this.projectVersions.get(projectId) || 0) + 1
+    );
+
+    try {
+      const res = await api.deleteProject(projectId);
+      if (!res.success) {
+        throw new Error(res.message || 'Không thể xóa dự án trên máy chủ.');
+      }
+    } catch (err) {
+      // Nếu server trả 404 (dự án đã không còn trên server hoặc chỉ có ở local), vẫn chạy local cleanup
+      const isNotFound = err instanceof ApiError && err.status === 404;
+      if (!isNotFound) {
+        if (
+          this.accountVersion === context.version &&
+          this.accountId === context.accountId &&
+          this.deletedProjects.get(projectId) === deleteToken
+        ) {
+          this.deletedProjects.delete(projectId);
+        }
+        throw err;
+      }
     }
-    const localProjectsKey = this.getLocalProjectsKey(context.accountId);
-    if (localProjectsKey) {
-      await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
+
+    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+
+    this.memoryProjects.delete(projectId);
+    this.projectVersions.delete(projectId);
+    this.graphRequestVersions.delete(projectId);
+
+    const cacheKey = this.getProjectCacheKey(projectId, context.accountId);
+    if (cacheKey) {
+      await AsyncStorage.removeItem(cacheKey);
     }
+
+    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+      const locals = await this.getLocalProjects(context.accountId);
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+      const filteredLocals = locals.filter((p) => p.id !== projectId);
+      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+      if (localProjectsKey) {
+        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
+      }
+    });
   }
 
   /**
@@ -700,7 +887,23 @@ export class ProjectStore {
       charactersInvolved: nodeData.charactersInvolved?.trim() || '',
       characters: nodeData.characters?.trim() || '',
       impact: nodeData.impact?.trim() || '',
+      eventType: nodeData.eventType?.trim() || '',
+      importance: nodeData.importance?.trim() || '',
+      arcName: nodeData.arcName?.trim() || '',
+      sequenceOrder: nodeData.sequenceOrder?.trim() || '',
+      timelineType: nodeData.timelineType?.trim() || '',
+      duration: nodeData.duration?.trim() || '',
+      cause: nodeData.cause?.trim() || '',
+      conflict: nodeData.conflict?.trim() || '',
+      outcome: nodeData.outcome?.trim() || '',
+      consequences: nodeData.consequences?.trim() || '',
+      characterRoles: nodeData.characterRoles?.trim() || '',
+      itemsInvolved: nodeData.itemsInvolved?.trim() || '',
+      factionsInvolved: nodeData.factionsInvolved?.trim() || '',
       statusEvent: nodeData.statusEvent?.trim() || '',
+      ...(typeof nodeData.autoCreatedStub === 'boolean'
+        ? { autoCreatedStub: nodeData.autoCreatedStub }
+        : {}),
       syncStatus: 'pending',
       createdAt: Date.now(),
       updatedAt: Date.now(),

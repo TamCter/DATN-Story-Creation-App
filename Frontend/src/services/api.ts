@@ -110,7 +110,11 @@ class ApiService {
 
     // AI có thể cần vài lượt để hoàn thiện đủ node; provider có timeout riêng cho từng lượt.
     const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      controller.abort();
+    }, timeoutMs);
 
     try {
       console.log(`[API] 📡 ${options.method || 'GET'} ${url}`);
@@ -121,9 +125,12 @@ class ApiService {
         signal: controller.signal,
       });
 
-      clearTimeout(timeoutId);
-
-      const data = await response.json().catch(() => null);
+      const data = await response.json().catch((parseErr: any) => {
+        if (timedOut || parseErr?.name === 'AbortError') {
+          throw parseErr;
+        }
+        return null;
+      });
 
       if (!response.ok) {
         const errorMsg =
@@ -134,9 +141,7 @@ class ApiService {
 
       return data as T;
     } catch (error: any) {
-      clearTimeout(timeoutId);
-
-      if (error.name === 'AbortError') {
+      if (timedOut || error?.name === 'AbortError') {
         throw new Error(
           `Yêu cầu tới máy chủ bị quá thời gian chờ (${Math.round(timeoutMs / 1000)}s) hoặc đã bị hủy. Vui lòng thử lại.`
         );
@@ -151,6 +156,8 @@ class ApiService {
         );
       }
       throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
   }
 
@@ -456,7 +463,12 @@ class ApiService {
     projectContext?: { projectId?: string; nodes?: any[]; projectTitle?: string };
   }): Promise<{
     success: boolean;
-    data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+    data: {
+      message: string;
+      nodeData: any | null;
+      nodeDataList?: any[];
+      suggestedPrompt?: string | null;
+    };
     message?: string;
   }> {
     // Giữ body JSON dưới giới hạn 100KB mặc định của Express mà không làm thay đổi lịch sử lưu cục bộ
@@ -552,7 +564,12 @@ class ApiService {
 
     return this.request<{
       success: boolean;
-      data: { message: string; nodeData: any | null; nodeDataList?: any[] };
+      data: {
+        message: string;
+        nodeData: any | null;
+        nodeDataList?: any[];
+        suggestedPrompt?: string | null;
+      };
       message?: string;
     }>(
       '/ai/chat',
@@ -577,8 +594,21 @@ class ApiService {
       events: Array<{
         name: string;
         desc: string;
+        eventType?: string;
+        importance?: string;
+        arcName?: string;
+        sequenceOrder?: string;
         location?: string;
         time?: string;
+        timelineType?: string;
+        duration?: string;
+        cause?: string;
+        conflict?: string;
+        outcome?: string;
+        consequences?: string;
+        characterRoles?: string;
+        itemsInvolved?: string[];
+        factionsInvolved?: string[];
         charactersInvolved?: string[];
         characterStatusChanges?: Array<{
           characterName: string;
@@ -713,9 +743,22 @@ class ApiService {
       suggestedEvents: Array<{
         name: string;
         desc: string;
+        eventType?: string;
+        importance?: string;
+        arcName?: string;
+        sequenceOrder?: string;
         location?: string;
         time?: string;
+        timelineType?: string;
+        duration?: string;
+        cause?: string;
+        conflict?: string;
+        outcome?: string;
+        consequences?: string;
         impact?: string;
+        characterRoles?: string;
+        itemsInvolved?: string[];
+        factionsInvolved?: string[];
         charactersInvolved: string[];
       }>;
       characterStatusChanges: Array<{

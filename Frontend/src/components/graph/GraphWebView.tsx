@@ -185,6 +185,11 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
             );
             pendingFocusNodeRef.current = null;
           }
+          webViewRef.current?.injectJavaScript(
+            `window.postMessage(JSON.stringify({ type: 'SELECT_NODE', nodeId: ${JSON.stringify(
+              selectedNodeId || null
+            )} }), '*'); true;`
+          );
           return;
         }
 

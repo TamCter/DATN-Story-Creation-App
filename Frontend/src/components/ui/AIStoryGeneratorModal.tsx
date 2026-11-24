@@ -15,13 +15,17 @@ import {
 } from 'react-native';
 import { AppFonts, ThemeColors } from '@/constants/theme';
 import {
+  EVENT_IMPORTANCE_OPTIONS,
+  EVENT_TIMELINE_OPTIONS,
+  EVENT_TYPE_OPTIONS,
   eventBelongsToChapter,
   parseEventParticipants,
   StoryChapter,
   StoryNode,
   StoryProject,
 } from '@/constants/story-data';
-import { api } from '@/services/api';
+import { FormSelectField } from '@/components/ui/FormSelectField';
+import { api, ApiError } from '@/services/api';
 import { projectStore } from '@/services/project-store';
 import * as Clipboard from 'expo-clipboard';
 
@@ -89,8 +93,21 @@ export default function AIStoryGeneratorModal({
     Array<{
       name: string;
       desc: string;
+      eventType?: string;
+      importance?: string;
+      arcName?: string;
+      sequenceOrder?: string;
       location?: string;
       time?: string;
+      timelineType?: string;
+      duration?: string;
+      cause?: string;
+      conflict?: string;
+      outcome?: string;
+      consequences?: string;
+      characterRoles?: string;
+      itemsInvolved?: string[];
+      factionsInvolved?: string[];
       charactersInvolved?: string[];
       characterStatusChanges?: Array<{
         characterName: string;
@@ -106,6 +123,128 @@ export default function AIStoryGeneratorModal({
   const [wordCount, setWordCount] = useState<number>(0);
   const [copySuccess, setCopySuccess] = useState(false);
   const [copyError, setCopyError] = useState(false);
+
+  // Chỉnh sửa các trường metadata không ảnh hưởng cốt truyện của sự kiện ở Bước 2
+  const [editingEventIndex, setEditingEventIndex] = useState<number | null>(null);
+  const [editingEventDraft, setEditingEventDraft] = useState<{
+    name: string;
+    eventType: string;
+    importance: string;
+    arcName: string;
+    sequenceOrder: string;
+    time: string;
+    timelineType: string;
+    duration: string;
+    characterRoles: string;
+  } | null>(null);
+
+  const handleOpenEventEdit = (index: number) => {
+    if (isGenerating || isSaving) return;
+    const target = generatedEvents[index];
+    if (!target) return;
+    setEditingEventIndex(index);
+    setEditingEventDraft({
+      name: target.name || '',
+      eventType: target.eventType || '',
+      importance: target.importance || '',
+      arcName: target.arcName || '',
+      sequenceOrder: target.sequenceOrder || String(index + 1),
+      time: target.time || '',
+      timelineType: target.timelineType || 'Hiện tại',
+      duration: target.duration || '',
+      characterRoles: target.characterRoles || '',
+    });
+  };
+
+  const handleSaveEventEdit = () => {
+    if (editingEventIndex === null || !editingEventDraft) return;
+    const trimmedName = editingEventDraft.name.trim();
+    if (!trimmedName) {
+      if (Platform.OS === 'web') {
+        window.alert('Tên sự kiện không được để trống.');
+      } else {
+        Alert.alert('Thiếu tên sự kiện', 'Tên sự kiện không được để trống.');
+      }
+      return;
+    }
+
+    const currentTarget = generatedEvents[editingEventIndex];
+    if (!currentTarget) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
+
+    const nextEventType = editingEventDraft.eventType.trim();
+    const nextImportance = editingEventDraft.importance.trim();
+    const nextArcName = editingEventDraft.arcName.trim();
+    const nextSequenceOrder =
+      editingEventDraft.sequenceOrder.trim() || String(editingEventIndex + 1);
+    const nextTime = editingEventDraft.time.trim();
+    const nextTimelineType = editingEventDraft.timelineType.trim() || 'Hiện tại';
+    const nextDuration = editingEventDraft.duration.trim();
+    const nextCharacterRoles = editingEventDraft.characterRoles.trim();
+
+    const hasEffectiveChange =
+      trimmedName !== (currentTarget.name || '').trim() ||
+      nextEventType !== (currentTarget.eventType || '').trim() ||
+      nextImportance !== (currentTarget.importance || '').trim() ||
+      nextArcName !== (currentTarget.arcName || '').trim() ||
+      nextSequenceOrder !== (currentTarget.sequenceOrder || String(editingEventIndex + 1)).trim() ||
+      nextTime !== (currentTarget.time || '').trim() ||
+      nextTimelineType !== (currentTarget.timelineType || 'Hiện tại').trim() ||
+      nextDuration !== (currentTarget.duration || '').trim() ||
+      nextCharacterRoles !== (currentTarget.characterRoles || '').trim();
+
+    if (!hasEffectiveChange) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
+
+    const oldNameLower = (currentTarget.name || '').trim().toLocaleLowerCase('vi');
+    const renamed = oldNameLower !== '' && oldNameLower !== trimmedName.toLocaleLowerCase('vi');
+
+    setGeneratedEvents((prev) =>
+      prev.map((ev, idx) => {
+        if (idx === editingEventIndex) {
+          return {
+            ...ev,
+            name: trimmedName,
+            eventType: nextEventType,
+            importance: nextImportance,
+            arcName: nextArcName,
+            sequenceOrder: nextSequenceOrder,
+            time: nextTime,
+            timelineType: nextTimelineType,
+            duration: nextDuration,
+            characterRoles: nextCharacterRoles,
+            characterStatusChanges: (ev.characterStatusChanges || []).map((change) => ({
+              ...change,
+              statusEvent: trimmedName,
+            })),
+          };
+        }
+        if (
+          renamed &&
+          typeof ev.cause === 'string' &&
+          ev.cause.trim().toLocaleLowerCase('vi') === oldNameLower
+        ) {
+          return { ...ev, cause: trimmedName };
+        }
+        return ev;
+      })
+    );
+
+    // Đánh dấu nội dung truyện đã cũ và yêu cầu sáng tác lại trước khi lưu
+    if (storyContent) {
+      setStoryContent('');
+      setWordCount(0);
+    }
+
+    setEditingEventIndex(null);
+    setEditingEventDraft(null);
+  };
 
   useEffect(() => {
     projectNodesRef.current = project.nodes;
@@ -135,11 +274,18 @@ export default function AIStoryGeneratorModal({
     };
     setStoryContent('');
     setWordCount(0);
+    setEditingEventIndex(null);
+    setEditingEventDraft(null);
     setIsSaving(false);
   }, [targetChapterKey]);
 
-  // Reset khi mở lại với initialChapter
+  // Reset khi mở lại với initialChapter hoặc dọn trạng thái edit khi đóng modal
   useEffect(() => {
+    if (!visible) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
     if (visible) {
       if (initialChapter) {
         // Initialize this modal from the selected chapter when it opens or changes.
@@ -152,11 +298,24 @@ export default function AIStoryGeneratorModal({
         });
         const matchedEvts = (projectNodesRef.current || [])
           .filter((node) => eventBelongsToChapter(node, initialChapter))
-          .map((n) => ({
+          .map((n, idx) => ({
             name: n.name,
             desc: n.desc,
+            eventType: n.eventType || '',
+            importance: n.importance || '',
+            arcName: n.arcName || '',
+            sequenceOrder: n.sequenceOrder || String(idx + 1),
             location: n.location,
             time: n.time,
+            timelineType: n.timelineType || 'Hiện tại',
+            duration: n.duration || '',
+            cause: n.cause || '',
+            conflict: n.conflict || '',
+            outcome: n.outcome || '',
+            consequences: n.consequences || '',
+            characterRoles: n.characterRoles || '',
+            itemsInvolved: parseEventParticipants(n.itemsInvolved),
+            factionsInvolved: parseEventParticipants(n.factionsInvolved),
             charactersInvolved: parseEventParticipants(
               n.charactersInvolved || n.characters
             ),
@@ -190,6 +349,8 @@ export default function AIStoryGeneratorModal({
   const handleClose = (saveCompleted = false) => {
     if (isSavingRef.current && !saveCompleted) return;
     generationSessionRef.current += 1;
+    setEditingEventIndex(null);
+    setEditingEventDraft(null);
     onClose();
   };
 
@@ -408,25 +569,65 @@ export default function AIStoryGeneratorModal({
                 ids: {},
               };
             }
+            const eventPayload: Partial<StoryNode> = {
+              name: ev.name,
+              type: 'event',
+              desc: ev.desc,
+              chapter: generatedChapter.title,
+              location: ev.location || '',
+              time: ev.time || '',
+              timelineType: ev.timelineType || 'Hiện tại',
+              duration: ev.duration || '',
+              eventType: ev.eventType || '',
+              importance: ev.importance || '',
+              arcName: ev.arcName || '',
+              sequenceOrder: ev.sequenceOrder || String(eventIndex + 1),
+              cause: ev.cause || '',
+              conflict: ev.conflict || '',
+              outcome: ev.outcome || '',
+              consequences: ev.consequences || '',
+              characterRoles: ev.characterRoles || '',
+              itemsInvolved: JSON.stringify(ev.itemsInvolved || []),
+              factionsInvolved: JSON.stringify(ev.factionsInvolved || []),
+              impact: ev.impact || '',
+              role: 'BIẾN CỐ',
+              status: 'Đã diễn ra',
+              charactersInvolved: JSON.stringify(participants),
+            };
             const savedNodeId = savedEventNodeIdsRef.current.ids[eventIndex];
             if (savedNodeId) {
               eventNode = currentNodes.find((node) => node.id === savedNodeId);
               if (!eventNode) {
                 throw new Error('Không tìm thấy node sự kiện đã tạo ở lần lưu trước.');
               }
+              try {
+                eventNode = await projectStore.updateNode(
+                  project.id,
+                  eventNode.id,
+                  eventPayload
+                );
+              } catch (updateErr) {
+                // Nếu node vẫn đang pending (chưa tồn tại trên server -> 404), tạo trên server qua ensureNodeSynced rồi áp dụng metadata
+                if (
+                  updateErr instanceof ApiError &&
+                  updateErr.status === 404 &&
+                  eventNode.syncStatus === 'pending'
+                ) {
+                  eventNode = await projectStore.ensureNodeSynced(project.id, eventNode.id);
+                  if (draftVersionRef.current !== saveDraftVersion) return;
+                  eventNode = await projectStore.updateNode(
+                    project.id,
+                    eventNode.id,
+                    eventPayload
+                  );
+                } else {
+                  throw updateErr;
+                }
+              }
+              const existingIdx = currentNodes.findIndex((node) => node.id === eventNode!.id);
+              if (existingIdx !== -1) currentNodes[existingIdx] = eventNode;
             } else {
-              eventNode = await projectStore.createNode(project.id, {
-                name: ev.name,
-                type: 'event',
-                desc: ev.desc,
-                chapter: generatedChapter.title,
-                location: ev.location || '',
-                time: ev.time || '',
-                impact: ev.impact || '',
-                role: 'BIẾN CỐ',
-                status: 'Đã diễn ra',
-                charactersInvolved: JSON.stringify(participants),
-              });
+              eventNode = await projectStore.createNode(project.id, eventPayload);
               currentNodes.push(eventNode);
               if (draftVersionRef.current !== saveDraftVersion) return;
               savedEventNodeIdsRef.current.ids[eventIndex] = eventNode.id;
@@ -608,7 +809,8 @@ export default function AIStoryGeneratorModal({
             style={styles.modalScroll}
             contentContainerStyle={styles.scrollContent}
             showsVerticalScrollIndicator={false}
-            keyboardShouldPersistTaps="handled">
+            keyboardShouldPersistTaps="handled"
+            pointerEvents={isGenerating || isSaving ? 'none' : 'auto'}>
             {/* BƯỚC 1: Ý TƯỞNG & PHONG CÁCH */}
             {step === 1 && (
               <View style={styles.stepSection}>
@@ -630,7 +832,12 @@ export default function AIStoryGeneratorModal({
                       return (
                         <Pressable
                           key={st}
-                          style={[styles.styleChip, isSel && styles.styleChipSelected]}
+                          disabled={isGenerating || isSaving}
+                          style={[
+                            styles.styleChip,
+                            isSel && styles.styleChipSelected,
+                            (isGenerating || isSaving) && { opacity: 0.55 },
+                          ]}
                           onPress={() => setWritingStyle(st)}>
                           <Text style={[styles.styleChipText, isSel && styles.styleChipTextSelected]}>
                             {st}
@@ -646,10 +853,14 @@ export default function AIStoryGeneratorModal({
                     Ý TƯỞNG / MẠCH TRUYỆN MONG MUỐN CHO CHƯƠNG TIẾP THEO (TÙY CHỌN)
                   </Text>
                   <TextInput
-                    style={styles.ideaTextInput}
+                    style={[
+                      styles.ideaTextInput,
+                      (isGenerating || isSaving) && { opacity: 0.55 },
+                    ]}
                     placeholder="Ví dụ: nhân vật chính phát hiện một bằng chứng mới và phải quyết định có công bố hay không..."
                     placeholderTextColor="#685f50"
                     multiline
+                    editable={!isGenerating && !isSaving}
                     value={userIdea}
                     onChangeText={setUserIdea}
                     textAlignVertical="top"
@@ -660,7 +871,10 @@ export default function AIStoryGeneratorModal({
                 </View>
 
                 <Pressable
-                  style={styles.primaryActionBtn}
+                  style={[
+                    styles.primaryActionBtn,
+                    (isGenerating || isSaving) && { opacity: 0.55 },
+                  ]}
                   onPress={handleGenerateChapterAndEvents}
                   disabled={isGenerating || isSaving}>
                   <Text style={styles.primaryActionBtnText}>
@@ -688,39 +902,29 @@ export default function AIStoryGeneratorModal({
                     <Text style={styles.sectionHeaderTitle}>
                       CÁC SỰ KIỆN TRONG CHƯƠNG ({generatedEvents.length})
                     </Text>
-                    <Text style={styles.sectionHeaderNote}>
-                      Sẽ được chuyển thành Node sự kiện trên đồ thị
-                    </Text>
                   </View>
 
                   {generatedEvents.map((ev, idx) => (
                     <View key={idx} style={styles.eventItemCard}>
                       <View style={styles.eventItemIndex}>
-                        <Text style={styles.eventIndexText}>{idx + 1}</Text>
+                        <Text style={styles.eventIndexText}>{ev.sequenceOrder || idx + 1}</Text>
                       </View>
-                      <View style={{ flex: 1, gap: 3 }}>
-                        <Text style={styles.eventItemName}>{ev.name}</Text>
-                        <Text style={styles.eventItemDesc}>{ev.desc}</Text>
-                        <View style={styles.eventMetaRow}>
-                          {Boolean(ev.location) && (
-                            <Text style={styles.eventMetaTag}>📍 {ev.location}</Text>
-                          )}
-                          {Boolean(ev.time) && (
-                            <Text style={styles.eventMetaTag}>⏱ {ev.time}</Text>
-                          )}
-                          {Boolean(ev.charactersInvolved?.length) && (
-                            <Text style={styles.eventMetaTag}>
-                              👤 {ev.charactersInvolved?.join(', ')}
-                            </Text>
-                          )}
-                          {Boolean(ev.characterStatusChanges?.length) && (
-                            <Text style={styles.eventMetaTag}>
-                              {ev.characterStatusChanges
-                                ?.map((change) => `${change.characterName}: ${change.status}`)
-                                .join(' · ')}
-                            </Text>
+                      <View style={{ flex: 1, gap: 4 }}>
+                        <View style={styles.eventHeaderRow}>
+                          <Text style={[styles.eventItemName, { flex: 1 }]}>{ev.name}</Text>
+                          {!initialChapter && (
+                            <Pressable
+                              style={[
+                                styles.eventEditBtn,
+                                (isGenerating || isSaving) && { opacity: 0.5 },
+                              ]}
+                              disabled={isGenerating || isSaving}
+                              onPress={() => handleOpenEventEdit(idx)}>
+                              <Text style={styles.eventEditBtnText}>✏️ Sửa</Text>
+                            </Pressable>
                           )}
                         </View>
+                        <Text style={styles.eventItemDesc}>{ev.desc}</Text>
                       </View>
                     </View>
                   ))}
@@ -730,7 +934,10 @@ export default function AIStoryGeneratorModal({
                 <View style={styles.actionButtonGroup}>
                   {!initialChapter && (
                     <Pressable
-                      style={styles.secondaryBtn}
+                      style={[
+                        styles.secondaryBtn,
+                        (isGenerating || isSaving) && { opacity: 0.5 },
+                      ]}
                       onPress={() => setStep(1)}
                       disabled={isGenerating || isSaving}>
                       <Text style={styles.secondaryBtnText}>← Chỉnh sửa ý tưởng</Text>
@@ -738,7 +945,10 @@ export default function AIStoryGeneratorModal({
                   )}
 
                   <Pressable
-                    style={styles.primaryActionBtn}
+                    style={[
+                      styles.primaryActionBtn,
+                      (isGenerating || isSaving) && { opacity: 0.5 },
+                    ]}
                     onPress={handleGenerateStoryNarrative}
                     disabled={isGenerating || isSaving}>
                     <Text style={styles.primaryActionBtnText}>
@@ -812,6 +1022,158 @@ export default function AIStoryGeneratorModal({
               </View>
             )}
           </ScrollView>
+
+          {/* Overlay chỉnh sửa metadata sự kiện (chỉ cho sửa các trường không ảnh hưởng cốt truyện) */}
+          {editingEventIndex !== null && editingEventDraft && (
+            <View style={styles.editOverlay}>
+              <View style={styles.editCard}>
+                <View style={styles.editHeader}>
+                  <Text style={styles.editTitle}>Chỉnh sửa thông tin sự kiện</Text>
+                  <Pressable
+                    onPress={() => {
+                      setEditingEventIndex(null);
+                      setEditingEventDraft(null);
+                    }}
+                    style={styles.closeBtn}>
+                    <Text style={styles.closeBtnText}>✕</Text>
+                  </Pressable>
+                </View>
+
+                <Text style={styles.editHint}>
+                  Chỉ chỉnh sửa các thông tin phân loại & thời gian để không làm lệch cốt truyện và thực thể đã phác thảo.
+                </Text>
+
+                <ScrollView
+                  style={{ maxHeight: SCREEN_HEIGHT * 0.52 }}
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled">
+                  <Text style={styles.editFieldLabel}>Tên sự kiện *</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editingEventDraft.name}
+                    onChangeText={(v) =>
+                      setEditingEventDraft({ ...editingEventDraft, name: v })
+                    }
+                    placeholder="Tên sự kiện..."
+                    placeholderTextColor="#685f50"
+                  />
+
+                  <Text style={styles.editFieldLabel}>Phân loại sự kiện</Text>
+                  <FormSelectField
+                    value={editingEventDraft.eventType}
+                    onChange={(v) =>
+                      setEditingEventDraft({ ...editingEventDraft, eventType: v })
+                    }
+                    options={EVENT_TYPE_OPTIONS}
+                    allowCustom
+                    placeholder="-- Chọn loại sự kiện --"
+                  />
+
+                  <Text style={styles.editFieldLabel}>Mức độ quan trọng</Text>
+                  <FormSelectField
+                    value={editingEventDraft.importance}
+                    onChange={(v) =>
+                      setEditingEventDraft({ ...editingEventDraft, importance: v })
+                    }
+                    options={EVENT_IMPORTANCE_OPTIONS}
+                    placeholder="-- Chọn mức độ --"
+                  />
+
+                  <View style={styles.editRow}>
+                    <View style={{ flex: 2 }}>
+                      <Text style={styles.editFieldLabel}>Cung truyện (Arc)</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editingEventDraft.arcName}
+                        onChangeText={(v) =>
+                          setEditingEventDraft({ ...editingEventDraft, arcName: v })
+                        }
+                        placeholder="VD: Arc Học viện..."
+                        placeholderTextColor="#685f50"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editFieldLabel}>Thứ tự</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editingEventDraft.sequenceOrder}
+                        onChangeText={(v) =>
+                          setEditingEventDraft({ ...editingEventDraft, sequenceOrder: v })
+                        }
+                        placeholder="1, 2..."
+                        placeholderTextColor="#685f50"
+                        keyboardType="numeric"
+                      />
+                    </View>
+                  </View>
+
+                  <View style={styles.editRow}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editFieldLabel}>Thời điểm</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editingEventDraft.time}
+                        onChangeText={(v) =>
+                          setEditingEventDraft({ ...editingEventDraft, time: v })
+                        }
+                        placeholder="VD: Đêm khuya"
+                        placeholderTextColor="#685f50"
+                      />
+                    </View>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.editFieldLabel}>Thời lượng</Text>
+                      <TextInput
+                        style={styles.editInput}
+                        value={editingEventDraft.duration}
+                        onChangeText={(v) =>
+                          setEditingEventDraft({ ...editingEventDraft, duration: v })
+                        }
+                        placeholder="VD: 30 phút"
+                        placeholderTextColor="#685f50"
+                      />
+                    </View>
+                  </View>
+
+                  <Text style={styles.editFieldLabel}>Dòng thời gian</Text>
+                  <FormSelectField
+                    value={editingEventDraft.timelineType}
+                    onChange={(v) =>
+                      setEditingEventDraft({ ...editingEventDraft, timelineType: v })
+                    }
+                    options={EVENT_TIMELINE_OPTIONS}
+                    placeholder="Hiện tại"
+                  />
+
+                  <Text style={styles.editFieldLabel}>Vai trò nhân vật (ghi chú)</Text>
+                  <TextInput
+                    style={styles.editInput}
+                    value={editingEventDraft.characterRoles}
+                    onChangeText={(v) =>
+                      setEditingEventDraft({ ...editingEventDraft, characterRoles: v })
+                    }
+                    placeholder="VD: A: Chủ động; B: Hỗ trợ"
+                    placeholderTextColor="#685f50"
+                  />
+                </ScrollView>
+
+                <View style={styles.editActions}>
+                  <Pressable
+                    style={[styles.secondaryBtn, { flex: 1 }]}
+                    onPress={() => {
+                      setEditingEventIndex(null);
+                      setEditingEventDraft(null);
+                    }}>
+                    <Text style={styles.secondaryBtnText}>Hủy</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.primaryActionBtn, { flex: 1 }]}
+                    onPress={handleSaveEventEdit}>
+                    <Text style={styles.primaryActionBtnText}>Lưu chỉnh sửa</Text>
+                  </Pressable>
+                </View>
+              </View>
+            </View>
+          )}
         </View>
       </KeyboardAvoidingView>
     </Modal>
@@ -1259,6 +1621,94 @@ const styles = StyleSheet.create({
     fontFamily: AppFonts.sans,
     fontWeight: '700',
     letterSpacing: 0.5,
+  },
+  eventHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  eventEditBtn: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(229, 169, 60, 0.4)',
+    backgroundColor: 'rgba(229, 169, 60, 0.12)',
+  },
+  eventEditBtnText: {
+    color: '#e5a93c',
+    fontSize: 12,
+    fontFamily: AppFonts.sans,
+    fontWeight: '600',
+  },
+  editOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.78)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 16,
+    zIndex: 50,
+  },
+  editCard: {
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: '#1a1712',
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#3f3627',
+    padding: 18,
+  },
+  editHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  editTitle: {
+    color: '#f5eee6',
+    fontSize: 17,
+    fontFamily: AppFonts.serif,
+    fontWeight: '700',
+  },
+  editHint: {
+    color: '#9a9080',
+    fontSize: 12,
+    fontFamily: AppFonts.sans,
+    lineHeight: 17,
+    marginBottom: 12,
+  },
+  editFieldLabel: {
+    color: '#c8b48c',
+    fontSize: 12,
+    fontFamily: AppFonts.sans,
+    fontWeight: '600',
+    marginTop: 8,
+    marginBottom: 5,
+  },
+  editInput: {
+    backgroundColor: '#12100d',
+    borderWidth: 1,
+    borderColor: '#383226',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    color: '#f5eee6',
+    fontSize: 13.5,
+    fontFamily: AppFonts.sans,
+  },
+  editRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  editActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 14,
   },
 });
 
