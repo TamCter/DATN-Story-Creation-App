@@ -1601,35 +1601,62 @@ export default function AIChatPanel({
     messageId: string,
     nodes: Partial<StoryNode>[]
   ): Promise<boolean> => {
-    const capturedScope = activeScopeRef.current;
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const turnRevision = {
+      current: chatState.scopeKey === capturedScope ? chatState.baseRevision : 0,
+    };
+
     const ok = await onCreateNodes(nodes);
     if (ok) {
-      setChatState((prev) =>
-        prev.scopeKey === capturedScope
-          ? {
-            ...prev,
-            messages: prev.messages.map((m) =>
-              m.id === messageId ? { ...m, nodesAdded: true } : m
-            ),
-          }
-          : prev
-      );
+      let nextMessagesForScope: AIChatMessage[] | null = null;
+      bumpRevision(capturedScope);
+      setChatState((prev) => {
+        if (prev.scopeKey !== capturedScope) return prev;
+        nextMessagesForScope = prev.messages.map((m) =>
+          m.id === messageId ? { ...m, nodesAdded: true } : m
+        );
+        return {
+          ...prev,
+          messages: nextMessagesForScope,
+        };
+      });
+
       if (capturedScope) {
-        void enqueueScopedWrite(capturedScope, async () => {
-          try {
-            const raw = await AsyncStorage.getItem(capturedScope);
-            if (!raw) return;
-            const parsed = JSON.parse(raw);
-            if (parsed && Array.isArray(parsed.messages)) {
-              parsed.messages = parsed.messages.map((m: AIChatMessage) =>
-                m.id === messageId ? { ...m, nodesAdded: true } : m
-              );
-              await AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
+        if (nextMessagesForScope) {
+          void persistMessagesForScope(
+            capturedScope,
+            capturedPendingDelete,
+            capturedLocalCleanup,
+            capturedServerRev,
+            capturedProjectId,
+            capturedUserId,
+            nextMessagesForScope,
+            turnRevision
+          );
+        } else {
+          // Trường hợp người dùng đã chuyển sang scope khác trước khi onCreateNodes xong:
+          // vẫn tuần tự hóa cập nhật cờ trên snapshot của đúng scope khởi tạo.
+          void enqueueScopedWrite(capturedScope, async () => {
+            try {
+              const raw = await AsyncStorage.getItem(capturedScope);
+              if (!raw) return;
+              const parsed = JSON.parse(raw);
+              if (parsed && Array.isArray(parsed.messages)) {
+                parsed.messages = parsed.messages.map((m: AIChatMessage) =>
+                  m.id === messageId ? { ...m, nodesAdded: true } : m
+                );
+                await AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
+              }
+            } catch {
+              // Không chặn luồng chính nếu cập nhật cờ cache local thất bại
             }
-          } catch {
-            // Không chặn luồng chính nếu cập nhật cờ cache local thất bại
-          }
-        });
+          });
+        }
       }
     }
     return ok;

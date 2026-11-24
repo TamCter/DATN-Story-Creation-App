@@ -168,11 +168,6 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
         if (data.type === 'READY') {
           readyRef.current = true;
           sendGraphData();
-          webViewRef.current?.injectJavaScript(
-            `window.postMessage(JSON.stringify({ type: 'SELECT_NODE', nodeId: ${JSON.stringify(
-              selectedNodeId || null
-            )} }), '*'); true;`
-          );
           if (pendingFocusRef.current) {
             const { sourceId, targetId } = pendingFocusRef.current;
             webViewRef.current?.injectJavaScript(
@@ -190,6 +185,11 @@ export const GraphWebView = forwardRef<GraphWebViewRef, GraphWebViewProps>(
             );
             pendingFocusNodeRef.current = null;
           }
+          webViewRef.current?.injectJavaScript(
+            `window.postMessage(JSON.stringify({ type: 'SELECT_NODE', nodeId: ${JSON.stringify(
+              selectedNodeId || null
+            )} }), '*'); true;`
+          );
           return;
         }
 

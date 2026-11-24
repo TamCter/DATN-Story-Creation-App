@@ -368,7 +368,8 @@ export class ProjectStore {
   private accountVersion = 0;
   private projectVersions: Map<string, number> = new Map();
   private graphRequestVersions: Map<string, number> = new Map();
-  private deletedProjects: Set<string> = new Set();
+  private deletedProjects: Map<string, symbol> = new Map();
+  private localProjectsTails: Map<string, Promise<void>> = new Map();
   private chapterMutationTails: Map<string, Promise<void>> = new Map();
 
   constructor() {
@@ -486,6 +487,22 @@ export class ProjectStore {
     return [];
   }
 
+  private enqueueLocalProjectsWrite(
+    accountId: string | null,
+    task: () => Promise<void>
+  ): Promise<void> {
+    if (!accountId) return task();
+    const prev = this.localProjectsTails.get(accountId) || Promise.resolve();
+    const next = prev.catch(() => {}).then(task);
+    this.localProjectsTails.set(accountId, next);
+    void next.finally(() => {
+      if (this.localProjectsTails.get(accountId) === next) {
+        this.localProjectsTails.delete(accountId);
+      }
+    });
+    return next;
+  }
+
   /**
    * Lấy thông tin chi tiết dự án kèm Nodes và Links của dự án đó.
    * QUAN TRỌNG: Không bao giờ fallback sang dự án khác nếu không tìm thấy!
@@ -496,6 +513,10 @@ export class ProjectStore {
   ): Promise<StoryProject> {
     const accountId = this.accountId;
     const accountVersion = this.accountVersion;
+
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
+    }
 
     if (options.preferCache && this.memoryProjects.has(projectId)) {
       const cached = this.memoryProjects.get(projectId)!;
@@ -511,6 +532,9 @@ export class ProjectStore {
       const cached = await this.getCachedProjectLocally(projectId, accountId);
       if (this.accountVersion !== accountVersion) {
         throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+      }
+      if (this.deletedProjects.has(projectId)) {
+        throw new Error('Dự án đã bị xóa.');
       }
       if (cached) {
         this.memoryProjects.set(projectId, cached);
@@ -620,8 +644,15 @@ export class ProjectStore {
       if (this.accountVersion !== accountVersion) {
         throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
       }
+      if (this.deletedProjects.has(projectId)) {
+        throw new Error('Dự án đã bị xóa.');
+      }
       backendError = err;
       // Bỏ qua lỗi mạng, chuyển sang lấy từ cache / local storage
+    }
+
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
     }
 
     // 2. Kiểm tra bộ nhớ tạm (Memory Cache)
@@ -635,6 +666,9 @@ export class ProjectStore {
     const cached = await this.getCachedProjectLocally(projectId, accountId);
     if (this.accountVersion !== accountVersion) {
       throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+    }
+    if (this.deletedProjects.has(projectId)) {
+      throw new Error('Dự án đã bị xóa.');
     }
     if (cached) {
       this.memoryProjects.set(projectId, cached);
@@ -676,11 +710,18 @@ export class ProjectStore {
    */
   async saveProject(
     project: StoryProject,
-    context: AccountContext = this.captureAccountContext()
+    context: AccountContext = this.captureAccountContext(),
+    options: { allowRecreate?: boolean } = {}
   ): Promise<void> {
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
 
-    this.deletedProjects.delete(project.id);
+    const allowRecreate = Boolean(options.allowRecreate);
+    if (allowRecreate) {
+      this.deletedProjects.delete(project.id);
+    } else if (this.deletedProjects.has(project.id)) {
+      return;
+    }
+
     this.projectVersions.set(
       project.id,
       (this.projectVersions.get(project.id) || 0) + 1
@@ -688,20 +729,37 @@ export class ProjectStore {
     this.memoryProjects.set(project.id, { ...project });
     await this.cacheProjectLocally(project, context.accountId);
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+    if (!allowRecreate && this.deletedProjects.has(project.id)) {
+      this.memoryProjects.delete(project.id);
+      const staleCacheKey = this.getProjectCacheKey(project.id, context.accountId);
+      if (staleCacheKey) {
+        await AsyncStorage.removeItem(staleCacheKey);
+      }
+      return;
+    }
 
-    // Cập nhật danh sách local projects
-    const locals = await this.getLocalProjects(context.accountId);
-    this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
-    const idx = locals.findIndex((p) => p.id === project.id);
-    if (idx >= 0) {
-      locals[idx] = { ...locals[idx], ...project };
-    } else {
-      locals.unshift(project);
-    }
-    const localProjectsKey = this.getLocalProjectsKey(context.accountId);
-    if (localProjectsKey) {
-      await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
-    }
+    // Tuần tự hóa cập nhật danh sách local projects theo từng tài khoản
+    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+      if (!allowRecreate && this.deletedProjects.has(project.id)) {
+        return;
+      }
+      const locals = await this.getLocalProjects(context.accountId);
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
+      if (!allowRecreate && this.deletedProjects.has(project.id)) {
+        return;
+      }
+      const idx = locals.findIndex((p) => p.id === project.id);
+      if (idx >= 0) {
+        locals[idx] = { ...locals[idx], ...project };
+      } else {
+        locals.unshift(project);
+      }
+      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+      if (localProjectsKey) {
+        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(locals));
+      }
+    });
   }
 
   /**
@@ -713,8 +771,9 @@ export class ProjectStore {
   ): Promise<void> {
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
 
-    // Đánh dấu dự án đang bị xóa để loại bỏ mọi response getProject cũ đang chạy song song
-    this.deletedProjects.add(projectId);
+    // Đánh dấu dự án đang bị xóa bằng token riêng để loại bỏ response cũ và bảo vệ quyền sở hữu marker
+    const deleteToken = Symbol('deleteProject');
+    this.deletedProjects.set(projectId, deleteToken);
     this.graphRequestVersions.set(
       projectId,
       (this.graphRequestVersions.get(projectId) || 0) + 1
@@ -733,7 +792,13 @@ export class ProjectStore {
       // Nếu server trả 404 (dự án đã không còn trên server hoặc chỉ có ở local), vẫn chạy local cleanup
       const isNotFound = err instanceof ApiError && err.status === 404;
       if (!isNotFound) {
-        this.deletedProjects.delete(projectId);
+        if (
+          this.accountVersion === context.version &&
+          this.accountId === context.accountId &&
+          this.deletedProjects.get(projectId) === deleteToken
+        ) {
+          this.deletedProjects.delete(projectId);
+        }
         throw err;
       }
     }
@@ -749,12 +814,16 @@ export class ProjectStore {
       await AsyncStorage.removeItem(cacheKey);
     }
 
-    const locals = await this.getLocalProjects(context.accountId);
-    const filteredLocals = locals.filter((p) => p.id !== projectId);
-    const localProjectsKey = this.getLocalProjectsKey(context.accountId);
-    if (localProjectsKey) {
-      await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
-    }
+    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+      const locals = await this.getLocalProjects(context.accountId);
+      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+      const filteredLocals = locals.filter((p) => p.id !== projectId);
+      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+      if (localProjectsKey) {
+        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
+      }
+    });
   }
 
   /**

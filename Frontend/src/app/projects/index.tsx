@@ -114,7 +114,7 @@ export default function ProjectsScreen() {
           nodes: [],
           links: [],
         };
-        await projectStore.saveProject(created);
+        await projectStore.saveProject(created, undefined, { allowRecreate: true });
         setProjects((prev) => [created, ...prev]);
       } else {
         // Fallback lưu local nếu backend lỗi
@@ -129,7 +129,7 @@ export default function ProjectsScreen() {
           nodes: [],
           links: [],
         };
-        await projectStore.saveProject(fallbackProj);
+        await projectStore.saveProject(fallbackProj, undefined, { allowRecreate: true });
         setProjects((prev) => [fallbackProj, ...prev]);
       }
 

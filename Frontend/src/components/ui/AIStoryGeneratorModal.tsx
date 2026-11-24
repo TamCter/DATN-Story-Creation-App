@@ -25,7 +25,7 @@ import {
   StoryProject,
 } from '@/constants/story-data';
 import { FormSelectField } from '@/components/ui/FormSelectField';
-import { api } from '@/services/api';
+import { api, ApiError } from '@/services/api';
 import { projectStore } from '@/services/project-store';
 import * as Clipboard from 'expo-clipboard';
 
@@ -274,11 +274,18 @@ export default function AIStoryGeneratorModal({
     };
     setStoryContent('');
     setWordCount(0);
+    setEditingEventIndex(null);
+    setEditingEventDraft(null);
     setIsSaving(false);
   }, [targetChapterKey]);
 
-  // Reset khi mở lại với initialChapter
+  // Reset khi mở lại với initialChapter hoặc dọn trạng thái edit khi đóng modal
   useEffect(() => {
+    if (!visible) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
     if (visible) {
       if (initialChapter) {
         // Initialize this modal from the selected chapter when it opens or changes.
@@ -342,6 +349,8 @@ export default function AIStoryGeneratorModal({
   const handleClose = (saveCompleted = false) => {
     if (isSavingRef.current && !saveCompleted) return;
     generationSessionRef.current += 1;
+    setEditingEventIndex(null);
+    setEditingEventDraft(null);
     onClose();
   };
 
@@ -591,11 +600,30 @@ export default function AIStoryGeneratorModal({
               if (!eventNode) {
                 throw new Error('Không tìm thấy node sự kiện đã tạo ở lần lưu trước.');
               }
-              eventNode = await projectStore.updateNode(
-                project.id,
-                eventNode.id,
-                eventPayload
-              );
+              try {
+                eventNode = await projectStore.updateNode(
+                  project.id,
+                  eventNode.id,
+                  eventPayload
+                );
+              } catch (updateErr) {
+                // Nếu node vẫn đang pending (chưa tồn tại trên server -> 404), tạo trên server qua ensureNodeSynced rồi áp dụng metadata
+                if (
+                  updateErr instanceof ApiError &&
+                  updateErr.status === 404 &&
+                  eventNode.syncStatus === 'pending'
+                ) {
+                  eventNode = await projectStore.ensureNodeSynced(project.id, eventNode.id);
+                  if (draftVersionRef.current !== saveDraftVersion) return;
+                  eventNode = await projectStore.updateNode(
+                    project.id,
+                    eventNode.id,
+                    eventPayload
+                  );
+                } else {
+                  throw updateErr;
+                }
+              }
               const existingIdx = currentNodes.findIndex((node) => node.id === eventNode!.id);
               if (existingIdx !== -1) currentNodes[existingIdx] = eventNode;
             } else {

@@ -1286,18 +1286,39 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // 5.6 Đối soát đảo chiều CAUSED_BY: nối các sự kiện trước đó có cause khớp tên/ID của sự kiện mới tạo này
+      // Loại trừ các chuỗi giữ chỗ (placeholder) tương tự cleanRelationalValue
+      const placeholderCauses = [
+        'unknown',
+        'not known',
+        'n/a',
+        'none',
+        'null',
+        'undefined',
+        'không rõ',
+        'chưa rõ',
+        'không xác định',
+        'chưa xác định',
+        'không có',
+        'trống',
+      ];
       await runQuery(`
         MATCH (otherEv:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (otherEv)-[old:RELATES_TO { category: 'CAUSED_BY' }]->(ev:StoryNode { id: $nodeId })
-        WHERE toLower(coalesce(otherEv.cause, '')) <> toLower(ev.name)
-          AND coalesce(otherEv.cause, '') <> ev.id
+        WHERE (
+          toLower(trim(coalesce(otherEv.cause, ''))) IN $placeholderCauses
+          OR (
+            toLower(trim(coalesce(otherEv.cause, ''))) <> toLower(ev.name)
+            AND trim(coalesce(otherEv.cause, '')) <> ev.id
+          )
+        )
         DELETE old
-      `, { nodeId, projectId });
+      `, { nodeId, projectId, placeholderCauses });
       await runQuery(`
         MATCH (otherEv:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p)
         WHERE otherEv.id <> ev.id
           AND otherEv.cause IS NOT NULL AND trim(otherEv.cause) <> ''
+          AND NOT (toLower(trim(otherEv.cause)) IN $placeholderCauses)
           AND (toLower(trim(otherEv.cause)) = toLower(ev.name) OR trim(otherEv.cause) = ev.id)
         MERGE (otherEv)-[r:RELATES_TO { category: 'CAUSED_BY' }]->(ev)
         ON CREATE SET r.id = 'link-' + otherEv.id + '-' + ev.id + '-cause',
@@ -1307,7 +1328,7 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                       r.createdAt = timestamp()
         ON MATCH SET r.label = 'Bắt nguồn từ',
                      r.updatedAt = timestamp()
-      `, { nodeId, projectId });
+      `, { nodeId, projectId, placeholderCauses });
     }
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):

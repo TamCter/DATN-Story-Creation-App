@@ -630,10 +630,24 @@ const handleCreateNodesFromAI = async (
         cleaned.ruler = keepIfAllowed(nodeData.ruler, 'faction');
       } else if (t === 'event') {
         cleaned.location = keepIfAllowed(nodeData.location, 'location');
-        cleaned.charactersInvolved = filterAllowedList(
-          nodeData.charactersInvolved || nodeData.characters,
-          'character'
-        );
+        const mergedParticipants = [
+          ...parseEventParticipants(nodeData.charactersInvolved),
+          ...parseEventParticipants(nodeData.characters),
+        ];
+        const seenParticipantKeys = new Set<string>();
+        const allowedParticipants: string[] = [];
+        for (const name of mergedParticipants) {
+          const key = name.trim().toLocaleLowerCase('vi');
+          if (
+            key &&
+            !seenParticipantKeys.has(key) &&
+            allowedNamesByType.character.has(key)
+          ) {
+            seenParticipantKeys.add(key);
+            allowedParticipants.push(name.trim());
+          }
+        }
+        cleaned.charactersInvolved = JSON.stringify(allowedParticipants);
         cleaned.characters = '';
         cleaned.itemsInvolved = filterAllowedList(nodeData.itemsInvolved, 'item');
         cleaned.factionsInvolved = filterAllowedList(nodeData.factionsInvolved, 'faction');
