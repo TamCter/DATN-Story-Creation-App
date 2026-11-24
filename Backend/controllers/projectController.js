@@ -229,7 +229,7 @@ async function deleteProject(req, res, next) {
       MATCH (u:User { id: $userId })-[:OWNS]->(p:Project { id: $id })
       OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
       OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (cs:ChatSession { projectId: $id, userId: $userId })
+      OPTIONAL MATCH (cs:AIChatSession { projectId: $id, userId: $userId })
       DETACH DELETE n, c, cs, p
       RETURN count(p) AS deleted
     `;

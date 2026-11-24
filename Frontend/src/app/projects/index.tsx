@@ -115,7 +115,7 @@ export default function ProjectsScreen() {
           links: [],
         };
         await projectStore.saveProject(created);
-        setProjects([created, ...projects]);
+        setProjects((prev) => [created, ...prev]);
       } else {
         // Fallback lưu local nếu backend lỗi
         const fallbackProj: StoryProject = {
@@ -130,7 +130,7 @@ export default function ProjectsScreen() {
           links: [],
         };
         await projectStore.saveProject(fallbackProj);
-        setProjects([fallbackProj, ...projects]);
+        setProjects((prev) => [fallbackProj, ...prev]);
       }
 
       setNewTitle('');
@@ -164,7 +164,7 @@ export default function ProjectsScreen() {
           nodes: [],
           links: [],
         };
-        setProjects([created, ...projects]);
+        setProjects((prev) => [created, ...prev]);
       } else {
         const msg = res.message || 'Không thể tạo dự án mẫu trên máy chủ.';
         Alert.alert('Lỗi tạo dự án', msg);

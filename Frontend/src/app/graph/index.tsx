@@ -634,6 +634,7 @@ const handleCreateNodesFromAI = async (
           nodeData.charactersInvolved || nodeData.characters,
           'character'
         );
+        cleaned.characters = '';
         cleaned.itemsInvolved = filterAllowedList(nodeData.itemsInvolved, 'item');
         cleaned.factionsInvolved = filterAllowedList(nodeData.factionsInvolved, 'faction');
       }

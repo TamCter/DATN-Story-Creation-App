@@ -184,9 +184,13 @@ function extractCreateNodeResponse(responseText) {
                     copy[relField] = PLACEHOLDER_VALUE_PATTERN.test(trimmed) ? '' : trimmed;
                   }
                 }
+                if (typeof copy.sequenceOrder === 'number' && Number.isFinite(copy.sequenceOrder)) {
+                  copy.sequenceOrder = String(copy.sequenceOrder);
+                }
                 return copy;
               };
 
+              const NON_STRING_NODE_FIELDS = new Set(['x', 'y', 'autoCreatedStub']);
               const sanitizedNodes = rawNodes.map(sanitizeNode);
               const isCompleteNode = (node) =>
                 node &&
@@ -202,9 +206,11 @@ function extractCreateNodeResponse(responseText) {
                 RELATIONAL_NODE_FIELDS.every(
                   (field) => !(field in node) || typeof node[field] === 'string'
                 ) &&
-                Object.values(node).every(
-                  (value) => typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-                );
+                Object.entries(node).every(([key, value]) => {
+                  if (key === 'x' || key === 'y') return typeof value === 'number' && Number.isFinite(value);
+                  if (key === 'autoCreatedStub') return typeof value === 'boolean';
+                  return !NON_STRING_NODE_FIELDS.has(key) && typeof value === 'string';
+                });
 
               if (sanitizedNodes.every(isCompleteNode)) {
                 // Khử trùng lặp nếu AI trả về 2 node giống nhau (cùng type + name)
@@ -924,17 +930,27 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       (n) => n && n.type === 'faction' && typeof n.name === 'string' && n.name.trim()
     );
 
+    const hasWholeEntityMention = (text, entityName) => {
+      if (!text || !entityName) return false;
+      const escaped = entityName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const pattern = new RegExp(
+        `(^|[^\\p{L}\\p{N}\\p{M}])${escaped}(?=$|[^\\p{L}\\p{N}\\p{M}])`,
+        'iu'
+      );
+      return pattern.test(text);
+    };
+
     const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event, idx) => {
       const cleanLocation = cleanEventScalar(event.location);
       const cleanCharacters = cleanEventList(event.charactersInvolved);
-      const eventTextLower = `${event.name || ''} ${event.desc || ''}`.toLocaleLowerCase('vi');
+      const eventText = `${event.name || ''} ${event.desc || ''}`;
 
       const matchedItems = cleanEventList(event.itemsInvolved);
       for (const itemNode of itemNodes) {
         const itemName = itemNode.name.trim();
         if (
           itemName.length >= 2 &&
-          eventTextLower.includes(itemName.toLocaleLowerCase('vi')) &&
+          hasWholeEntityMention(eventText, itemName) &&
           !matchedItems.some((existing) => existing.toLocaleLowerCase('vi') === itemName.toLocaleLowerCase('vi'))
         ) {
           matchedItems.push(itemName);
@@ -946,7 +962,7 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
         const facName = facNode.name.trim();
         if (
           facName.length >= 2 &&
-          eventTextLower.includes(facName.toLocaleLowerCase('vi')) &&
+          hasWholeEntityMention(eventText, facName) &&
           !matchedFactions.some((existing) => existing.toLocaleLowerCase('vi') === facName.toLocaleLowerCase('vi'))
         ) {
           matchedFactions.push(facName);

@@ -368,6 +368,7 @@ export class ProjectStore {
   private accountVersion = 0;
   private projectVersions: Map<string, number> = new Map();
   private graphRequestVersions: Map<string, number> = new Map();
+  private deletedProjects: Set<string> = new Set();
   private chapterMutationTails: Map<string, Promise<void>> = new Map();
 
   constructor() {
@@ -386,6 +387,7 @@ export class ProjectStore {
     this.memoryProjects.clear();
     this.projectVersions.clear();
     this.graphRequestVersions.clear();
+    this.deletedProjects.clear();
     for (const project of INITIAL_PROJECTS) {
       this.memoryProjects.set(project.id, cloneSeedProject(project));
     }
@@ -530,6 +532,9 @@ export class ProjectStore {
         if (this.accountVersion !== accountVersion) {
           throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
         }
+        if (this.deletedProjects.has(projectId)) {
+          throw new Error('Dự án đã bị xóa.');
+        }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
           (this.projectVersions.get(projectId) || 0) !== requestVersion
@@ -577,10 +582,21 @@ export class ProjectStore {
           edges: actualLinks,
           chapters: mergedChapters,
         };
+        if (this.deletedProjects.has(projectId)) {
+          throw new Error('Dự án đã bị xóa.');
+        }
         this.memoryProjects.set(projectId, fullProject);
         await this.cacheProjectLocally(fullProject, accountId);
         if (this.accountVersion !== accountVersion) {
           throw new Error('Tài khoản đã thay đổi trong lúc tải dự án.');
+        }
+        if (this.deletedProjects.has(projectId)) {
+          this.memoryProjects.delete(projectId);
+          const staleCacheKey = this.getProjectCacheKey(projectId, accountId);
+          if (staleCacheKey) {
+            await AsyncStorage.removeItem(staleCacheKey);
+          }
+          throw new Error('Dự án đã bị xóa.');
         }
         if (
           this.graphRequestVersions.get(projectId) !== graphRequestVersion ||
@@ -664,6 +680,7 @@ export class ProjectStore {
   ): Promise<void> {
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc lưu dự án.');
 
+    this.deletedProjects.delete(project.id);
     this.projectVersions.set(
       project.id,
       (this.projectVersions.get(project.id) || 0) + 1
@@ -696,18 +713,27 @@ export class ProjectStore {
   ): Promise<void> {
     this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
 
+    // Đánh dấu dự án đang bị xóa để loại bỏ mọi response getProject cũ đang chạy song song
+    this.deletedProjects.add(projectId);
+    this.graphRequestVersions.set(
+      projectId,
+      (this.graphRequestVersions.get(projectId) || 0) + 1
+    );
+    this.projectVersions.set(
+      projectId,
+      (this.projectVersions.get(projectId) || 0) + 1
+    );
+
     try {
       const res = await api.deleteProject(projectId);
       if (!res.success) {
         throw new Error(res.message || 'Không thể xóa dự án trên máy chủ.');
       }
     } catch (err) {
-      // Nếu dự án chỉ tồn tại ở local (chưa từng lưu lên server -> 404), vẫn cho phép dọn local
-      const isLocalOnly404 =
-        err instanceof ApiError &&
-        err.status === 404 &&
-        projectId.startsWith('project-');
-      if (!isLocalOnly404) {
+      // Nếu server trả 404 (dự án đã không còn trên server hoặc chỉ có ở local), vẫn chạy local cleanup
+      const isNotFound = err instanceof ApiError && err.status === 404;
+      if (!isNotFound) {
+        this.deletedProjects.delete(projectId);
         throw err;
       }
     }

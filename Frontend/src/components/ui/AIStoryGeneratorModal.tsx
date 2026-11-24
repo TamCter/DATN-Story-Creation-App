@@ -167,28 +167,81 @@ export default function AIStoryGeneratorModal({
       }
       return;
     }
+
+    const currentTarget = generatedEvents[editingEventIndex];
+    if (!currentTarget) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
+
+    const nextEventType = editingEventDraft.eventType.trim();
+    const nextImportance = editingEventDraft.importance.trim();
+    const nextArcName = editingEventDraft.arcName.trim();
+    const nextSequenceOrder =
+      editingEventDraft.sequenceOrder.trim() || String(editingEventIndex + 1);
+    const nextTime = editingEventDraft.time.trim();
+    const nextTimelineType = editingEventDraft.timelineType.trim() || 'Hiện tại';
+    const nextDuration = editingEventDraft.duration.trim();
+    const nextCharacterRoles = editingEventDraft.characterRoles.trim();
+
+    const hasEffectiveChange =
+      trimmedName !== (currentTarget.name || '').trim() ||
+      nextEventType !== (currentTarget.eventType || '').trim() ||
+      nextImportance !== (currentTarget.importance || '').trim() ||
+      nextArcName !== (currentTarget.arcName || '').trim() ||
+      nextSequenceOrder !== (currentTarget.sequenceOrder || String(editingEventIndex + 1)).trim() ||
+      nextTime !== (currentTarget.time || '').trim() ||
+      nextTimelineType !== (currentTarget.timelineType || 'Hiện tại').trim() ||
+      nextDuration !== (currentTarget.duration || '').trim() ||
+      nextCharacterRoles !== (currentTarget.characterRoles || '').trim();
+
+    if (!hasEffectiveChange) {
+      setEditingEventIndex(null);
+      setEditingEventDraft(null);
+      return;
+    }
+
+    const oldNameLower = (currentTarget.name || '').trim().toLocaleLowerCase('vi');
+    const renamed = oldNameLower !== '' && oldNameLower !== trimmedName.toLocaleLowerCase('vi');
+
     setGeneratedEvents((prev) =>
-      prev.map((ev, idx) =>
-        idx === editingEventIndex
-          ? {
+      prev.map((ev, idx) => {
+        if (idx === editingEventIndex) {
+          return {
             ...ev,
             name: trimmedName,
-            eventType: editingEventDraft.eventType.trim(),
-            importance: editingEventDraft.importance.trim(),
-            arcName: editingEventDraft.arcName.trim(),
-            sequenceOrder: editingEventDraft.sequenceOrder.trim() || String(idx + 1),
-            time: editingEventDraft.time.trim(),
-            timelineType: editingEventDraft.timelineType.trim() || 'Hiện tại',
-            duration: editingEventDraft.duration.trim(),
-            characterRoles: editingEventDraft.characterRoles.trim(),
+            eventType: nextEventType,
+            importance: nextImportance,
+            arcName: nextArcName,
+            sequenceOrder: nextSequenceOrder,
+            time: nextTime,
+            timelineType: nextTimelineType,
+            duration: nextDuration,
+            characterRoles: nextCharacterRoles,
             characterStatusChanges: (ev.characterStatusChanges || []).map((change) => ({
               ...change,
               statusEvent: trimmedName,
             })),
-          }
-          : ev
-      )
+          };
+        }
+        if (
+          renamed &&
+          typeof ev.cause === 'string' &&
+          ev.cause.trim().toLocaleLowerCase('vi') === oldNameLower
+        ) {
+          return { ...ev, cause: trimmedName };
+        }
+        return ev;
+      })
     );
+
+    // Đánh dấu nội dung truyện đã cũ và yêu cầu sáng tác lại trước khi lưu
+    if (storyContent) {
+      setStoryContent('');
+      setWordCount(0);
+    }
+
     setEditingEventIndex(null);
     setEditingEventDraft(null);
   };
@@ -238,11 +291,24 @@ export default function AIStoryGeneratorModal({
         });
         const matchedEvts = (projectNodesRef.current || [])
           .filter((node) => eventBelongsToChapter(node, initialChapter))
-          .map((n) => ({
+          .map((n, idx) => ({
             name: n.name,
             desc: n.desc,
+            eventType: n.eventType || '',
+            importance: n.importance || '',
+            arcName: n.arcName || '',
+            sequenceOrder: n.sequenceOrder || String(idx + 1),
             location: n.location,
             time: n.time,
+            timelineType: n.timelineType || 'Hiện tại',
+            duration: n.duration || '',
+            cause: n.cause || '',
+            conflict: n.conflict || '',
+            outcome: n.outcome || '',
+            consequences: n.consequences || '',
+            characterRoles: n.characterRoles || '',
+            itemsInvolved: parseEventParticipants(n.itemsInvolved),
+            factionsInvolved: parseEventParticipants(n.factionsInvolved),
             charactersInvolved: parseEventParticipants(
               n.charactersInvolved || n.characters
             ),
@@ -494,38 +560,46 @@ export default function AIStoryGeneratorModal({
                 ids: {},
               };
             }
+            const eventPayload: Partial<StoryNode> = {
+              name: ev.name,
+              type: 'event',
+              desc: ev.desc,
+              chapter: generatedChapter.title,
+              location: ev.location || '',
+              time: ev.time || '',
+              timelineType: ev.timelineType || 'Hiện tại',
+              duration: ev.duration || '',
+              eventType: ev.eventType || '',
+              importance: ev.importance || '',
+              arcName: ev.arcName || '',
+              sequenceOrder: ev.sequenceOrder || String(eventIndex + 1),
+              cause: ev.cause || '',
+              conflict: ev.conflict || '',
+              outcome: ev.outcome || '',
+              consequences: ev.consequences || '',
+              characterRoles: ev.characterRoles || '',
+              itemsInvolved: JSON.stringify(ev.itemsInvolved || []),
+              factionsInvolved: JSON.stringify(ev.factionsInvolved || []),
+              impact: ev.impact || '',
+              role: 'BIẾN CỐ',
+              status: 'Đã diễn ra',
+              charactersInvolved: JSON.stringify(participants),
+            };
             const savedNodeId = savedEventNodeIdsRef.current.ids[eventIndex];
             if (savedNodeId) {
               eventNode = currentNodes.find((node) => node.id === savedNodeId);
               if (!eventNode) {
                 throw new Error('Không tìm thấy node sự kiện đã tạo ở lần lưu trước.');
               }
+              eventNode = await projectStore.updateNode(
+                project.id,
+                eventNode.id,
+                eventPayload
+              );
+              const existingIdx = currentNodes.findIndex((node) => node.id === eventNode!.id);
+              if (existingIdx !== -1) currentNodes[existingIdx] = eventNode;
             } else {
-              eventNode = await projectStore.createNode(project.id, {
-                name: ev.name,
-                type: 'event',
-                desc: ev.desc,
-                chapter: generatedChapter.title,
-                location: ev.location || '',
-                time: ev.time || '',
-                timelineType: ev.timelineType || 'Hiện tại',
-                duration: ev.duration || '',
-                eventType: ev.eventType || '',
-                importance: ev.importance || '',
-                arcName: ev.arcName || '',
-                sequenceOrder: ev.sequenceOrder || String(eventIndex + 1),
-                cause: ev.cause || '',
-                conflict: ev.conflict || '',
-                outcome: ev.outcome || '',
-                consequences: ev.consequences || '',
-                characterRoles: ev.characterRoles || '',
-                itemsInvolved: JSON.stringify(ev.itemsInvolved || []),
-                factionsInvolved: JSON.stringify(ev.factionsInvolved || []),
-                impact: ev.impact || '',
-                role: 'BIẾN CỐ',
-                status: 'Đã diễn ra',
-                charactersInvolved: JSON.stringify(participants),
-              });
+              eventNode = await projectStore.createNode(project.id, eventPayload);
               currentNodes.push(eventNode);
               if (draftVersionRef.current !== saveDraftVersion) return;
               savedEventNodeIdsRef.current.ids[eventIndex] = eventNode.id;

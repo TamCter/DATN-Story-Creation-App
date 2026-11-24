@@ -1601,9 +1601,9 @@ export default function AIChatPanel({
     messageId: string,
     nodes: Partial<StoryNode>[]
   ): Promise<boolean> => {
+    const capturedScope = activeScopeRef.current;
     const ok = await onCreateNodes(nodes);
     if (ok) {
-      const capturedScope = activeScopeRef.current;
       setChatState((prev) =>
         prev.scopeKey === capturedScope
           ? {
@@ -1615,20 +1615,21 @@ export default function AIChatPanel({
           : prev
       );
       if (capturedScope) {
-        void AsyncStorage.getItem(capturedScope)
-          .then((raw) => {
+        void enqueueScopedWrite(capturedScope, async () => {
+          try {
+            const raw = await AsyncStorage.getItem(capturedScope);
             if (!raw) return;
             const parsed = JSON.parse(raw);
             if (parsed && Array.isArray(parsed.messages)) {
               parsed.messages = parsed.messages.map((m: AIChatMessage) =>
                 m.id === messageId ? { ...m, nodesAdded: true } : m
               );
-              return AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
+              await AsyncStorage.setItem(capturedScope, JSON.stringify(parsed));
             }
-          })
-          .catch(() => {
+          } catch {
             // Không chặn luồng chính nếu cập nhật cờ cache local thất bại
-          });
+          }
+        });
       }
     }
     return ok;

@@ -530,7 +530,9 @@ async function updateNode(req, res, next) {
     const participantFieldsChanged =
       body.charactersInvolved !== undefined ||
       body.characters !== undefined ||
-      body.character !== undefined;
+      body.character !== undefined ||
+      body.itemsInvolved !== undefined ||
+      body.factionsInvolved !== undefined;
     const currentType = body.type?.toLowerCase() || checkResult[0].n.type;
     if (participantFieldsChanged && currentType === 'event') {
       updates._participantSyncRevision = crypto.randomUUID();
@@ -1183,25 +1185,33 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
       await runQuery(`
         MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
+        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
         OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_ITEM' }]->(it:StoryNode)
-        WHERE NOT (it.id IN $itemIds)
-        DELETE old
-      `, { nodeId, projectId, itemIds });
-      if (itemIds.length > 0) {
-        await runQuery(`
-          MATCH (ev:StoryNode { id: $nodeId })
-          MATCH (it:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
-          WHERE it.id IN $itemIds
-          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_ITEM' }]->(it)
-          ON CREATE SET r.id = 'link-' + ev.id + '-' + it.id + '-item',
+        WHERE isCurrent AND NOT (it.id IN $itemIds)
+        WITH ev, isCurrent, collect(old) AS staleLinks
+        FOREACH (staleLink IN staleLinks | DELETE staleLink)
+        OPTIONAL MATCH (itemNode:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+        WHERE isCurrent AND itemNode.id IN $itemIds
+        WITH ev, isCurrent, collect(itemNode) AS targetItems
+        FOREACH (targetItem IN targetItems |
+          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_ITEM' }]->(targetItem)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + targetItem.id + '-item',
                         r.label = 'Liên quan vật phẩm',
                         r.type = 'dashed',
                         r.tone = 'possession',
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Liên quan vật phẩm',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, itemIds });
-      }
+        )
+        REMOVE ev._participantSyncLock
+        RETURN isCurrent
+      `, {
+        nodeId,
+        projectId,
+        itemIds,
+        revision: nodeData._participantSyncRevision || null,
+      });
 
       // 5.4 Tổ chức / Phe phái liên quan -> Faction (INVOLVES_FACTION)
       const factionNames = Array.from(
@@ -1224,25 +1234,33 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
       await runQuery(`
         MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(:Project { id: $projectId })
+        SET ev._participantSyncLock = coalesce(ev._participantSyncLock, 0) + 1
+        WITH ev, coalesce(ev._participantSyncRevision, '') = coalesce($revision, '') AS isCurrent
         OPTIONAL MATCH (ev)-[old:RELATES_TO { category: 'INVOLVES_FACTION' }]->(fac:StoryNode)
-        WHERE NOT (fac.id IN $factionIds)
-        DELETE old
-      `, { nodeId, projectId, factionIds });
-      if (factionIds.length > 0) {
-        await runQuery(`
-          MATCH (ev:StoryNode { id: $nodeId })
-          MATCH (fac:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
-          WHERE fac.id IN $factionIds
-          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_FACTION' }]->(fac)
-          ON CREATE SET r.id = 'link-' + ev.id + '-' + fac.id + '-faction',
+        WHERE isCurrent AND NOT (fac.id IN $factionIds)
+        WITH ev, isCurrent, collect(old) AS staleLinks
+        FOREACH (staleLink IN staleLinks | DELETE staleLink)
+        OPTIONAL MATCH (facNode:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+        WHERE isCurrent AND facNode.id IN $factionIds
+        WITH ev, isCurrent, collect(facNode) AS targetFactions
+        FOREACH (targetFac IN targetFactions |
+          MERGE (ev)-[r:RELATES_TO { category: 'INVOLVES_FACTION' }]->(targetFac)
+          ON CREATE SET r.id = 'link-' + ev.id + '-' + targetFac.id + '-faction',
                         r.label = 'Liên quan tổ chức',
                         r.type = 'dashed',
                         r.tone = 'sect',
                         r.createdAt = timestamp()
           ON MATCH SET r.label = 'Liên quan tổ chức',
                        r.updatedAt = timestamp()
-        `, { nodeId, projectId, factionIds });
-      }
+        )
+        REMOVE ev._participantSyncLock
+        RETURN isCurrent
+      `, {
+        nodeId,
+        projectId,
+        factionIds,
+        revision: nodeData._participantSyncRevision || null,
+      });
 
       // 5.5 Nhân quả giữa các sự kiện -> Event (CAUSED_BY, chỉ nối nếu khớp tên/ID một Event đã tồn tại)
       const causeText = cleanRelationalValue(nodeData.cause);
@@ -1266,6 +1284,30 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                        r.updatedAt = timestamp()
         `, { nodeId, projectId, causeText });
       }
+
+      // 5.6 Đối soát đảo chiều CAUSED_BY: nối các sự kiện trước đó có cause khớp tên/ID của sự kiện mới tạo này
+      await runQuery(`
+        MATCH (otherEv:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (otherEv)-[old:RELATES_TO { category: 'CAUSED_BY' }]->(ev:StoryNode { id: $nodeId })
+        WHERE toLower(coalesce(otherEv.cause, '')) <> toLower(ev.name)
+          AND coalesce(otherEv.cause, '') <> ev.id
+        DELETE old
+      `, { nodeId, projectId });
+      await runQuery(`
+        MATCH (otherEv:StoryNode { type: 'event' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        MATCH (ev:StoryNode { id: $nodeId })-[:BELONGS_TO]->(p)
+        WHERE otherEv.id <> ev.id
+          AND otherEv.cause IS NOT NULL AND trim(otherEv.cause) <> ''
+          AND (toLower(trim(otherEv.cause)) = toLower(ev.name) OR trim(otherEv.cause) = ev.id)
+        MERGE (otherEv)-[r:RELATES_TO { category: 'CAUSED_BY' }]->(ev)
+        ON CREATE SET r.id = 'link-' + otherEv.id + '-' + ev.id + '-cause',
+                      r.label = 'Bắt nguồn từ',
+                      r.type = 'dashed',
+                      r.tone = 'event',
+                      r.createdAt = timestamp()
+        ON MATCH SET r.label = 'Bắt nguồn từ',
+                     r.updatedAt = timestamp()
+      `, { nodeId, projectId });
     }
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
