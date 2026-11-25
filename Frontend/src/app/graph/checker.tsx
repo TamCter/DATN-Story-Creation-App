@@ -438,6 +438,7 @@ export default function TextCheckerScreen() {
 
   // Lưu vào database (ghi nhớ chapterId đã tạo trong phiên để retry không tạo trùng chương)
   const [isSaving, setIsSaving] = useState(false);
+  const [committedNodeIds, setCommittedNodeIds] = useState<Record<string, string>>({});
   const activeSaveAttemptRef = useRef<{
     chapterId: string;
     chapterNumber: number;
@@ -479,6 +480,7 @@ export default function TextCheckerScreen() {
   useEffect(() => {
     chapterNumberTouchedRef.current = false;
     activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
     void loadProject();
   }, [loadProject]);
 
@@ -960,6 +962,7 @@ export default function TextCheckerScreen() {
             existingChapter = latestChapters.find((c) => c.id === currentAttempt!.chapterId);
           } else {
             activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
             currentAttempt = null;
           }
         }
@@ -1094,9 +1097,7 @@ export default function TextCheckerScreen() {
           statusEvent: item.statusEvent.trim(),
           gender: item.gender.trim(),
           dob: formatDateDDMMYYYY(item.dob),
-          age: item.ageManuallyEdited
-            ? item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob))
-            : calculateAgeFromDob(formatDateDDMMYYYY(item.dob)) || item.age.trim(),
+          age: item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob)),
           birthplace: item.birthplace.trim(),
           weapon: item.weapon.trim(),
           sect: item.sect.trim(),
@@ -1128,6 +1129,7 @@ export default function TextCheckerScreen() {
                 { onlyIfStub: true }
               );
               attempt.committedNodeIds[item.localId] = updatedNode.id;
+              setCommittedNodeIds({ ...attempt.committedNodeIds });
               savedNodesCount += 1;
             } catch (stubErr) {
               // Nếu node đã trở thành node đầy đủ trong lúc ghi -> giữ nguyên, không ghi đè
@@ -1140,6 +1142,7 @@ export default function TextCheckerScreen() {
         } else {
           const createdNode = await projectStore.createNode(projectId, payload);
           attempt.committedNodeIds[item.localId] = createdNode.id;
+          setCommittedNodeIds({ ...attempt.committedNodeIds });
           savedNodesCount += 1;
         }
       }
@@ -1235,6 +1238,7 @@ export default function TextCheckerScreen() {
       chapterNumberTouchedRef.current = false;
       setChapterNumberInput(String(nextNum));
       activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
 
       setSaveSuccessInfo({
         chapterTitle: effectiveTitle,
@@ -1425,6 +1429,7 @@ export default function TextCheckerScreen() {
     analyzedTextSnapshotRef.current = null;
     setContextOmissions(null);
     activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
     chapterNumberTouchedRef.current = false;
     setSaveSuccessInfo(null);
   };
@@ -2103,7 +2108,7 @@ export default function TextCheckerScreen() {
             </Text>
             {editingNode && (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
-                {(isAddingNewNode || !activeSaveAttemptRef.current?.committedNodeIds[editingNode.localId]) && (
+                {(isAddingNewNode || !committedNodeIds[editingNode.localId]) && (
                   <>
                     <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
                     <View style={styles.typeChipsRow}>

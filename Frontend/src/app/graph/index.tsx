@@ -296,6 +296,7 @@ export default function GraphScreen() {
   // Nhân vật (Character)
   const [formDob, setFormDob] = useState('');
   const [formAge, setFormAge] = useState('');
+  const [formAgeManuallyEdited, setFormAgeManuallyEdited] = useState(false);
   const [formBirthplace, setFormBirthplace] = useState('');
   const [formGender, setFormGender] = useState('Nam');
   const [formWeapons, setFormWeapons] = useState<string[]>([]);
@@ -499,6 +500,7 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormDesc('');
   setFormDob('');
   setFormAge('');
+  setFormAgeManuallyEdited(false);
   setFormBirthplace('');
   setFormGender('Nam');
   setFormWeapons([]);
@@ -915,8 +917,12 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Đang hoạt động' : 'Hoạt động'));
   setFormStatusEvent(node.statusEvent || '');
   setFormDesc(node.desc || '');
-  setFormDob(formatDateDDMMYYYY(node.dob));
-  setFormAge(node.age || '');
+  const normalizedDob = formatDateDDMMYYYY(node.dob);
+  const existingAge = (node.age || '').trim();
+  const derivedAge = calculateAgeFromDob(normalizedDob);
+  setFormDob(normalizedDob);
+  setFormAge(existingAge);
+  setFormAgeManuallyEdited(Boolean(existingAge && existingAge !== derivedAge));
   setFormBirthplace(node.birthplace || '');
   setFormGender(node.gender || 'Nam');
   setFormWeapons(getCharacterOwnedItems(node, nodes, links));
@@ -935,9 +941,8 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormRuler(node.ruler || '');
   setFormLeader(node.leader || '');
   if (node.type === 'faction') {
-    const facMembers = getFactionMembers(node, nodes, links);
-    setFormFactionSeniorMembers(facMembers.seniorMembers);
-    setFormFactionMembers(facMembers.members);
+    setFormFactionSeniorMembers(parseEventParticipants(node.seniorMembers));
+    setFormFactionMembers(parseEventParticipants(node.members));
   } else {
     setFormFactionSeniorMembers([]);
     setFormFactionMembers([]);
@@ -1386,9 +1391,14 @@ return (
                       {selectedNode.birthplace ? (
                         <Text style={styles.previewTag}>📍 {selectedNode.birthplace}</Text>
                       ) : null}
-                      {selectedNode.weapon ? (
-                        <Text style={styles.previewTag}>⚔️ {selectedNode.weapon}</Text>
-                      ) : null}
+                      {selectedNode.type === 'character'
+                        ? (() => {
+                            const ownedItems = getCharacterOwnedItems(selectedNode, nodes, links);
+                            return ownedItems.length > 0 ? (
+                              <Text style={styles.previewTag}>⚔️ {ownedItems.join(', ')}</Text>
+                            ) : null;
+                          })()
+                        : null}
                       {selectedNode.sect ? (
                         <Text style={styles.previewTag}>🏛️ {selectedNode.sect}</Text>
                       ) : null}
@@ -1613,7 +1623,12 @@ return (
                               <Text style={styles.modalInputLabel}>Ngày / Năm sinh</Text>
                               <DatePickerField
                                 value={formDob}
-                                onChange={setFormDob}
+                                onChange={(v) => {
+                                  setFormDob(v);
+                                  if (!formAgeManuallyEdited) {
+                                    setFormAge(calculateAgeFromDob(formatDateDDMMYYYY(v)));
+                                  }
+                                }}
                                 placeholder="DD/MM/YYYY"
                               />
                             </View>
@@ -1622,7 +1637,10 @@ return (
                               <TextInput
                                 style={styles.modalInput}
                                 value={formAge}
-                                onChangeText={setFormAge}
+                                onChangeText={(v) => {
+                                  setFormAge(v);
+                                  setFormAgeManuallyEdited(v.trim() !== '');
+                                }}
                                 placeholder="Để trống sẽ tự tính theo năm sinh"
                                 placeholderTextColor="#665f52"
                                 keyboardType="numeric"

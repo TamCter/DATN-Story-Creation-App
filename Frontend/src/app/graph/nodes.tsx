@@ -23,6 +23,7 @@ import {
   FACTION_STATUS_OPTIONS,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterOwnedItems,
   getProjectChapters,
   INITIAL_PROJECTS,
   ITEM_RARITY_OPTIONS,
@@ -508,7 +509,18 @@ export default function NodesDetailScreen() {
                     <Text style={styles.attrTag}>📍 Nơi sinh: {node.birthplace}</Text>
                   ) : null}
                   {node.gender ? <Text style={styles.attrTag}>⚧ Giới tính: {node.gender}</Text> : null}
-                  {node.weapon ? <Text style={styles.attrTag}>🎒 Vật dụng: {node.weapon}</Text> : null}
+                  {node.type === 'character'
+                    ? (() => {
+                        const ownedItems = getCharacterOwnedItems(
+                          node,
+                          currentProject.nodes,
+                          currentProject.links
+                        );
+                        return ownedItems.length > 0 ? (
+                          <Text style={styles.attrTag}>🎒 Vật phẩm: {ownedItems.join(', ')}</Text>
+                        ) : null;
+                      })()
+                    : null}
                   {node.sect ? <Text style={styles.attrTag}>🏛️ Tổ chức: {node.sect}</Text> : null}
                   {node.personality ? (
                     <Text style={styles.attrTag}>🎭 Tính cách: {node.personality}</Text>
