@@ -18,7 +18,8 @@ import * as Clipboard from 'expo-clipboard';
 import { AppFonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { api, ApiError } from '@/services/api';
-import { StoryNode } from '@/constants/story-data';
+import { projectStore } from '@/services/project-store';
+import { StoryLink, StoryNode } from '@/constants/story-data';
 
 const AI_CHAT_STORAGE_PREFIX = '@story_app_ai_chat_';
 const AI_CHAT_PENDING_DELETE_PREFIX = '@story_app_ai_chat_pending_delete_';
@@ -182,6 +183,18 @@ function parseStoredChatPayload(raw: string): StoredChatPayload | null {
   return null;
 }
 
+export interface AIChatSuggestedLink {
+  source: string;
+  target: string;
+  sourceName?: string;
+  targetName?: string;
+  label: string;
+  category?: string;
+  tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
+  type?: 'solid' | 'dashed';
+  contextNote?: string;
+}
+
 export interface AIChatMessage {
   id: string;
   role: 'user' | 'assistant' | 'system';
@@ -189,6 +202,8 @@ export interface AIChatMessage {
   nodeData?: Partial<StoryNode> | null;
   nodeDataList?: Partial<StoryNode>[];
   nodesAdded?: boolean;
+  linkDataList?: AIChatSuggestedLink[];
+  linksAdded?: boolean;
   suggestedPrompt?: string | null;
   timestamp: number;
   canRetry?: boolean;
@@ -199,9 +214,11 @@ interface AIChatPanelProps {
   onClose: () => void;
   onCreateNode: (nodeData: Partial<StoryNode>) => void;
   onCreateNodes: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
+  onCreateLinks?: (links: AIChatSuggestedLink[]) => Promise<boolean>;
   projectId?: string;
   projectTitle?: string;
   existingNodes?: StoryNode[];
+  existingLinks?: StoryLink[];
 }
 
 const WELCOME_MSG: AIChatMessage = {
@@ -219,9 +236,11 @@ export default function AIChatPanel({
   onClose,
   onCreateNode,
   onCreateNodes,
+  onCreateLinks,
   projectId,
   projectTitle,
   existingNodes = [],
+  existingLinks = [],
 }: AIChatPanelProps) {
   const { user } = useAuth();
   const authorKey = user?.id || user?.email || 'guest';
@@ -432,6 +451,11 @@ export default function AIChatPanel({
           ...(supersededClearMarker ? { replacedClearId: supersededClearMarker.clearId } : {}),
         };
 
+        if (targetProjectId && projectStore.isProjectDeleted(targetProjectId)) {
+          workingHistoryByScopeRef.current.delete(targetScopeKey);
+          return;
+        }
+
         let localWriteSucceeded = false;
         try {
           // Ghi snapshot thay thế gắn với clearId và pendingWriteId TRƯỚC khi đánh dấu dọn dẹp cục bộ đã xong
@@ -439,6 +463,16 @@ export default function AIChatPanel({
           localWriteSucceeded = true;
         } catch (err) {
           console.warn('[AIChatPanel] Không thể lưu lịch sử chat vào bộ nhớ cục bộ:', err);
+        }
+
+        if (targetProjectId && projectStore.isProjectDeleted(targetProjectId)) {
+          await AsyncStorage.multiRemove([
+            targetScopeKey,
+            targetPendingDeleteKey,
+            targetLocalCleanupKey,
+            targetServerRevKey,
+          ]).catch(() => undefined);
+          return;
         }
 
         // Chỉ cập nhật/gỡ targetLocalCleanupKey SAU KHI snapshot thay thế đã được ghi bền vững
@@ -464,8 +498,8 @@ export default function AIChatPanel({
         if (!isServerBacked || !targetProjectId || !targetUserId) {
           return;
         }
-        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động
-        if (activeUserIdRef.current !== targetUserId) {
+        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động và dự án chưa bị xóa
+        if (activeUserIdRef.current !== targetUserId || projectStore.isProjectDeleted(targetProjectId)) {
           return;
         }
 
@@ -482,6 +516,15 @@ export default function AIChatPanel({
             expectedRevision: baseRevisionForPut,
             writeId,
           });
+          if (projectStore.isProjectDeleted(targetProjectId)) {
+            await AsyncStorage.multiRemove([
+              targetScopeKey,
+              targetPendingDeleteKey,
+              targetLocalCleanupKey,
+              targetServerRevKey,
+            ]).catch(() => undefined);
+            return;
+          }
           const confirmedRevision = Number(saveRes.data?.revision) || baseRevisionForPut + 1;
           turnRevision.current = confirmedRevision;
           lastLocalWriteAckRef.current.set(targetScopeKey, {
@@ -1308,6 +1351,7 @@ export default function AIChatPanel({
             : res.data.nodeData
               ? [res.data.nodeData]
               : [],
+          linkDataList: res.data.linkDataList?.length ? res.data.linkDataList : [],
           suggestedPrompt: res.data.suggestedPrompt || null,
           timestamp: Date.now(),
         };
@@ -1720,6 +1764,69 @@ export default function AIChatPanel({
     return ok;
   };
 
+  const existingLinkKeys = React.useMemo(() => {
+    const keys = new Set<string>();
+    for (const link of existingLinks) {
+      if (link && link.source && link.target) {
+        const labelKey = (link.label || '').trim().toLocaleLowerCase('vi');
+        keys.add(`${link.source}::${link.target}::${labelKey}`);
+      }
+    }
+    return keys;
+  }, [existingLinks]);
+
+  const handleConfirmCreateLinks = async (
+    messageId: string,
+    links: AIChatSuggestedLink[]
+  ): Promise<boolean> => {
+    if (!onCreateLinks || links.length === 0) return false;
+    const capturedScope = storageKey;
+    const capturedPendingDelete = pendingDeleteKey;
+    const capturedLocalCleanup = localCleanupKey;
+    const capturedServerRev = serverRevKey;
+    const capturedProjectId = projectId;
+    const capturedUserId = user?.id;
+    const turnRevision = {
+      current: chatState.scopeKey === capturedScope ? chatState.baseRevision : 0,
+    };
+
+    const ok = await onCreateLinks(links);
+    if (ok) {
+      bumpRevision(capturedScope);
+      setChatState((prev) =>
+        prev.scopeKey === capturedScope
+          ? {
+              ...prev,
+              messages: prev.messages.map((m) =>
+                m.id === messageId ? { ...m, linksAdded: true } : m
+              ),
+            }
+          : prev
+      );
+
+      if (capturedScope) {
+        void persistMessagesForScope(
+          capturedScope,
+          capturedPendingDelete,
+          capturedLocalCleanup,
+          capturedServerRev,
+          capturedProjectId,
+          capturedUserId,
+          (latestMessages) => {
+            if (!latestMessages.some((m) => m.id === messageId)) {
+              return null;
+            }
+            return latestMessages.map((m) =>
+              m.id === messageId ? { ...m, linksAdded: true } : m
+            );
+          },
+          turnRevision
+        );
+      }
+    }
+    return ok;
+  };
+
   if (!visible) return null;
 
   return (
@@ -1829,8 +1936,12 @@ export default function AIChatPanel({
             key={msg.id}
             message={msg}
             existingFullNodeKeys={existingFullNodeKeys}
+            existingLinkKeys={existingLinkKeys}
             onConfirmCreate={handleConfirmCreate}
             onConfirmCreateMany={(nodes) => handleConfirmCreateMany(msg.id, nodes)}
+            onConfirmCreateLinks={
+              onCreateLinks ? (links) => handleConfirmCreateLinks(msg.id, links) : undefined
+            }
             onRetry={handleRetry}
             onCopy={handleCopyMessage}
             onUseSuggestedPrompt={(prompt) => setInputText(prompt)}
@@ -1904,8 +2015,10 @@ export default function AIChatPanel({
 function MessageBubble({
   message,
   existingFullNodeKeys,
+  existingLinkKeys,
   onConfirmCreate,
   onConfirmCreateMany,
+  onConfirmCreateLinks,
   onRetry,
   onCopy,
   onUseSuggestedPrompt,
@@ -1914,8 +2027,10 @@ function MessageBubble({
 }: {
   message: AIChatMessage;
   existingFullNodeKeys: Set<string>;
+  existingLinkKeys: Set<string>;
   onConfirmCreate: (node: Partial<StoryNode>) => void;
   onConfirmCreateMany: (nodes: Partial<StoryNode>[]) => Promise<boolean>;
+  onConfirmCreateLinks?: (links: AIChatSuggestedLink[]) => Promise<boolean>;
   onRetry?: () => void;
   onCopy?: (message: AIChatMessage) => void;
   onUseSuggestedPrompt?: (prompt: string) => void;
@@ -1929,12 +2044,19 @@ function MessageBubble({
     : message.nodeData
       ? [message.nodeData]
       : [];
+  const linkDataList = message.linkDataList?.length ? message.linkDataList : [];
   const allNodesAlreadyInGraph =
     nodeDataList.length > 0 &&
     nodeDataList.every((n) => {
       const t = n.type || 'character';
       const name = (n.name || '').trim().toLocaleLowerCase('vi');
       return Boolean(name) && existingFullNodeKeys.has(`${t}::${name}`);
+    });
+  const allLinksAlreadyInGraph =
+    linkDataList.length > 0 &&
+    linkDataList.every((l) => {
+      const labelKey = (l.label || '').trim().toLocaleLowerCase('vi');
+      return existingLinkKeys.has(`${l.source}::${l.target}::${labelKey}`);
     });
   const [isAddingNodes, setIsAddingNodes] = useState(false);
   const [localNodesAdded, setLocalNodesAdded] = useState(Boolean(message.nodesAdded));
@@ -1943,6 +2065,15 @@ function MessageBubble({
   const hasAddedRef = useRef(nodesAdded);
   if (nodesAdded) {
     hasAddedRef.current = true;
+  }
+
+  const [isAddingLinks, setIsAddingLinks] = useState(false);
+  const [localLinksAdded, setLocalLinksAdded] = useState(Boolean(message.linksAdded));
+  const linksAdded = Boolean(message.linksAdded) || localLinksAdded || allLinksAlreadyInGraph;
+  const isAddingLinksRef = useRef(false);
+  const hasAddedLinksRef = useRef(Boolean(message.linksAdded));
+  if (message.linksAdded) {
+    hasAddedLinksRef.current = true;
   }
 
   const handleAddAllNodes = async () => {
@@ -1961,6 +2092,33 @@ function MessageBubble({
     } finally {
       isAddingRef.current = false;
       setIsAddingNodes(false);
+    }
+  };
+
+  const handleAddAllLinks = async () => {
+    if (
+      !onConfirmCreateLinks ||
+      isAddingLinksRef.current ||
+      hasAddedLinksRef.current ||
+      isAddingLinks ||
+      linksAdded
+    ) {
+      return;
+    }
+    isAddingLinksRef.current = true;
+    setIsAddingLinks(true);
+    try {
+      const ok = await onConfirmCreateLinks(linkDataList);
+      if (ok) {
+        hasAddedLinksRef.current = true;
+        setLocalLinksAdded(true);
+      }
+    } catch (error) {
+      console.error('[AIChatPanel] Không thể lưu quan hệ:', error);
+      Alert.alert('Không thể lưu quan hệ', 'Đã xảy ra lỗi khi lưu các mối quan hệ vào đồ thị.');
+    } finally {
+      isAddingLinksRef.current = false;
+      setIsAddingLinks(false);
     }
   };
 
@@ -2050,6 +2208,42 @@ function MessageBubble({
                   : nodeDataList.length === 1
                     ? '＋ Lưu node vào đồ thị'
                     : `＋ Thêm cả ${nodeDataList.length} node vào đồ thị`}
+              </Text>
+            )}
+          </Pressable>
+        )}
+        {linkDataList.map((linkData, index) => (
+          <View key={`${message.id}-link-${index}`} style={styles.nodePreview}>
+            <View style={styles.nodePreviewHeader}>
+              <Text style={styles.nodePreviewIcon}>🔗</Text>
+              <Text style={styles.nodePreviewType}>QUAN HỆ ĐỒ THỊ</Text>
+            </View>
+            <Text style={styles.nodePreviewName}>
+              {linkData.sourceName || linkData.source} ──[{linkData.label}]──▶{' '}
+              {linkData.targetName || linkData.target}
+            </Text>
+            {linkData.contextNote ? (
+              <Text style={styles.nodePreviewDesc} numberOfLines={2}>
+                {linkData.contextNote}
+              </Text>
+            ) : null}
+          </View>
+        ))}
+        {linkDataList.length >= 1 && onConfirmCreateLinks && (
+          <Pressable
+            accessibilityRole="button"
+            style={[styles.createAllNodesBtn, (isAddingLinks || linksAdded) && styles.sendBtnDisabled]}
+            onPress={handleAddAllLinks}
+            disabled={isAddingLinks || linksAdded}>
+            {isAddingLinks ? (
+              <ActivityIndicator size="small" color="#12100d" />
+            ) : (
+              <Text style={styles.createAllNodesBtnText}>
+                {linksAdded
+                  ? '✓ Đã nối quan hệ vào đồ thị'
+                  : linkDataList.length === 1
+                    ? '🔗 Lưu quan hệ vào đồ thị'
+                    : `🔗 Lưu cả ${linkDataList.length} quan hệ vào đồ thị`}
               </Text>
             )}
           </Pressable>

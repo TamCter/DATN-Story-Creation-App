@@ -12,6 +12,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  calculateAgeFromDob,
+  formatDateDDMMYYYY,
+  getCharacterOwnedItems,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -284,8 +287,19 @@ export default function CharactersScreen() {
                 {/* Character Profile Meta */}
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🎒 Vật dụng:</Text>
-                    <Text style={styles.metaValueHighlight}>{char.weapon || extra.weapon}</Text>
+                    <Text style={styles.metaLabel}>🎒 Vật phẩm sở hữu:</Text>
+                    <Text style={[styles.metaValueHighlight, { flex: 1 }]}>
+                      {(() => {
+                        const ownedItems = getCharacterOwnedItems(
+                          char,
+                          currentProject.nodes,
+                          currentProject.links
+                        );
+                        return ownedItems.length > 0
+                          ? ownedItems.join(', ')
+                          : extra.weapon || 'Chưa có';
+                      })()}
+                    </Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🏛 Tổ chức:</Text>
@@ -297,12 +311,20 @@ export default function CharactersScreen() {
                   </View>
                 </View>
 
-                {(char.dob || char.birthplace) && (
+                {(char.dob || char.age || char.birthplace) && (
                   <View style={[styles.metaRow, { marginTop: 6 }]}>
                     {char.dob ? (
                       <View style={styles.metaItem}>
                         <Text style={styles.metaLabel}>📅 Ngày sinh:</Text>
-                        <Text style={styles.metaValue}>{char.dob}</Text>
+                        <Text style={styles.metaValue}>{formatDateDDMMYYYY(char.dob)}</Text>
+                      </View>
+                    ) : null}
+                    {(char.age || calculateAgeFromDob(char.dob)) ? (
+                      <View style={styles.metaItem}>
+                        <Text style={styles.metaLabel}>🎂 Tuổi:</Text>
+                        <Text style={styles.metaValue}>
+                          {char.age || calculateAgeFromDob(char.dob)}
+                        </Text>
                       </View>
                     ) : null}
                     {char.birthplace ? (

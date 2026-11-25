@@ -467,6 +467,17 @@ class ApiService {
       message: string;
       nodeData: any | null;
       nodeDataList?: any[];
+      linkDataList?: Array<{
+        source: string;
+        target: string;
+        sourceName?: string;
+        targetName?: string;
+        label: string;
+        category?: string;
+        tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
+        type?: 'solid' | 'dashed';
+        contextNote?: string;
+      }>;
       suggestedPrompt?: string | null;
     };
     message?: string;
@@ -568,6 +579,17 @@ class ApiService {
         message: string;
         nodeData: any | null;
         nodeDataList?: any[];
+        linkDataList?: Array<{
+          source: string;
+          target: string;
+          sourceName?: string;
+          targetName?: string;
+          label: string;
+          category?: string;
+          tone?: 'loyalty' | 'hostile' | 'possession' | 'sect' | 'event' | 'location';
+          type?: 'solid' | 'dashed';
+          contextNote?: string;
+        }>;
         suggestedPrompt?: string | null;
       };
       message?: string;
@@ -721,6 +743,7 @@ class ApiService {
         status?: string;
         gender?: string;
         dob?: string;
+        age?: string;
         birthplace?: string;
         weapon?: string;
         sect?: string;

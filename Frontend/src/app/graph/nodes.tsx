@@ -23,6 +23,8 @@ import {
   FACTION_STATUS_OPTIONS,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterOwnedItems,
+  parseEventParticipants,
   getProjectChapters,
   INITIAL_PROJECTS,
   ITEM_RARITY_OPTIONS,
@@ -88,7 +90,8 @@ export default function NodesDetailScreen() {
   const [formDob, setFormDob] = useState('');
   const [formBirthplace, setFormBirthplace] = useState('');
   const [formGender, setFormGender] = useState('Nam');
-  const [formWeapon, setFormWeapon] = useState('');
+  const [formWeapons, setFormWeapons] = useState<string[]>([]);
+  const [formCustomWeaponInput, setFormCustomWeaponInput] = useState('');
   const [formSect, setFormSect] = useState('');
   const [formPersonality, setFormPersonality] = useState('');
 
@@ -190,7 +193,8 @@ export default function NodesDetailScreen() {
     setFormDob('');
     setFormBirthplace('');
     setFormGender('Nam');
-    setFormWeapon('');
+    setFormWeapons([]);
+    setFormCustomWeaponInput('');
     setFormSect('');
     setFormPersonality('');
     setFormRarity('Quý hiếm');
@@ -228,7 +232,8 @@ export default function NodesDetailScreen() {
     setFormDob(node.dob || '');
     setFormBirthplace(node.birthplace || '');
     setFormGender(node.gender || 'Nam');
-    setFormWeapon(node.weapon || '');
+    setFormWeapons(getCharacterOwnedItems(node, nodes, currentProject.links));
+    setFormCustomWeaponInput('');
     setFormSect(node.sect || '');
     setFormPersonality(node.personality || '');
     setFormRarity(node.rarity || 'Quý hiếm');
@@ -283,7 +288,18 @@ export default function NodesDetailScreen() {
       payload.dob = formDob.trim();
       payload.birthplace = formBirthplace.trim();
       payload.gender = formGender.trim() || 'Nam';
-      payload.weapon = formWeapon.trim();
+      const mergedWeapons: string[] = [];
+      const seenWeaponLower = new Set<string>();
+      [...formWeapons, ...parseEventParticipants(formCustomWeaponInput)].forEach((w) => {
+        const trimmed = w.trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (!seenWeaponLower.has(key)) {
+          seenWeaponLower.add(key);
+          mergedWeapons.push(trimmed);
+        }
+      });
+      payload.weapon = mergedWeapons.length > 0 ? JSON.stringify(mergedWeapons) : '';
       payload.sect = formSect.trim();
       payload.personality = formPersonality.trim();
     } else if (formType === 'item') {
@@ -324,13 +340,38 @@ export default function NodesDetailScreen() {
       payload.location = formLocation.trim();
     }
 
+    let didPersistNode = false;
     try {
       if (isEditing && editingNodeId) {
-        const updated = await projectStore.updateNode(currentProject.id, editingNodeId, payload);
-        setNodes((prev) => prev.map((n) => (n.id === editingNodeId ? { ...n, ...updated } : n)));
+        const editingNode = nodes.find((n) => n.id === editingNodeId);
+        await projectStore.updateNode(currentProject.id, editingNodeId, payload);
+        didPersistNode = true;
+        if (formType === 'character') {
+          const selectedWeaponLower = new Set(
+            parseEventParticipants(payload.weapon).map((w) => w.toLowerCase())
+          );
+          const charMatchKeys = new Set(
+            [editingNodeId, editingNode?.name]
+              .map((v) => String(v || '').trim().toLowerCase())
+              .filter(Boolean)
+          );
+          const itemsToClear = itemNodes.filter((item) => {
+            const holderLower = (item.holderOrLocation || '').trim().toLowerCase();
+            if (!holderLower || !charMatchKeys.has(holderLower)) return false;
+            return (
+              !selectedWeaponLower.has((item.name || '').trim().toLowerCase()) &&
+              !selectedWeaponLower.has(item.id.toLowerCase())
+            );
+          });
+          for (const item of itemsToClear) {
+            await projectStore.updateNode(currentProject.id, item.id, {
+              holderOrLocation: '',
+            });
+          }
+        }
       } else {
-        const created = await projectStore.createNode(currentProject.id, payload);
-        setNodes((prev) => [...prev, created]);
+        await projectStore.createNode(currentProject.id, payload);
+        didPersistNode = true;
       }
       setModalOpen(false);
     } catch (err: any) {
@@ -338,6 +379,15 @@ export default function NodesDetailScreen() {
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Lỗi', msg);
     } finally {
+      if (didPersistNode) {
+        try {
+          const refreshed = await projectStore.getProject(currentProject.id);
+          setCurrentProject(refreshed);
+          setNodes(refreshed.nodes || []);
+        } catch (refreshErr) {
+          console.warn('Lỗi tải lại dữ liệu dự án sau khi lưu node:', refreshErr);
+        }
+      }
       setIsSubmitting(false);
     }
   };
@@ -508,7 +558,18 @@ export default function NodesDetailScreen() {
                     <Text style={styles.attrTag}>📍 Nơi sinh: {node.birthplace}</Text>
                   ) : null}
                   {node.gender ? <Text style={styles.attrTag}>⚧ Giới tính: {node.gender}</Text> : null}
-                  {node.weapon ? <Text style={styles.attrTag}>🎒 Vật dụng: {node.weapon}</Text> : null}
+                  {node.type === 'character'
+                    ? (() => {
+                        const ownedItems = getCharacterOwnedItems(
+                          node,
+                          nodes,
+                          currentProject.links
+                        );
+                        return ownedItems.length > 0 ? (
+                          <Text style={styles.attrTag}>🎒 Vật phẩm: {ownedItems.join(', ')}</Text>
+                        ) : null;
+                      })()
+                    : null}
                   {node.sect ? <Text style={styles.attrTag}>🏛️ Tổ chức: {node.sect}</Text> : null}
                   {node.personality ? (
                     <Text style={styles.attrTag}>🎭 Tính cách: {node.personality}</Text>
@@ -778,7 +839,7 @@ export default function NodesDetailScreen() {
                     </View>
                   </View>
 
-                  {/* Gender & Weapon */}
+                  {/* Gender & Sect */}
                   <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Giới tính</Text>
@@ -789,24 +850,6 @@ export default function NodesDetailScreen() {
                         placeholder="-- Chọn giới tính --"
                       />
                     </View>
-                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Vật dụng / Vật phẩm</Text>
-                      <FormSelectField
-                        value={formWeapon}
-                        onChange={setFormWeapon}
-                        options={itemNodes.map((it) => ({
-                          label: it.name,
-                          value: it.name,
-                          subtitle: it.rarity || it.role || 'Vật phẩm',
-                          icon: '🗡️',
-                        }))}
-                        placeholder="-- Chọn vật phẩm --"
-                      />
-                    </View>
-                  </View>
-
-                  {/* Sect & Personality */}
-                  <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
                       <FormSelectField
@@ -821,6 +864,130 @@ export default function NodesDetailScreen() {
                         placeholder="-- Chọn tổ chức --"
                       />
                     </View>
+                  </View>
+
+                  {/* Owned Weapons / Items (Multi-select) */}
+                  <View style={styles.modalInputGroup}>
+                    <Text style={styles.modalInputLabel}>Vật phẩm sở hữu (chọn nhiều)</Text>
+                    {(() => {
+                      const existingItemNamesLower = new Set(
+                        itemNodes.map((it) => (it.name || '').trim().toLowerCase())
+                      );
+                      const customSelectedWeapons = formWeapons.filter(
+                        (w) => !existingItemNamesLower.has(w.trim().toLowerCase())
+                      );
+                      const allChipNames = [
+                        ...itemNodes.map((it) => it.name),
+                        ...customSelectedWeapons,
+                      ];
+                      return allChipNames.length > 0 ? (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {allChipNames.map((itemName) => {
+                            const itemLower = itemName.trim().toLowerCase();
+                            const isSelected = formWeapons.some(
+                              (w) => w.trim().toLowerCase() === itemLower
+                            );
+                            return (
+                              <Pressable
+                                key={`node-weapon-${itemLower}`}
+                                style={{
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 6,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: isSelected ? '#e5a93c' : '#3a342c',
+                                  backgroundColor: isSelected
+                                    ? 'rgba(229, 169, 60, 0.16)'
+                                    : '#1a1714',
+                                }}
+                                onPress={() =>
+                                  setFormWeapons((selected) =>
+                                    isSelected
+                                      ? selected.filter(
+                                          (w) => w.trim().toLowerCase() !== itemLower
+                                        )
+                                      : [...selected, itemName]
+                                  )
+                                }
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: isSelected }}>
+                                <Text
+                                  style={{
+                                    fontSize: 12,
+                                    color: isSelected ? '#f2c86b' : '#b8b0a2',
+                                  }}>
+                                  {isSelected ? '✓ ' : ''}🗡️ {itemName}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Text style={{ fontSize: 12, color: '#787064', fontStyle: 'italic' }}>
+                          Chưa có node vật phẩm nào. Nhập tên bên dưới để thêm.
+                        </Text>
+                      );
+                    })()}
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <TextInput
+                        style={[styles.modalInput, { flex: 1 }]}
+                        value={formCustomWeaponInput}
+                        onChangeText={setFormCustomWeaponInput}
+                        placeholder="Nhập tên vật phẩm mới để thêm..."
+                        placeholderTextColor="#665f52"
+                        onSubmitEditing={() => {
+                          const additions = parseEventParticipants(formCustomWeaponInput);
+                          if (additions.length === 0) return;
+                          setFormWeapons((prev) => {
+                            const seen = new Set(prev.map((w) => w.trim().toLowerCase()));
+                            const next = [...prev];
+                            additions.forEach((name) => {
+                              const key = name.trim().toLowerCase();
+                              if (!seen.has(key)) {
+                                seen.add(key);
+                                next.push(name);
+                              }
+                            });
+                            return next;
+                          });
+                          setFormCustomWeaponInput('');
+                        }}
+                      />
+                      <Pressable
+                        style={{
+                          paddingHorizontal: 14,
+                          justifyContent: 'center',
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#e5a93c',
+                          backgroundColor: 'rgba(229, 169, 60, 0.16)',
+                        }}
+                        onPress={() => {
+                          const additions = parseEventParticipants(formCustomWeaponInput);
+                          if (additions.length === 0) return;
+                          setFormWeapons((prev) => {
+                            const seen = new Set(prev.map((w) => w.trim().toLowerCase()));
+                            const next = [...prev];
+                            additions.forEach((name) => {
+                              const key = name.trim().toLowerCase();
+                              if (!seen.has(key)) {
+                                seen.add(key);
+                                next.push(name);
+                              }
+                            });
+                            return next;
+                          });
+                          setFormCustomWeaponInput('');
+                        }}>
+                        <Text style={{ fontSize: 12, color: '#f2c86b', fontWeight: '600' }}>
+                          + Thêm
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
+                  {/* Personality */}
+                  <View style={styles.formRow}>
                     <View style={[styles.modalInputGroup, { flex: 1 }]}>
                       <Text style={styles.modalInputLabel}>Tính cách</Text>
                       <TextInput

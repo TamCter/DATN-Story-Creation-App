@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  getFactionMembers,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -388,6 +389,34 @@ export default function FactionsScreen() {
                       </Text>
                     </View>
                   )}
+
+                  {(() => {
+                    const { seniorMembers, members } = getFactionMembers(
+                      faction,
+                      currentProject.nodes,
+                      currentProject.links
+                    );
+                    return (
+                      <>
+                        {seniorMembers.length > 0 && (
+                          <View style={styles.metaItem}>
+                            <Text style={styles.metaIcon}>⭐</Text>
+                            <Text style={styles.metaLabel}>Thành viên cấp cao:</Text>
+                            <Text style={[styles.metaValueHighlight, { flex: 1 }]}>
+                              {seniorMembers.join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                        {members.length > 0 && (
+                          <View style={styles.metaItem}>
+                            <Text style={styles.metaIcon}>👥</Text>
+                            <Text style={styles.metaLabel}>Thành viên:</Text>
+                            <Text style={[styles.metaValue, { flex: 1 }]}>{members.join(', ')}</Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {extra.headquarters && (
                     <View style={styles.metaItem}>

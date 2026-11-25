@@ -10,6 +10,7 @@ export interface StoryNode {
   status?: string;
   // Character fields
   dob?: string;
+  age?: string;
   birthplace?: string;
   gender?: string;
   weapon?: string;
@@ -29,6 +30,8 @@ export interface StoryNode {
   ruler?: string;
   // Faction fields
   leader?: string;
+  members?: string;
+  seniorMembers?: string;
   headquarters?: string;
   motto?: string;
   alignment?: string;
@@ -73,6 +76,233 @@ export function parseEventParticipants(value?: string | string[]): string[] {
     }
   }
   return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
+}
+
+const OWNED_ITEM_PLACEHOLDER_PATTERN =
+  /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
+
+export function getCharacterOwnedItems(
+  character: Pick<StoryNode, 'id' | 'name' | 'weapon'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): string[] {
+  const charId = (character.id || '').trim();
+  const charNameLower = (character.name || '').trim().toLowerCase();
+  const itemNodes = allNodes.filter((n) => n.type === 'item');
+  const itemById = new Map<string, StoryNode>();
+  const itemByNameLower = new Map<string, StoryNode>();
+  itemNodes.forEach((item) => {
+    itemById.set(item.id, item);
+    itemByNameLower.set((item.name || '').trim().toLowerCase(), item);
+  });
+
+  const seenLower = new Set<string>();
+  const result: string[] = [];
+  const addItemName = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matchedNode = itemById.get(trimmed) || itemByNameLower.get(trimmed.toLowerCase());
+    const displayName = matchedNode ? matchedNode.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenLower.has(key)) {
+      seenLower.add(key);
+      result.push(displayName);
+    }
+  };
+
+  parseEventParticipants(character.weapon).forEach(addItemName);
+
+  itemNodes.forEach((item) => {
+    const holder = (item.holderOrLocation || '').trim();
+    if (!holder) return;
+    if ((charNameLower && holder.toLowerCase() === charNameLower) || (charId && holder === charId)) {
+      addItemName(item.name);
+    }
+  });
+
+  allLinks.forEach((link) => {
+    const category = (link.category || '').toUpperCase();
+    if (category !== 'OWNS' && category !== 'EQUIPPED') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (charId && sourceId === charId && targetId) {
+      const targetItem = itemById.get(targetId);
+      if (targetItem) {
+        addItemName(targetItem.name);
+      }
+    }
+  });
+
+  return result;
+}
+
+export function getFactionMembers(
+  faction: Pick<StoryNode, 'id' | 'name' | 'members' | 'seniorMembers'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): { seniorMembers: string[]; members: string[] } {
+  const facId = (faction.id || '').trim();
+  const facNameLower = (faction.name || '').trim().toLowerCase();
+  const charNodes = allNodes.filter((n) => n.type === 'character');
+  const charById = new Map<string, StoryNode>();
+  const charByNameLower = new Map<string, StoryNode>();
+  charNodes.forEach((c) => {
+    charById.set(c.id, c);
+    charByNameLower.set((c.name || '').trim().toLowerCase(), c);
+  });
+
+  const seenSeniorLower = new Set<string>();
+  const seniorMembers: string[] = [];
+  const addSenior = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenSeniorLower.has(key)) {
+      seenSeniorLower.add(key);
+      seniorMembers.push(displayName);
+    }
+  };
+
+  parseEventParticipants(faction.seniorMembers).forEach(addSenior);
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'SENIOR_MEMBER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (facId && targetId === facId && sourceId) {
+      const ch = charById.get(sourceId);
+      if (ch) addSenior(ch.name);
+    }
+  });
+
+  const seenMemberLower = new Set<string>();
+  const members: string[] = [];
+  const addMember = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (seenSeniorLower.has(key)) return;
+    if (!seenMemberLower.has(key)) {
+      seenMemberLower.add(key);
+      members.push(displayName);
+    }
+  };
+
+  parseEventParticipants(faction.members).forEach(addMember);
+  charNodes.forEach((c) => {
+    const sect = (c.sect || '').trim();
+    if (!sect) return;
+    if ((facNameLower && sect.toLowerCase() === facNameLower) || (facId && sect === facId)) {
+      if (!seenSeniorLower.has((c.name || '').trim().toLowerCase())) {
+        addMember(c.name);
+      }
+    }
+  });
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'MEMBER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (facId && targetId === facId && sourceId) {
+      const ch = charById.get(sourceId);
+      if (ch && !seenSeniorLower.has((ch.name || '').trim().toLowerCase())) {
+        addMember(ch.name);
+      }
+    }
+  });
+
+  return { seniorMembers, members };
+}
+
+export function formatDateDDMMYYYY(value?: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return trimmed;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  if (match[1].length === 4 || p1 > 31) {
+    return `${String(p3).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p1).padStart(4, '0')}`;
+  }
+  return `${String(p1).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p3).padStart(4, '0')}`;
+}
+
+export function getDateSortKey(value?: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return trimmed;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  if (match[1].length === 4 || p1 > 31) {
+    return `${String(p1).padStart(4, '0')}-${String(p2).padStart(2, '0')}-${String(p3).padStart(2, '0')}`;
+  }
+  return `${String(p3).padStart(4, '0')}-${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}`;
+}
+
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCFullYear(year);
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
+export function calculateAgeFromDob(dob?: string, referenceDate: Date = new Date()): string {
+  const trimmed = String(dob || '').trim();
+  if (!trimmed) return '';
+  const currentYear = referenceDate.getFullYear();
+  const currentMonth = referenceDate.getMonth() + 1;
+  const currentDay = referenceDate.getDate();
+
+  const fullMatch = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (fullMatch) {
+    const p1 = parseInt(fullMatch[1], 10);
+    const p2 = parseInt(fullMatch[2], 10);
+    const p3 = parseInt(fullMatch[3], 10);
+    let year: number;
+    let month: number;
+    let day: number;
+    if (fullMatch[1].length === 4 || p1 > 31) {
+      year = p1;
+      month = p2;
+      day = p3;
+    } else {
+      day = p1;
+      month = p2;
+      year = p3;
+    }
+    if (!isValidCalendarDate(year, month, day)) return '';
+    if (
+      year > currentYear ||
+      (year === currentYear && month > currentMonth) ||
+      (year === currentYear && month === currentMonth && day > currentDay)
+    ) {
+      return '';
+    }
+    let age = currentYear - year;
+    if (currentMonth < month || (currentMonth === month && currentDay < day)) {
+      age -= 1;
+    }
+    return String(Math.max(0, age));
+  }
+
+  const yearMatch = trimmed.match(/^\s*(\d{1,4})\s*$/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[1], 10);
+    if (Number.isInteger(year) && year >= 1 && year <= currentYear) {
+      return String(Math.max(0, currentYear - year));
+    }
+  }
+  return '';
 }
 
 export interface StoryLink {

@@ -67,7 +67,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
   const GENERATED_LINK_SUFFIX_BY_CATEGORY: Record<string, string[]> = {
     EQUIPPED: ['equipped', 'weapon'],
     BIRTHPLACE: ['birthplace'],
-    MEMBER_OF: ['member_of', 'sect'],
+    MEMBER_OF: ['member_of', 'sect', 'member'],
+    SENIOR_MEMBER_OF: ['senior_member_of', 'senior-member'],
     STATUS_EVENT: ['status_event', 'event'],
     OWNS: ['owns', 'holder'],
     ORIGIN: ['origin'],
@@ -129,8 +130,14 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
 
   if (node.type === 'character') {
     removeObsoleteGeneratedLinks('outgoing', node.id, 'EQUIPPED');
-    const weapon = cleanRelationalVal(node.weapon);
-    if (weapon) {
+    const weapons = parseEventParticipants(node.weapon)
+      .map((w) => cleanRelationalVal(w))
+      .filter(Boolean);
+    const seenWeaponLower = new Set<string>();
+    weapons.forEach((weapon) => {
+      const key = weapon.toLowerCase();
+      if (seenWeaponLower.has(key)) return;
+      seenWeaponLower.add(key);
       const item = findOrAddNode(weapon, 'item', {
         role: 'Quý hiếm',
         rarity: 'Quý hiếm',
@@ -138,7 +145,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         status: 'Nguyên vẹn',
       });
       ensureLink(node.id, item.id, 'EQUIPPED', 'Sở hữu / Sử dụng', 'solid');
-    }
+    });
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'BIRTHPLACE');
     const birthplace = cleanRelationalVal(node.birthplace);
@@ -152,7 +159,22 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(node.id, loc.id, 'BIRTHPLACE', 'Nơi sinh', 'dashed');
     }
 
-    removeObsoleteGeneratedLinks('outgoing', node.id, 'MEMBER_OF');
+    const charNameLower = (node.name || '').trim().toLowerCase();
+    const rosterBackedFactionIds = new Set(
+      (project.nodes || [])
+        .filter((n) => n.type === 'faction')
+        .filter((fac) =>
+          parseEventParticipants(fac.members)
+            .map((m) => cleanRelationalVal(m))
+            .some((m) => m && (m.toLowerCase() === charNameLower || m === node.id))
+        )
+        .map((fac) => fac.id)
+    );
+    project.links = (project.links || []).filter((l) => {
+      if (l.category !== 'MEMBER_OF' || !isGeneratedDerivedLink(l, 'MEMBER_OF')) return true;
+      if (l.source !== node.id) return true;
+      return rosterBackedFactionIds.has(l.target);
+    });
     const sect = cleanRelationalVal(node.sect);
     if (sect) {
       const fac = findOrAddNode(sect, 'faction', {
@@ -217,6 +239,57 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       });
       ensureLink(ch.id, node.id, 'LEADER_OF', 'Người đại diện / Thủ lĩnh', 'solid');
     }
+
+    removeObsoleteGeneratedLinks('incoming', node.id, 'SENIOR_MEMBER_OF');
+    const seniorMembers = parseEventParticipants(node.seniorMembers)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    const seenSeniorLower = new Set<string>();
+    seniorMembers.forEach((memberName) => {
+      const key = memberName.toLowerCase();
+      if (seenSeniorLower.has(key)) return;
+      seenSeniorLower.add(key);
+      const ch = findOrAddNode(memberName, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Thành viên cấp cao của ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'SENIOR_MEMBER_OF', 'Thành viên cấp cao', 'solid');
+    });
+
+    const factionMembers = parseEventParticipants(node.members)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    const seenMemberLower = new Set<string>();
+    const memberCharIds = new Set<string>();
+    factionMembers.forEach((memberName) => {
+      const key = memberName.toLowerCase();
+      if (seenMemberLower.has(key)) return;
+      seenMemberLower.add(key);
+      const ch = findOrAddNode(memberName, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Thành viên của ${node.name}`,
+        status: 'Còn sống',
+      });
+      memberCharIds.add(ch.id);
+      ensureLink(ch.id, node.id, 'MEMBER_OF', 'Thành viên', 'solid');
+    });
+
+    // Xóa các cạnh MEMBER_OF tự sinh không còn nằm trong danh sách members và cũng không còn c.sect trỏ tới tổ chức này
+    const facNameLower = (node.name || '').trim().toLowerCase();
+    const charById = new Map(
+      (project.nodes || []).filter((n) => n.type === 'character').map((c) => [c.id, c])
+    );
+    project.links = (project.links || []).filter((l) => {
+      if (l.category !== 'MEMBER_OF' || l.target !== node.id) return true;
+      if (!isGeneratedDerivedLink(l, 'MEMBER_OF')) return true;
+      if (memberCharIds.has(l.source)) return true;
+      const srcChar = charById.get(l.source);
+      const srcSect = cleanRelationalVal(srcChar?.sect);
+      return Boolean(srcSect && (srcSect.toLowerCase() === facNameLower || srcSect === node.id));
+    });
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'HEADQUARTERS');
     const hq = cleanRelationalVal(node.headquarters);
@@ -283,34 +356,10 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(ch.id, node.id, 'PARTICIPATED_IN', 'Tham gia', 'dashed');
     }
 
+    // Vật phẩm & Tổ chức liên quan của sự kiện được hiển thị nối qua Nhân vật tham gia,
+    // nên dọn các cạnh trực tiếp INVOLVES_ITEM / INVOLVES_FACTION cũ nếu còn tồn tại.
     removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_ITEM');
-    const rawItems = parseEventParticipants(node.itemsInvolved)
-      .map((s) => cleanRelationalVal(s))
-      .filter(Boolean);
-    for (const itemName of Array.from(new Set(rawItems))) {
-      const it = findOrAddNode(itemName, 'item', {
-        role: 'VẬT PHẨM',
-        rarity: 'Hiếm',
-        desc: `Vật phẩm xuất hiện trong sự kiện ${node.name}`,
-        status: 'Nguyên vẹn',
-      });
-      ensureLink(node.id, it.id, 'INVOLVES_ITEM', 'Liên quan vật phẩm', 'dashed');
-    }
-
     removeObsoleteGeneratedLinks('outgoing', node.id, 'INVOLVES_FACTION');
-    const rawFactions = parseEventParticipants(node.factionsInvolved)
-      .map((s) => cleanRelationalVal(s))
-      .filter(Boolean);
-    for (const facName of Array.from(new Set(rawFactions))) {
-      const fac = findOrAddNode(facName, 'faction', {
-        role: 'TỔ CHỨC',
-        subType: 'Trung lập',
-        alignment: 'TRUNG LẬP',
-        desc: `Tổ chức liên quan tới sự kiện ${node.name}`,
-        status: 'Đang hoạt động',
-      });
-      ensureLink(node.id, fac.id, 'INVOLVES_FACTION', 'Liên quan tổ chức', 'dashed');
-    }
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'CAUSED_BY');
     const causeName = cleanRelationalVal(node.cause);
@@ -764,6 +813,10 @@ export class ProjectStore {
     });
   }
 
+  isProjectDeleted(projectId: string): boolean {
+    return this.deletedProjects.has(projectId);
+  }
+
   /**
    * Xóa vĩnh viễn một dự án trên Backend (Neo4j) và dọn sạch bộ nhớ đệm local
    */
@@ -811,21 +864,50 @@ export class ProjectStore {
     this.projectVersions.delete(projectId);
     this.graphRequestVersions.delete(projectId);
 
+    const cleanupErrors: unknown[] = [];
+
     const cacheKey = this.getProjectCacheKey(projectId, context.accountId);
     if (cacheKey) {
-      await AsyncStorage.removeItem(cacheKey);
+      try {
+        await AsyncStorage.removeItem(cacheKey);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
     }
 
-    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
-      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
-      const locals = await this.getLocalProjects(context.accountId);
-      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
-      const filteredLocals = locals.filter((p) => p.id !== projectId);
-      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
-      if (localProjectsKey) {
-        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
-      }
-    });
+    // Dọn sạch các khóa lịch sử AI Chat local của dự án đã xóa (độc lập với cache đồ thị)
+    const encodedAuthor = encodeURIComponent(context.accountId || 'guest');
+    const encodedProject = encodeURIComponent(projectId);
+    const scopeSuffix = `${encodedAuthor}_${encodedProject}`;
+    try {
+      await AsyncStorage.multiRemove([
+        `@story_app_ai_chat_${scopeSuffix}`,
+        `@story_app_ai_chat_pending_delete_${scopeSuffix}`,
+        `@story_app_ai_chat_local_cleanup_${scopeSuffix}`,
+        `@story_app_ai_chat_server_rev_${scopeSuffix}`,
+      ]);
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+
+    try {
+      await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+        this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+        const locals = await this.getLocalProjects(context.accountId);
+        this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+        const filteredLocals = locals.filter((p) => p.id !== projectId);
+        const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+        if (localProjectsKey) {
+          await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
+        }
+      });
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+
+    if (cleanupErrors.length > 0) {
+      console.warn('[projectStore] Một số bước dọn dẹp cục bộ sau khi xóa dự án thất bại:', cleanupErrors[0]);
+    }
   }
 
   /**
@@ -861,6 +943,7 @@ export class ProjectStore {
       y: typeof nodeData.y === 'number' ? nodeData.y : 350 + (Math.random() * 80 - 40),
       status: nodeData.status?.trim() || defaultStatusByType[type] || 'Hoạt động',
       dob: nodeData.dob?.trim() || '',
+      age: nodeData.age?.trim() || '',
       birthplace: nodeData.birthplace?.trim() || '',
       gender: nodeData.gender?.trim() || '',
       weapon: nodeData.weapon?.trim() || '',
@@ -877,6 +960,8 @@ export class ProjectStore {
       dangerLevel: nodeData.dangerLevel?.trim() || '',
       ruler: nodeData.ruler?.trim() || '',
       leader: nodeData.leader?.trim() || '',
+      members: nodeData.members?.trim() || '',
+      seniorMembers: nodeData.seniorMembers?.trim() || '',
       headquarters: nodeData.headquarters?.trim() || '',
       motto: nodeData.motto?.trim() || '',
       alignment: nodeData.alignment?.trim() || '',

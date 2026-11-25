@@ -225,16 +225,19 @@ async function deleteProject(req, res, next) {
 
   try {
     // Chỉ cho phép xóa dự án thuộc quyền sở hữu của user đã đăng nhập
+    const sessionKey = `${userId}::${id}`;
     const query = `
       MATCH (u:User { id: $userId })-[:OWNS]->(p:Project { id: $id })
       OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
       OPTIONAL MATCH (c:Chapter)-[:BELONGS_TO]->(p)
-      OPTIONAL MATCH (cs:AIChatSession { projectId: $id, userId: $userId })
+      OPTIONAL MATCH (cs:AIChatSession)
+      WHERE cs.sessionKey = $sessionKey
+         OR (cs.projectId = $id AND cs.userId = $userId)
       DETACH DELETE n, c, cs, p
       RETURN count(p) AS deleted
     `;
 
-    const records = await runQuery(query, { id, userId }, 'WRITE');
+    const records = await runQuery(query, { id, userId, sessionKey }, 'WRITE');
     if (!records[0] || records[0].deleted === 0) {
       return res.status(404).json({
         success: false,

@@ -19,6 +19,7 @@ import { GraphSidebar } from '@/components/graph/GraphSidebar';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
 import {
+  calculateAgeFromDob,
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
   EVENT_IMPORTANCE_OPTIONS,
@@ -26,6 +27,7 @@ import {
   EVENT_TYPE_OPTIONS,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatDateDDMMYYYY,
   getProjectChapters,
   INITIAL_PROJECTS,
   ITEM_RARITY_OPTIONS,
@@ -95,6 +97,8 @@ interface EditableSuggestedNode {
   statusEvent: string;
   gender: string;
   dob: string;
+  age: string;
+  ageManuallyEdited?: boolean;
   birthplace: string;
   weapon: string;
   sect: string;
@@ -328,6 +332,7 @@ function createEmptySuggestedNode(type: EntityType = 'character'): EditableSugge
     statusEvent: '',
     gender: '',
     dob: '',
+    age: '',
     birthplace: '',
     weapon: '',
     sect: '',
@@ -433,6 +438,7 @@ export default function TextCheckerScreen() {
 
   // Lưu vào database (ghi nhớ chapterId đã tạo trong phiên để retry không tạo trùng chương)
   const [isSaving, setIsSaving] = useState(false);
+  const [committedNodeIds, setCommittedNodeIds] = useState<Record<string, string>>({});
   const activeSaveAttemptRef = useRef<{
     chapterId: string;
     chapterNumber: number;
@@ -474,6 +480,7 @@ export default function TextCheckerScreen() {
   useEffect(() => {
     chapterNumberTouchedRef.current = false;
     activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
     void loadProject();
   }, [loadProject]);
 
@@ -733,7 +740,9 @@ export default function TextCheckerScreen() {
         desc: n.desc || '',
         status: n.status || createEmptySuggestedNode(n.type).status,
         gender: n.gender || '',
-        dob: n.dob || '',
+        dob: formatDateDDMMYYYY(n.dob || ''),
+        age: n.age ? String(n.age) : '',
+        ageManuallyEdited: false,
         birthplace: n.birthplace || '',
         weapon: n.weapon || '',
         sect: n.sect || '',
@@ -766,7 +775,7 @@ export default function TextCheckerScreen() {
         sequenceOrder: ev.sequenceOrder || String(idx + 1),
         location: ev.location || '',
         time: ev.time || '',
-        timelineType: ev.timelineType || 'Hiện tại',
+        timelineType: ev.timelineType || '',
         duration: ev.duration || '',
         cause: ev.cause || '',
         conflict: ev.conflict || '',
@@ -953,6 +962,7 @@ export default function TextCheckerScreen() {
             existingChapter = latestChapters.find((c) => c.id === currentAttempt!.chapterId);
           } else {
             activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
             currentAttempt = null;
           }
         }
@@ -1086,7 +1096,8 @@ export default function TextCheckerScreen() {
           status: item.status.trim(),
           statusEvent: item.statusEvent.trim(),
           gender: item.gender.trim(),
-          dob: item.dob.trim(),
+          dob: formatDateDDMMYYYY(item.dob),
+          age: item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob)),
           birthplace: item.birthplace.trim(),
           weapon: item.weapon.trim(),
           sect: item.sect.trim(),
@@ -1118,6 +1129,7 @@ export default function TextCheckerScreen() {
                 { onlyIfStub: true }
               );
               attempt.committedNodeIds[item.localId] = updatedNode.id;
+              setCommittedNodeIds({ ...attempt.committedNodeIds });
               savedNodesCount += 1;
             } catch (stubErr) {
               // Nếu node đã trở thành node đầy đủ trong lúc ghi -> giữ nguyên, không ghi đè
@@ -1130,6 +1142,7 @@ export default function TextCheckerScreen() {
         } else {
           const createdNode = await projectStore.createNode(projectId, payload);
           attempt.committedNodeIds[item.localId] = createdNode.id;
+          setCommittedNodeIds({ ...attempt.committedNodeIds });
           savedNodesCount += 1;
         }
       }
@@ -1164,7 +1177,7 @@ export default function TextCheckerScreen() {
             sequenceOrder: ev.sequenceOrder.trim(),
             location: ev.location.trim(),
             time: ev.time.trim(),
-            timelineType: ev.timelineType.trim() || 'Hiện tại',
+            timelineType: ev.timelineType.trim(),
             duration: ev.duration.trim(),
             cause: ev.cause.trim(),
             conflict: ev.conflict.trim(),
@@ -1225,6 +1238,7 @@ export default function TextCheckerScreen() {
       chapterNumberTouchedRef.current = false;
       setChapterNumberInput(String(nextNum));
       activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
 
       setSaveSuccessInfo({
         chapterTitle: effectiveTitle,
@@ -1415,6 +1429,7 @@ export default function TextCheckerScreen() {
     analyzedTextSnapshotRef.current = null;
     setContextOmissions(null);
     activeSaveAttemptRef.current = null;
+    setCommittedNodeIds({});
     chapterNumberTouchedRef.current = false;
     setSaveSuccessInfo(null);
   };
@@ -1984,9 +1999,7 @@ export default function TextCheckerScreen() {
                             {[
                               ev.eventType,
                               ev.importance,
-                              ev.timelineType && ev.timelineType !== 'Hiện tại' ? ev.timelineType : '',
-                              ev.time,
-                              ev.duration,
+                              ev.time ? `📅 ${formatDateDDMMYYYY(ev.time)}` : '',
                               ev.location,
                             ]
                               .filter(Boolean)
@@ -2095,37 +2108,41 @@ export default function TextCheckerScreen() {
             </Text>
             {editingNode && (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
-                <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
-                <View style={styles.typeChipsRow}>
-                  {(['character', 'item', 'location', 'faction'] as EntityType[]).map((t) => {
-                    const meta = ENTITY_TYPE_META[t];
-                    const active = editingNode.type === t;
-                    return (
-                      <Pressable
-                        key={t}
-                        style={[styles.typeChip, active && styles.typeChipActive]}
-                        onPress={() => {
-                          if (editingNode.type === t) return;
-                          setEditingNode({
-                            ...editingNode,
-                            type: t,
-                            status:
-                              t === 'character'
-                                ? 'Còn sống'
-                                : t === 'item'
-                                  ? 'Nguyên vẹn'
-                                  : t === 'faction'
-                                    ? 'Đang hoạt động'
-                                    : 'Hoạt động',
-                          });
-                        }}>
-                        <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
-                          {meta.icon} {meta.label}
-                        </Text>
-                      </Pressable>
-                    );
-                  })}
-                </View>
+                {(isAddingNewNode || !committedNodeIds[editingNode.localId]) && (
+                  <>
+                    <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
+                    <View style={styles.typeChipsRow}>
+                      {(['character', 'item', 'location', 'faction'] as EntityType[]).map((t) => {
+                        const meta = ENTITY_TYPE_META[t];
+                        const active = editingNode.type === t;
+                        return (
+                          <Pressable
+                            key={t}
+                            style={[styles.typeChip, active && styles.typeChipActive]}
+                            onPress={() => {
+                              if (editingNode.type === t) return;
+                              setEditingNode({
+                                ...editingNode,
+                                type: t,
+                                status:
+                                  t === 'character'
+                                    ? 'Còn sống'
+                                    : t === 'item'
+                                      ? 'Nguyên vẹn'
+                                      : t === 'faction'
+                                        ? 'Đang hoạt động'
+                                        : 'Hoạt động',
+                              });
+                            }}>
+                            <Text style={[styles.typeChipText, active && styles.typeChipTextActive]}>
+                              {meta.icon} {meta.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  </>
+                )}
 
                 <Text style={styles.fieldLabel}>Tên thực thể *</Text>
                 <TextInput
@@ -2196,11 +2213,34 @@ export default function TextCheckerScreen() {
                       </>
                     )}
 
-                    <Text style={styles.fieldLabel}>Ngày sinh</Text>
+                    <Text style={styles.fieldLabel}>Ngày / Năm sinh</Text>
                     <DatePickerField
                       value={editingNode.dob}
-                      onChange={(v) => setEditingNode({ ...editingNode, dob: v })}
-                      placeholder="Chọn ngày sinh"
+                      onChange={(v) =>
+                        setEditingNode({
+                          ...editingNode,
+                          dob: v,
+                          age: editingNode.ageManuallyEdited
+                            ? editingNode.age
+                            : calculateAgeFromDob(formatDateDDMMYYYY(v)),
+                        })
+                      }
+                      placeholder="DD/MM/YYYY"
+                    />
+                    <Text style={styles.fieldLabel}>Tuổi</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editingNode.age}
+                      onChangeText={(v) =>
+                        setEditingNode({
+                          ...editingNode,
+                          age: v,
+                          ageManuallyEdited: v.trim() !== '',
+                        })
+                      }
+                      placeholder="Để trống sẽ tự tính theo năm sinh"
+                      placeholderTextColor="#6d6253"
+                      keyboardType="numeric"
                     />
 
                     <Text style={styles.fieldLabel}>Nơi sinh ra</Text>
@@ -2515,35 +2555,11 @@ export default function TextCheckerScreen() {
                     customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
                   />
 
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Thời điểm diễn ra</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={editingEvent.time}
-                        onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
-                        placeholder="VD: Đầu chương / Đêm khuya"
-                        placeholderTextColor="#6d6253"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Thời lượng</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={editingEvent.duration}
-                        onChangeText={(v) => setEditingEvent({ ...editingEvent, duration: v })}
-                        placeholder="VD: 30 phút / Một đêm"
-                        placeholderTextColor="#6d6253"
-                      />
-                    </View>
-                  </View>
-
-                  <Text style={styles.fieldLabel}>Dòng thời gian</Text>
-                  <FormSelectField
-                    value={editingEvent.timelineType}
-                    onChange={(v) => setEditingEvent({ ...editingEvent, timelineType: v })}
-                    options={EVENT_TIMELINE_OPTIONS}
-                    placeholder="Hiện tại"
+                  <Text style={styles.fieldLabel}>Ngày / Tháng / Năm diễn ra</Text>
+                  <DatePickerField
+                    value={editingEvent.time}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, time: v })}
+                    placeholder="Chọn ngày / tháng / năm sự kiện"
                   />
 
                   <Text style={styles.fieldLabel}>Nguyên nhân / Ngòi nổ</Text>
