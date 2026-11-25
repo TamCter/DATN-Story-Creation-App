@@ -21,6 +21,7 @@ import { GraphSidebar } from '@/components/graph/GraphSidebar';
 
 
 import {
+  calculateAgeFromDob,
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
   EVENT_IMPORTANCE_OPTIONS,
@@ -29,9 +30,11 @@ import {
   eventBelongsToChapter,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatDateDDMMYYYY,
   GENDER_OPTIONS,
   generateUniqueNodeId,
   getCharacterOwnedItems,
+  getDateSortKey,
   getProjectChapters,
   INITIAL_PROJECTS,
   parseEventParticipants,
@@ -261,6 +264,7 @@ export default function GraphScreen() {
 
   // Nhân vật (Character)
   const [formDob, setFormDob] = useState('');
+  const [formAge, setFormAge] = useState('');
   const [formBirthplace, setFormBirthplace] = useState('');
   const [formGender, setFormGender] = useState('Nam');
   const [formWeapons, setFormWeapons] = useState<string[]>([]);
@@ -344,16 +348,44 @@ export default function GraphScreen() {
     const chapter = chapters.find((item) => item.id === activeChapterFilter);
     if (!chapter) return visibleNodes;
 
-    const eventNodeIds = new Set(
-      visibleNodes
-        .filter((node) => eventBelongsToChapter(node, chapter))
-        .map((node) => node.id)
-    );
+    const chapterEventNodes = visibleNodes.filter((node) => eventBelongsToChapter(node, chapter));
+    const eventNodeIds = new Set(chapterEventNodes.map((node) => node.id));
     const relatedNodeIds = new Set(eventNodeIds);
 
     visibleLinks.forEach((link) => {
       if (eventNodeIds.has(link.source)) relatedNodeIds.add(link.target);
       if (eventNodeIds.has(link.target)) relatedNodeIds.add(link.source);
+    });
+
+    // Kéo thêm các vật phẩm, tổ chức và nhân vật liên quan đã lưu trong thông tin sự kiện
+    // để chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện hiển thị đầy đủ khi lọc theo chương
+    const nodeById = new Map<string, StoryNode>();
+    const nodeByTypeAndName = new Map<string, StoryNode>();
+    visibleNodes.forEach((node) => {
+      nodeById.set(node.id, node);
+      nodeByTypeAndName.set(`${node.type}:${(node.name || '').trim().toLowerCase()}`, node);
+    });
+
+    const addMatchedByType = (names: string[], targetType: StoryNode['type']) => {
+      names.forEach((raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return;
+        const byId = nodeById.get(trimmed);
+        if (byId && byId.type === targetType) {
+          relatedNodeIds.add(byId.id);
+          return;
+        }
+        const byName = nodeByTypeAndName.get(`${targetType}:${trimmed.toLowerCase()}`);
+        if (byName) {
+          relatedNodeIds.add(byName.id);
+        }
+      });
+    };
+
+    chapterEventNodes.forEach((ev) => {
+      addMatchedByType(parseEventParticipants(ev.charactersInvolved || ev.characters), 'character');
+      addMatchedByType(parseEventParticipants(ev.itemsInvolved), 'item');
+      addMatchedByType(parseEventParticipants(ev.factionsInvolved), 'faction');
     });
 
     return visibleNodes.filter((node) => relatedNodeIds.has(node.id));
@@ -431,6 +463,7 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormStatusEvent('');
   setFormDesc('');
   setFormDob('');
+  setFormAge('');
   setFormBirthplace('');
   setFormGender('Nam');
   setFormWeapons([]);
@@ -482,7 +515,8 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   if (nodeData.status) setFormStatus(nodeData.status);
   if (nodeData.statusEvent) setFormStatusEvent(nodeData.statusEvent);
   if (nodeData.gender) setFormGender(nodeData.gender);
-  if (nodeData.dob) setFormDob(nodeData.dob);
+  if (nodeData.dob) setFormDob(formatDateDDMMYYYY(nodeData.dob));
+  if (nodeData.age) setFormAge(String(nodeData.age));
   if (nodeData.birthplace) setFormBirthplace(nodeData.birthplace);
   if (nodeData.weapon) setFormWeapons(parseEventParticipants(nodeData.weapon));
   if (nodeData.sect) setFormSect(nodeData.sect);
@@ -804,7 +838,8 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormStatus(node.status || (node.type === 'character' ? 'Còn sống' : node.type === 'faction' ? 'Đang hoạt động' : 'Hoạt động'));
   setFormStatusEvent(node.statusEvent || '');
   setFormDesc(node.desc || '');
-  setFormDob(node.dob || '');
+  setFormDob(formatDateDDMMYYYY(node.dob));
+  setFormAge(node.age || '');
   setFormBirthplace(node.birthplace || '');
   setFormGender(node.gender || 'Nam');
   setFormWeapons(getCharacterOwnedItems(node, nodes, links));
@@ -826,7 +861,7 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormMotto(node.motto || '');
   setFormAlignment(node.alignment || 'ĐỒNG MINH');
   setFormChapter(node.chapter || '');
-  setFormTime(node.time || '');
+  setFormTime(formatDateDDMMYYYY(node.time));
   setFormTimelineType(node.timelineType || 'Hiện tại');
   setFormDuration(node.duration || '');
   setFormEventType(node.eventType || '');
@@ -878,7 +913,9 @@ const handleSaveNode = async () => {
     } else {
       payload.statusEvent = '';
     }
-    payload.dob = formDob.trim();
+    const normalizedDob = formatDateDDMMYYYY(formDob);
+    payload.dob = normalizedDob;
+    payload.age = formAge.trim() || calculateAgeFromDob(normalizedDob);
     payload.birthplace = formBirthplace.trim();
     payload.gender = formGender.trim() || 'Nam';
     const mergedWeapons: string[] = [];
@@ -1457,32 +1494,45 @@ return (
                             )}
                           </View>
 
-                          {/* Dob & Birthplace */}
+                          {/* Dob & Age */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Ngày sinh</Text>
+                              <Text style={styles.modalInputLabel}>Ngày / Năm sinh</Text>
                               <DatePickerField
                                 value={formDob}
                                 onChange={setFormDob}
-                                placeholder="Chọn ngày sinh"
+                                placeholder="DD/MM/YYYY"
                               />
                             </View>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Nơi sinh ra</Text>
-                              <FormSelectField
-                                value={formBirthplace}
-                                onChange={setFormBirthplace}
-                                options={locationNodes.map((loc) => ({
-                                  label: loc.name,
-                                  value: loc.name,
-                                  subtitle: loc.region || loc.role || 'Địa danh',
-                                  icon: '📍',
-                                }))}
-                                placeholder="-- Chọn địa điểm hoặc bỏ trống --"
-                                allowCustom={true}
-                                customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
+                              <Text style={styles.modalInputLabel}>Tuổi</Text>
+                              <TextInput
+                                style={styles.modalInput}
+                                value={formAge}
+                                onChangeText={setFormAge}
+                                placeholder="Để trống sẽ tự tính theo năm sinh"
+                                placeholderTextColor="#665f52"
+                                keyboardType="numeric"
                               />
                             </View>
+                          </View>
+
+                          {/* Birthplace */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Nơi sinh ra</Text>
+                            <FormSelectField
+                              value={formBirthplace}
+                              onChange={setFormBirthplace}
+                              options={locationNodes.map((loc) => ({
+                                label: loc.name,
+                                value: loc.name,
+                                subtitle: loc.region || loc.role || 'Địa danh',
+                                icon: '📍',
+                              }))}
+                              placeholder="-- Chọn địa điểm hoặc bỏ trống --"
+                              allowCustom={true}
+                              customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
+                            />
                           </View>
 
                           {/* Gender & Sect */}
@@ -2249,8 +2299,18 @@ return (
                               <>
                                 {selectedNode.dob ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Ngày sinh (DOB):</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.dob}</Text>
+                                    <Text style={styles.detailItemKey}>Ngày / Năm sinh:</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      {formatDateDDMMYYYY(selectedNode.dob)}
+                                    </Text>
+                                  </View>
+                                ) : null}
+                                {(selectedNode.age || calculateAgeFromDob(selectedNode.dob)) ? (
+                                  <View style={styles.detailRowItem}>
+                                    <Text style={styles.detailItemKey}>Tuổi:</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      {selectedNode.age || calculateAgeFromDob(selectedNode.dob)} tuổi
+                                    </Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.birthplace ? (
@@ -2416,7 +2476,9 @@ return (
                                 {selectedNode.time ? (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Ngày / Tháng / Năm:</Text>
-                                    <Text style={styles.detailItemVal}>📅 {selectedNode.time}</Text>
+                                    <Text style={styles.detailItemVal}>
+                                      📅 {formatDateDDMMYYYY(selectedNode.time)}
+                                    </Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.location ? (
@@ -2527,8 +2589,8 @@ return (
 
                             const participatedEvents = Array.from(eventMap.values()).sort(
                               (a, b) => {
-                                const timeA = (a.time || '').trim();
-                                const timeB = (b.time || '').trim();
+                                const timeA = getDateSortKey(a.time);
+                                const timeB = getDateSortKey(b.time);
                                 if (timeA && timeB && timeA !== timeB) {
                                   return timeA.localeCompare(timeB);
                                 }
@@ -2549,7 +2611,7 @@ return (
                                       ⚡ {ev.name}
                                     </Text>
                                     <Text style={styles.relationLabel}>
-                                      📅 {ev.time || ev.chapter || 'Chưa rõ ngày'}
+                                      📅 {formatDateDDMMYYYY(ev.time) || ev.chapter || 'Chưa rõ ngày'}
                                     </Text>
                                   </View>
                                 ))}

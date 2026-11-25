@@ -843,6 +843,7 @@ export class ProjectStore {
       y: typeof nodeData.y === 'number' ? nodeData.y : 350 + (Math.random() * 80 - 40),
       status: nodeData.status?.trim() || defaultStatusByType[type] || 'Hoạt động',
       dob: nodeData.dob?.trim() || '',
+      age: nodeData.age?.trim() || '',
       birthplace: nodeData.birthplace?.trim() || '',
       gender: nodeData.gender?.trim() || '',
       weapon: nodeData.weapon?.trim() || '',

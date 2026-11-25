@@ -19,6 +19,7 @@ import { GraphSidebar } from '@/components/graph/GraphSidebar';
 import { DatePickerField } from '@/components/ui/DatePickerField';
 import { FormSelectField } from '@/components/ui/FormSelectField';
 import {
+  calculateAgeFromDob,
   CHARACTER_PROFESSIONS,
   CHARACTER_STATUS_OPTIONS,
   EVENT_IMPORTANCE_OPTIONS,
@@ -26,6 +27,7 @@ import {
   EVENT_TYPE_OPTIONS,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatDateDDMMYYYY,
   getProjectChapters,
   INITIAL_PROJECTS,
   ITEM_RARITY_OPTIONS,
@@ -95,6 +97,7 @@ interface EditableSuggestedNode {
   statusEvent: string;
   gender: string;
   dob: string;
+  age: string;
   birthplace: string;
   weapon: string;
   sect: string;
@@ -328,6 +331,7 @@ function createEmptySuggestedNode(type: EntityType = 'character'): EditableSugge
     statusEvent: '',
     gender: '',
     dob: '',
+    age: '',
     birthplace: '',
     weapon: '',
     sect: '',
@@ -733,7 +737,8 @@ export default function TextCheckerScreen() {
         desc: n.desc || '',
         status: n.status || createEmptySuggestedNode(n.type).status,
         gender: n.gender || '',
-        dob: n.dob || '',
+        dob: formatDateDDMMYYYY(n.dob || ''),
+        age: n.age ? String(n.age) : '',
         birthplace: n.birthplace || '',
         weapon: n.weapon || '',
         sect: n.sect || '',
@@ -1086,7 +1091,8 @@ export default function TextCheckerScreen() {
           status: item.status.trim(),
           statusEvent: item.statusEvent.trim(),
           gender: item.gender.trim(),
-          dob: item.dob.trim(),
+          dob: formatDateDDMMYYYY(item.dob),
+          age: item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob)),
           birthplace: item.birthplace.trim(),
           weapon: item.weapon.trim(),
           sect: item.sect.trim(),
@@ -1984,7 +1990,7 @@ export default function TextCheckerScreen() {
                             {[
                               ev.eventType,
                               ev.importance,
-                              ev.time ? `📅 ${ev.time}` : '',
+                              ev.time ? `📅 ${formatDateDDMMYYYY(ev.time)}` : '',
                               ev.location,
                             ]
                               .filter(Boolean)
@@ -2198,11 +2204,20 @@ export default function TextCheckerScreen() {
                       </>
                     )}
 
-                    <Text style={styles.fieldLabel}>Ngày sinh</Text>
+                    <Text style={styles.fieldLabel}>Ngày / Năm sinh</Text>
                     <DatePickerField
                       value={editingNode.dob}
                       onChange={(v) => setEditingNode({ ...editingNode, dob: v })}
-                      placeholder="Chọn ngày sinh"
+                      placeholder="DD/MM/YYYY"
+                    />
+                    <Text style={styles.fieldLabel}>Tuổi</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={editingNode.age}
+                      onChangeText={(v) => setEditingNode({ ...editingNode, age: v })}
+                      placeholder="Để trống sẽ tự tính theo năm sinh"
+                      placeholderTextColor="#6d6253"
+                      keyboardType="numeric"
                     />
 
                     <Text style={styles.fieldLabel}>Nơi sinh ra</Text>

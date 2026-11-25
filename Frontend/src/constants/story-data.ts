@@ -10,6 +10,7 @@ export interface StoryNode {
   status?: string;
   // Character fields
   dob?: string;
+  age?: string;
   birthplace?: string;
   gender?: string;
   weapon?: string;
@@ -131,6 +132,76 @@ export function getCharacterOwnedItems(
   });
 
   return result;
+}
+
+export function formatDateDDMMYYYY(value?: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return trimmed;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  if (match[1].length === 4 || p1 > 31) {
+    return `${String(p3).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p1).padStart(4, '0')}`;
+  }
+  return `${String(p1).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p3).padStart(4, '0')}`;
+}
+
+export function getDateSortKey(value?: string): string {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return trimmed;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  if (match[1].length === 4 || p1 > 31) {
+    return `${String(p1).padStart(4, '0')}-${String(p2).padStart(2, '0')}-${String(p3).padStart(2, '0')}`;
+  }
+  return `${String(p3).padStart(4, '0')}-${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}`;
+}
+
+export function calculateAgeFromDob(dob?: string, referenceDate: Date = new Date()): string {
+  const trimmed = String(dob || '').trim();
+  if (!trimmed) return '';
+  const currentYear = referenceDate.getFullYear();
+  const currentMonth = referenceDate.getMonth() + 1;
+  const currentDay = referenceDate.getDate();
+
+  const fullMatch = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (fullMatch) {
+    const p1 = parseInt(fullMatch[1], 10);
+    const p2 = parseInt(fullMatch[2], 10);
+    const p3 = parseInt(fullMatch[3], 10);
+    let year: number;
+    let month: number;
+    let day: number;
+    if (fullMatch[1].length === 4 || p1 > 31) {
+      year = p1;
+      month = p2;
+      day = p3;
+    } else {
+      day = p1;
+      month = p2;
+      year = p3;
+    }
+    if (!Number.isFinite(year) || year <= 0) return '';
+    let age = currentYear - year;
+    if (currentMonth < month || (currentMonth === month && currentDay < day)) {
+      age -= 1;
+    }
+    return String(Math.max(0, age));
+  }
+
+  const yearMatch = trimmed.match(/\b(\d{3,4})\b/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[1], 10);
+    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+      return String(Math.max(0, currentYear - year));
+    }
+  }
+  return '';
 }
 
 export interface StoryLink {

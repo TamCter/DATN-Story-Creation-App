@@ -106,12 +106,12 @@ export function DatePickerField({
     return (day + 6) % 7;
   }, [activeYear, activeMonth]);
 
-  // When user taps a day -> select date, close modal, button displays the date
+  // When user taps a day -> select date, close modal, button displays the date in DD/MM/YYYY
   const handleSelectDay = (day: number) => {
     const yStr = String(activeYear).padStart(4, '0');
     const mStr = String(activeMonth).padStart(2, '0');
     const dStr = String(day).padStart(2, '0');
-    onChange(`${yStr}-${mStr}-${dStr}`);
+    onChange(`${dStr}/${mStr}/${yStr}`);
     setModalVisible(false);
   };
 
@@ -138,7 +138,7 @@ export function DatePickerField({
     const yStr = String(now.getFullYear()).padStart(4, '0');
     const mStr = String(now.getMonth() + 1).padStart(2, '0');
     const dStr = String(now.getDate()).padStart(2, '0');
-    onChange(`${yStr}-${mStr}-${dStr}`);
+    onChange(`${dStr}/${mStr}/${yStr}`);
     setModalVisible(false);
   };
 
@@ -162,6 +162,20 @@ export function DatePickerField({
     return list;
   }, []);
 
+  const displayValue = useMemo(() => {
+    if (!value) return '';
+    const trimmed = value.trim();
+    const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+    if (!match) return trimmed;
+    const p1 = parseInt(match[1], 10);
+    const p2 = parseInt(match[2], 10);
+    const p3 = parseInt(match[3], 10);
+    if (match[1].length === 4 || p1 > 31) {
+      return `${String(p3).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p1).padStart(4, '0')}`;
+    }
+    return `${String(p1).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p3).padStart(4, '0')}`;
+  }, [value]);
+
   return (
     <View style={styles.wrapper}>
       {/* SINGLE BUTTON TRIGGER: Displays selected date or placeholder */}
@@ -170,8 +184,8 @@ export function DatePickerField({
           <Text style={styles.calendarIcon}>📅</Text>
           <Text
             numberOfLines={1}
-            style={[styles.dateButtonText, !value && styles.placeholderText]}>
-            {value ? value : placeholder}
+            style={[styles.dateButtonText, !displayValue && styles.placeholderText]}>
+            {displayValue ? displayValue : placeholder}
           </Text>
         </View>
 

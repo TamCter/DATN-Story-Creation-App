@@ -743,6 +743,7 @@ class ApiService {
         status?: string;
         gender?: string;
         dob?: string;
+        age?: string;
         birthplace?: string;
         weapon?: string;
         sect?: string;

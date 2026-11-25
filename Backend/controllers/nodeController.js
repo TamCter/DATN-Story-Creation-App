@@ -128,6 +128,7 @@ const ALLOWED_NODE_SCALARS = new Set([
   'status',
   // Character specific
   'dob',
+  'age',
   'birthplace',
   'gender',
   'weapon',
@@ -174,6 +175,61 @@ const ALLOWED_NODE_SCALARS = new Set([
   // Status Event cause
   'statusEvent',
 ]);
+
+function calculateAgeFromDob(dob) {
+  const trimmed = String(dob || '').trim();
+  if (!trimmed) return '';
+  const now = new Date();
+  const currentYear = now.getFullYear();
+  const currentMonth = now.getMonth() + 1;
+  const currentDay = now.getDate();
+
+  const fullMatch = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (fullMatch) {
+    const p1 = parseInt(fullMatch[1], 10);
+    const p2 = parseInt(fullMatch[2], 10);
+    const p3 = parseInt(fullMatch[3], 10);
+    let year, month, day;
+    if (fullMatch[1].length === 4 || p1 > 31) {
+      year = p1;
+      month = p2;
+      day = p3;
+    } else {
+      day = p1;
+      month = p2;
+      year = p3;
+    }
+    if (!Number.isFinite(year) || year <= 0) return '';
+    let age = currentYear - year;
+    if (currentMonth < month || (currentMonth === month && currentDay < day)) {
+      age -= 1;
+    }
+    return String(Math.max(0, age));
+  }
+
+  const yearMatch = trimmed.match(/\b(\d{3,4})\b/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[1], 10);
+    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+      return String(Math.max(0, currentYear - year));
+    }
+  }
+  return '';
+}
+
+function formatDateDDMMYYYY(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return trimmed;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  if (match[1].length === 4 || p1 > 31) {
+    return `${String(p3).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p1).padStart(4, '0')}`;
+  }
+  return `${String(p1).padStart(2, '0')}/${String(p2).padStart(2, '0')}/${String(p3).padStart(4, '0')}`;
+}
 
 /**
  * Lấy danh sách Nodes của một Project (có thể lọc theo ?type=character&search=...)
@@ -385,6 +441,15 @@ async function createNode(req, res, next) {
         nodeProperties[field] = body[field] !== null ? String(body[field]).trim() : '';
       }
     }
+    if (nodeProperties.dob) {
+      nodeProperties.dob = formatDateDDMMYYYY(nodeProperties.dob);
+    }
+    if (nodeProperties.time) {
+      nodeProperties.time = formatDateDDMMYYYY(nodeProperties.time);
+    }
+    if (normalizedType === 'character' && !nodeProperties.age && nodeProperties.dob) {
+      nodeProperties.age = calculateAgeFromDob(nodeProperties.dob);
+    }
     if (body.autoCreatedStub !== undefined) {
       nodeProperties.autoCreatedStub = body.autoCreatedStub;
     }
@@ -534,6 +599,22 @@ async function updateNode(req, res, next) {
       body.itemsInvolved !== undefined ||
       body.factionsInvolved !== undefined;
     const currentType = body.type?.toLowerCase() || checkResult[0].n.type;
+    if (updates.dob) {
+      updates.dob = formatDateDDMMYYYY(updates.dob);
+    }
+    if (updates.time) {
+      updates.time = formatDateDDMMYYYY(updates.time);
+    }
+    if (currentType === 'character') {
+      const effectiveDob = updates.dob !== undefined ? updates.dob : (checkResult[0].n.dob || '');
+      const effectiveAge = updates.age !== undefined ? updates.age : (checkResult[0].n.age || '');
+      if (!effectiveAge && effectiveDob) {
+        const computedAge = calculateAgeFromDob(effectiveDob);
+        if (computedAge) {
+          updates.age = computedAge;
+        }
+      }
+    }
     if (participantFieldsChanged && currentType === 'event') {
       updates._participantSyncRevision = crypto.randomUUID();
     }

@@ -36,15 +36,96 @@ const RELATIONAL_NODE_FIELDS = [
 ];
 const PLACEHOLDER_VALUE_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
 
+function parseDateParts(value) {
+  const trimmed = String(value || '').trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/^(\d{1,4})[-/](\d{1,2})[-/](\d{1,4})$/);
+  if (!match) return null;
+  const p1 = parseInt(match[1], 10);
+  const p2 = parseInt(match[2], 10);
+  const p3 = parseInt(match[3], 10);
+  let day, month, year;
+  if (match[1].length === 4 || p1 > 31) {
+    year = p1;
+    month = p2;
+    day = p3;
+  } else {
+    day = p1;
+    month = p2;
+    year = p3;
+  }
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  if (year <= 0 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  const dd = String(day).padStart(2, '0');
+  const mm = String(month).padStart(2, '0');
+  const yyyy = String(year).padStart(4, '0');
+  return {
+    day,
+    month,
+    year,
+    formatted: `${dd}/${mm}/${yyyy}`,
+    sortKey: `${yyyy}-${mm}-${dd}`,
+  };
+}
+
+function formatDateDDMMYYYY(value) {
+  const parsed = parseDateParts(value);
+  return parsed ? parsed.formatted : String(value || '').trim();
+}
+
+function getTodayDDMMYYYY(now = new Date()) {
+  const dd = String(now.getDate()).padStart(2, '0');
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const yyyy = String(now.getFullYear()).padStart(4, '0');
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function addDaysDDMMYYYY(parsed, days = 1) {
+  const d = new Date(Date.UTC(parsed.year, parsed.month - 1, parsed.day));
+  d.setUTCFullYear(parsed.year);
+  d.setUTCDate(d.getUTCDate() + days);
+  const dd = String(d.getUTCDate()).padStart(2, '0');
+  const mm = String(d.getUTCMonth() + 1).padStart(2, '0');
+  const yyyy = String(d.getUTCFullYear()).padStart(4, '0');
+  return `${dd}/${mm}/${yyyy}`;
+}
+
+function calculateAgeFromDob(dob, refDate = new Date()) {
+  const parsed = parseDateParts(dob);
+  const currentYear = refDate.getFullYear();
+  const currentMonth = refDate.getMonth() + 1;
+  const currentDay = refDate.getDate();
+  if (parsed) {
+    let age = currentYear - parsed.year;
+    if (currentMonth < parsed.month || (currentMonth === parsed.month && currentDay < parsed.day)) {
+      age -= 1;
+    }
+    return String(Math.max(0, age));
+  }
+  const yearMatch = String(dob || '').match(/\b(\d{3,4})\b/);
+  if (yearMatch) {
+    const year = parseInt(yearMatch[1], 10);
+    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+      return String(Math.max(0, currentYear - year));
+    }
+  }
+  return '';
+}
+
 const SYSTEM_PROMPT = `Bạn là trợ lý AI hỗ trợ phát triển câu chuyện và xây dựng hồ sơ nhân vật, bối cảnh, tổ chức, vật phẩm và sự kiện.
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
 Có 5 loại node:
-1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob, birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
+1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob (Ngày/Tháng/Năm sinh định dạng DD/MM/YYYY, VD: 15/08/1998), age (số tuổi), birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
 4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
-5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng YYYY-MM-DD, VD: 2024-08-15), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
+5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng DD/MM/YYYY, VD: 15/08/2024), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
+
+QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
+- TẤT CẢ ngày tháng năm (dob của nhân vật, time của sự kiện) BẮT BUỘC dùng định dạng DD/MM/YYYY (VD: 25/11/2026).
+- Khi tạo nhân vật: nếu người dùng cung cấp năm sinh/ngày sinh (dob) mà không nêu tuổi (age), hãy tính tuổi theo năm hiện tại (hoặc để trống để hệ thống tự tính).
+- BẮT LỖI TUỔI & NĂM: Nếu người dùng nhập cả năm sinh và tuổi nhưng không khớp nhau theo năm hiện tại (hoặc mốc năm của truyện), hoặc nhập ngày/năm sự kiện mâu thuẫn với năm sinh nhân vật tham gia (chưa ra đời) hay mâu thuẫn với niên biểu sự kiện đã có, hãy CHỈ RÕ MÂU THUẪN và gợi ý chỉnh lại trong lời trả lời!
 
 QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
 Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
@@ -896,10 +977,29 @@ async function generateChapterAndEvents(req, res, next) {
       .filter((n) => n.type === 'item')
       .slice(0, 12)
       .map((n) => n.name);
+    // Tính toán mốc ngày mặc định (DD/MM/YYYY):
+    // Nếu các chương/sự kiện trước đã có ngày hợp lệ -> lấy ngày tiếp theo (+1 ngày) sau mốc gần nhất.
+    // Nếu chưa có mốc nào -> lấy ngày hiện tại làm mốc.
+    const parsedPrevEventDates = nodes
+      .filter((n) => n && n.type === 'event' && n.time)
+      .map((n) => parseDateParts(n.time))
+      .filter(Boolean)
+      .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    const latestPrevEventDate =
+      parsedPrevEventDates.length > 0
+        ? parsedPrevEventDates[parsedPrevEventDates.length - 1]
+        : null;
+    const defaultEventDate = latestPrevEventDate
+      ? addDaysDDMMYYYY(latestPrevEventDate, 1)
+      : getTodayDDMMYYYY();
+    const defaultDateReason = latestPrevEventDate
+      ? `ngày tiếp theo sau sự kiện gần nhất (${latestPrevEventDate.formatted}) của chương trước`
+      : `ngày hiện tại (${defaultEventDate})`;
+
     const previousEvents = nodes
       .filter((n) => n.type === 'event' && n.name)
       .slice(-10)
-      .map((n) => `${n.name}${n.arcName ? ` [Arc: ${n.arcName}]` : ''}`);
+      .map((n) => `${n.name}${n.time ? ` [${formatDateDDMMYYYY(n.time)}]` : ''}${n.arcName ? ` [Arc: ${n.arcName}]` : ''}`);
 
     const contextPrompt = `Bạn là trợ lý AI sáng tạo cốt truyện tài hoa cho tiểu thuyết thể loại: ${writingStyle}.
 Dự án tiểu thuyết: "${projectTitle}".
@@ -910,6 +1010,7 @@ Các thực thể hiện có trong truyện:
 - Tổ chức / Nhóm: ${factions.join(', ') || 'Chưa có'}
 - Vật phẩm: ${items.join(', ') || 'Chưa có'}
 - Sự kiện trước đó: ${previousEvents.join(', ') || 'Chưa có'}
+- Mốc thời gian mặc định cho Chương ${nextChapterNumber}: ${defaultEventDate} (${defaultDateReason})
 
 Nhiệm vụ của bạn:
 1. Tạo thông tin cho CHƯƠNG TIẾP THEO (Chương ${nextChapterNumber}).
@@ -929,7 +1030,7 @@ QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN
 - "impact": tác động lâu dài tới mạch truyện các chương sau.
 - "eventType": chọn 1 trong: "Chiến đấu", "Đối thoại / Đàm phán", "Tiết lộ bí mật", "Du hành", "Biến cố / Hy sinh", "Giao dịch / Vật phẩm", "Hồi tưởng", "Khác".
 - "importance": chọn 1 trong: "Nút thắt chính", "Bước ngoặt", "Gieo mầm", "Sự kiện phụ".
-- "time": Ngày/Tháng/Năm diễn ra sự kiện định dạng YYYY-MM-DD (VD: "2024-08-15"), phải nối tiếp hợp lý theo niên biểu các sự kiện trước đó.
+- "time": Ngày/Tháng/Năm diễn ra sự kiện theo đúng định dạng DD/MM/YYYY (VD: "${defaultEventDate}"). QUY TẮC BẮT BUỘC: Nếu ý tưởng của tác giả KHÔNG đề cập ngày/tháng/năm cụ thể, hãy dùng "${defaultEventDate}" (${defaultDateReason}) làm mốc cho sự kiện đầu tiên và các sự kiện tiếp theo cùng ngày hoặc nối tiếp theo định dạng DD/MM/YYYY. Nếu tác giả có gợi ý thời điểm cụ thể, hãy dùng đúng thời điểm đó theo định dạng DD/MM/YYYY.
 - "characterStatusChanges": mảng ghi nhận khi sự kiện thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" trong diễn biến hiện tại (dùng [] nếu không có). Nhân vật thay đổi trạng thái phải có trong "charactersInvolved".
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
@@ -950,7 +1051,7 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
       "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm nơi diễn ra>",
-      "time": "<Ngày/Tháng/Năm diễn ra định dạng YYYY-MM-DD, VD: 2024-08-15>",
+      "time": "<Ngày/Tháng/Năm diễn ra định dạng DD/MM/YYYY, VD: ${defaultEventDate}>",
       "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới sự kiện này>",
       "conflict": "<Xung đột chính trong sự kiện>",
       "outcome": "<Kết quả trực tiếp của sự kiện>",
@@ -1113,8 +1214,9 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
         importance: cleanEventScalar(event.importance) || (idx === 0 ? 'Bước ngoặt' : 'Nút thắt chính'),
         arcName: cleanEventScalar(event.arcName) || `Chương ${nextChapterNumber}`,
         sequenceOrder: cleanEventScalar(event.sequenceOrder) || String(idx + 1),
-        timelineType: cleanEventScalar(event.timelineType) || 'Hiện tại',
-        duration: cleanEventScalar(event.duration) || 'Trong chương',
+        time: formatDateDDMMYYYY(cleanEventScalar(event.time)) || defaultEventDate,
+        timelineType: '',
+        duration: '',
         cause: cleanEventScalar(event.cause),
         conflict: cleanEventScalar(event.conflict),
         outcome: cleanEventScalar(event.outcome),
@@ -1868,23 +1970,33 @@ async function analyzeChapterText(req, res, next) {
         if (tgt === charId && eventById.has(src)) evMap.set(src, eventById.get(src));
       });
       return Array.from(evMap.values())
-        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+        .sort((a, b) => {
+          const ka = parseDateParts(a.time)?.sortKey || String(a.time || '');
+          const kb = parseDateParts(b.time)?.sortKey || String(b.time || '');
+          return ka.localeCompare(kb);
+        })
         .slice(0, 10)
-        .map((ev) => `${ev.name}${ev.time ? ` (${ev.time})` : ''}`);
+        .map((ev) => `${ev.name}${ev.time ? ` (${formatDateDDMMYYYY(ev.time)})` : ''}`);
     };
+
+    const todayStr = getTodayDDMMYYYY();
+    const currentYear = new Date().getFullYear();
 
     const characterLines = allCharacters
       .slice(0, MAX_CTX_CHARACTERS)
       .map((n) => {
         const ownedItems = getCharOwnedItems(n);
         const charEvents = getCharEventsSummary(n);
+        const formattedDob = formatDateDDMMYYYY(n.dob);
+        const resolvedAge = n.age || calculateAgeFromDob(formattedDob);
         return [
           n.name,
           n.status && `trạng thái=${n.status}`,
           n.statusEvent && `biến cố trạng thái=${n.statusEvent}`,
           n.role && `vai trò=${n.role}`,
           n.gender && `giới tính=${n.gender}`,
-          n.dob && `ngày sinh=${n.dob}`,
+          formattedDob && `ngày sinh=${formattedDob}`,
+          resolvedAge && `tuổi=${resolvedAge}`,
           n.birthplace && `nơi sinh=${n.birthplace}`,
           ownedItems.length > 0 && `vật phẩm sở hữu=[${ownedItems.join(', ')}]`,
           n.sect && `tổ chức=${n.sect}`,
@@ -1958,7 +2070,7 @@ async function analyzeChapterText(req, res, next) {
           n.eventType && `loại=${n.eventType}`,
           n.importance && `mức độ=${n.importance}`,
           n.arcName && `arc=${n.arcName}`,
-          n.time && `ngày/tháng/năm=${n.time}`,
+          n.time && `ngày/tháng/năm=${formatDateDDMMYYYY(n.time)}`,
           n.location && `địa điểm=${n.location}`,
           n.cause && `nguyên nhân=${String(n.cause).slice(0, 120)}`,
           n.conflict && `xung đột=${String(n.conflict).slice(0, 120)}`,
@@ -1979,15 +2091,15 @@ async function analyzeChapterText(req, res, next) {
     const chronologicalTimelineLines = [...allEvents]
       .filter((ev) => ev.time || ev.chapter)
       .sort((a, b) => {
-        const ta = String(a.time || '').trim();
-        const tb = String(b.time || '').trim();
-        if (ta && tb && ta !== tb) return ta.localeCompare(tb);
+        const ka = parseDateParts(a.time)?.sortKey || String(a.time || '').trim();
+        const kb = parseDateParts(b.time)?.sortKey || String(b.time || '').trim();
+        if (ka && kb && ka !== kb) return ka.localeCompare(kb);
         return (Number(a.sequenceOrder) || 0) - (Number(b.sequenceOrder) || 0);
       })
       .slice(-MAX_CTX_EVENTS)
       .map(
         (ev) =>
-          `- [${ev.time || 'Chưa rõ ngày'}] ${ev.name}${ev.chapter ? ` (${ev.chapter})` : ''}${ev.location ? ` @ ${ev.location}` : ''}${ev.cause ? ` | nguyên nhân: ${ev.cause}` : ''}${ev.charactersInvolved || ev.characters ? ` | nhân vật: ${ev.charactersInvolved || ev.characters}` : ''}`
+          `- [${formatDateDDMMYYYY(ev.time) || 'Chưa rõ ngày'}] ${ev.name}${ev.chapter ? ` (${ev.chapter})` : ''}${ev.location ? ` @ ${ev.location}` : ''}${ev.cause ? ` | nguyên nhân: ${ev.cause}` : ''}${ev.charactersInvolved || ev.characters ? ` | nhân vật: ${ev.charactersInvolved || ev.characters}` : ''}`
       );
 
     const chapterLines = eligibleChapters
@@ -2008,15 +2120,19 @@ async function analyzeChapterText(req, res, next) {
     const boundedChapterText = cleanText;
 
     const contextPrompt = `Bạn là biên tập viên văn học & chuyên gia kiểm tra tính nhất quán (Continuity Editor) xuất sắc cho tiểu thuyết "${projectTitle}".
+Ngày hiện tại của hệ thống: ${todayStr} (năm ${currentYear}). Tất cả ngày/tháng/năm đều dùng định dạng DD/MM/YYYY.
 Nhiệm vụ của bạn là đọc kỹ VĂN BẢN CHƯƠNG MỚI do tác giả tự viết, đối chiếu chặt chẽ với BẢN ĐỒ THỰC THỂ, NIÊN BIỂU SỰ KIỆN & LỊCH SỬ CÁC CHƯƠNG TRƯỚC của dự án để thực hiện 3 việc:
 
 1. BẮT LỖI TÍNH NHẤT QUÁN & LOGIC (issues):
 Hãy rà soát toàn diện các nhóm lỗi sau (chỉ báo lỗi thực sự có căn cứ từ dữ liệu đồ thị hoặc mâu thuẫn nội tại trong chương, KHÔNG bịa đặt):
-- "Lỗi thời gian & Niên biểu": RÀ SOÁT ĐẶC BIỆT KỸ các mốc ngày/tháng/năm giữa các sự kiện:
+- "Lỗi thời gian & Niên biểu": RÀ SOÁT ĐẶC BIỆT KỸ các mốc ngày/tháng/năm (DD/MM/YYYY) giữa các sự kiện:
   + Viết nhầm ngày/tháng/năm trong chương so với niên biểu các sự kiện đã có (VD: chương sau hoặc sự kiện diễn ra sau nhưng ghi ngày/tháng/năm SỚM HƠN sự kiện trước mà không phải hồi tưởng).
   + Mâu thuẫn nhân quả theo thời gian: nhắc tới kết quả/hệ quả của sự kiện A (hoặc sự kiện nối cause từ A) nhưng mốc thời gian lại trước ngày diễn ra sự kiện A.
   + Sai khoảng thời gian chênh lệch (VD: văn bản nói "3 ngày sau sự kiện X" nhưng ngày/tháng/năm thực tế chênh lệch khác hẳn hoặc đi ngược thời gian).
-  + Mâu thuẫn ngày sinh (dob) / tuổi nhân vật với ngày diễn ra sự kiện (nhân vật chưa ra đời hoặc sai số tuổi).
+  + Mâu thuẫn ngày sinh (dob) / tuổi (age) / năm sự kiện:
+    * Văn bản nêu số tuổi của nhân vật không khớp với trường "tuổi" hoặc không khớp với hiệu số (năm sự kiện hoặc năm hiện tại ${currentYear}) trừ năm sinh (dob).
+    * Nhân vật chưa ra đời vào ngày/năm diễn ra sự kiện, hoặc chênh lệch tuổi giữa hai nhân vật trái ngược với năm sinh đã lưu.
+    * Văn bản nêu cả năm sinh và tuổi của cùng một nhân vật nhưng tự mâu thuẫn với nhau.
   + Nhân vật xuất hiện cùng một ngày/tháng/năm ở hai địa điểm xa nhau không có giải thích di chuyển.
   + Nhầm trình tự thời gian giữa các sự kiện ngay trong cùng một chương.
 - "Nhân vật đã chết": Nhân vật đang có trạng thái "Đã chết" (hoặc đã tử nạn ở sự kiện statusEvent vào ngày X) nhưng lại xuất hiện hành động/đối thoại trực tiếp ở thời điểm sau ngày X (trừ khi văn bản nêu rõ là hồi tưởng trước ngày chết, linh hồn hoặc sự kiện hồi sinh).
@@ -2030,14 +2146,15 @@ Hãy rà soát toàn diện các nhóm lỗi sau (chỉ báo lỗi thực sự c
 - "Mâu thuẫn nội tại": Mâu thuẫn tự thân ngay trong văn bản chương (đổi tên nhân vật, buổi sáng đột ngột thành đêm khuya không chuyển cảnh, chi tiết trước đá chi tiết sau).
 
 Phân loại mức độ severity:
-- "error": Lỗi logic/nhất quán nghiêm trọng (VD: sai ngày/tháng/năm đảo ngược niên biểu sự kiện, người đã chết xuất hiện sau ngày tử nạn, sai sự thật đã khẳng định, dùng vật phẩm đã bị phá hủy).
+- "error": Lỗi logic/nhất quán nghiêm trọng (VD: sai ngày/tháng/năm đảo ngược niên biểu sự kiện, sai tuổi/năm sinh, người đã chết xuất hiện sau ngày tử nạn, sai sự thật đã khẳng định, dùng vật phẩm đã bị phá hủy).
 - "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, khoảng cách thời gian đáng ngờ, nhân vật hành xử khác thường).
-- "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn (VD: nên ghi rõ ngày/tháng/năm để đồng bộ niên biểu).
+- "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn (VD: nên ghi rõ ngày/tháng/năm DD/MM/YYYY để đồng bộ niên biểu).
 
 2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes) & QUY TẮC THỐNG NHẤT QUAN HỆ:
 - Trích xuất các thực thể MỚI xuất hiện rõ ràng trong chương thuộc 4 loại: "character", "item", "location", "faction" mà CHƯA CÓ trong danh sách thực thể hiện có ở dưới (so khớp không phân biệt hoa/thường).
 - KHÔNG tạo lại node đã tồn tại.
 - Điền đầy đủ các trường thông tin suy ra được từ văn bản để hệ thống tự động tạo đúng các cạnh quan hệ đồ thị:
+  + Nhân vật có ngày/năm sinh -> điền dob theo định dạng DD/MM/YYYY; có tuổi -> điền số tuổi vào age (nếu có dob mà văn bản không nêu tuổi, để trống hoặc tính theo năm hiện tại ${currentYear}).
   + Nhân vật sở hữu/dùng vật phẩm -> điền tên vật phẩm (nhiều vật phẩm phân tách bằng dấu phẩy) vào character.weapon và/hoặc tên nhân vật vào item.holderOrLocation.
   + Nhân vật thuộc tổ chức / lãnh đạo tổ chức -> character.sect và faction.leader.
   + Nhân vật sinh tại địa điểm -> character.birthplace.
@@ -2049,7 +2166,7 @@ Phân loại mức độ severity:
 - Rút ra 1 đến 5 SỰ KIỆN CHÍNH theo đúng trình tự thời gian diễn ra trong chương này để gắn vào Chi tiết chương.
 - Mỗi sự kiện phải có đầy đủ các trường chi tiết sau (để lưu thông tin phong phú & tự nối quan hệ đồ thị):
   + Cơ bản & Mạch truyện: "name", "desc", "eventType" (Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác), "importance" (Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ), "arcName", "sequenceOrder" ("1", "2",...).
-  + Thời gian & Địa điểm: "time" (Ngày/Tháng/Năm diễn ra sự kiện định dạng YYYY-MM-DD, VD: "2024-08-15", hoặc chuỗi rỗng "" nếu văn bản không đề cập), "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
+  + Thời gian & Địa điểm: "time" (Ngày/Tháng/Năm diễn ra sự kiện định dạng DD/MM/YYYY, VD: "${todayStr}", hoặc chuỗi rỗng "" nếu văn bản không đề cập), "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
   + Nhân quả & Mâu thuẫn: "cause" (nguyên nhân hoặc tên chính xác sự kiện trước để nối CAUSED_BY), "conflict", "outcome", "consequences", "impact".
   + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (chỉ liệt kê tên các vật phẩm nhân vật tham gia thực sự mang theo/sử dụng trong sự kiện để hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện), "factionsInvolved" (chỉ liệt kê tên các tổ chức liên quan qua nhân vật tham gia để hiển thị chuỗi Tổ chức <--Tổ chức-- Nhân vật --Tham gia--> Sự kiện).
 - "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
@@ -2104,6 +2221,7 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       "status": "<Còn sống / Nguyên vẹn / Hoạt động / Đang hoạt động>",
       "gender": "",
       "dob": "",
+      "age": "",
       "birthplace": "",
       "weapon": "",
       "sect": "",
@@ -2133,7 +2251,7 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
       "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm hoặc chuỗi rỗng>",
-      "time": "<Ngày/Tháng/Năm diễn ra định dạng YYYY-MM-DD, VD: 2024-08-15>",
+      "time": "<Ngày/Tháng/Năm diễn ra định dạng DD/MM/YYYY, VD: ${todayStr}>",
       "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới>",
       "conflict": "<Xung đột chính>",
       "outcome": "<Kết quả trực tiếp>",
@@ -2244,7 +2362,8 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
                   ? 'Đang hoạt động'
                   : 'Hoạt động'),
           gender: cleanField(n.gender),
-          dob: cleanField(n.dob),
+          dob: formatDateDDMMYYYY(cleanField(n.dob)),
+          age: cleanField(n.age) || calculateAgeFromDob(formatDateDDMMYYYY(cleanField(n.dob))),
           birthplace: cleanField(n.birthplace),
           weapon: cleanField(n.weapon),
           sect: cleanField(n.sect),
@@ -2304,9 +2423,9 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
         arcName: cleanField(ev.arcName),
         sequenceOrder: cleanField(ev.sequenceOrder) || String(idx + 1),
         location: cleanField(ev.location),
-        time: cleanField(ev.time),
-        timelineType: cleanField(ev.timelineType) || 'Hiện tại',
-        duration: cleanField(ev.duration),
+        time: formatDateDDMMYYYY(cleanField(ev.time)),
+        timelineType: '',
+        duration: '',
         cause: cleanField(ev.cause),
         conflict: cleanField(ev.conflict),
         outcome: cleanField(ev.outcome),
@@ -2333,9 +2452,9 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       arcName: ev.arcName || '',
       sequenceOrder: ev.sequenceOrder || '',
       location: ev.location || '',
-      time: ev.time || '',
-      timelineType: ev.timelineType || 'Hiện tại',
-      duration: ev.duration || '',
+      time: formatDateDDMMYYYY(ev.time || ''),
+      timelineType: '',
+      duration: '',
       cause: ev.cause || '',
       conflict: ev.conflict || '',
       outcome: ev.outcome || '',
