@@ -12,6 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  getCharacterOwnedItems,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -284,8 +285,19 @@ export default function CharactersScreen() {
                 {/* Character Profile Meta */}
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
-                    <Text style={styles.metaLabel}>🎒 Vật dụng:</Text>
-                    <Text style={styles.metaValueHighlight}>{char.weapon || extra.weapon}</Text>
+                    <Text style={styles.metaLabel}>🎒 Vật phẩm sở hữu:</Text>
+                    <Text style={styles.metaValueHighlight}>
+                      {(() => {
+                        const ownedItems = getCharacterOwnedItems(
+                          char,
+                          currentProject.nodes,
+                          currentProject.links
+                        );
+                        return ownedItems.length > 0
+                          ? ownedItems.join(', ')
+                          : extra.weapon || 'Chưa có';
+                      })()}
+                    </Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🏛 Tổ chức:</Text>

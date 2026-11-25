@@ -719,33 +719,50 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 1. NHÂN VẬT (Character)
     if (nodeType === 'character') {
-      // Vật dụng -> Item
-      const weapon = cleanRelationalValue(nodeData.weapon);
-      if (weapon) {
+      // Vật dụng / Vật phẩm sở hữu -> Item (hỗ trợ nhiều vật phẩm)
+      const weaponNames = [];
+      const seenWeaponLower = new Set();
+      for (const rawWeapon of parseParticipantNames(nodeData.weapon)) {
+        const cleanedWeapon = cleanRelationalValue(rawWeapon);
+        if (!cleanedWeapon) continue;
+        const key = cleanedWeapon.toLowerCase();
+        if (!seenWeaponLower.has(key)) {
+          seenWeaponLower.add(key);
+          weaponNames.push(cleanedWeapon);
+        }
+      }
+
+      if (weaponNames.length > 0) {
+        const weaponItemIds = [];
+        for (const weaponName of weaponNames) {
+          const itemId = await findOrCreateProjectEntity(projectId, weaponName, 'item', {
+            role: 'Quý hiếm',
+            rarity: 'Quý hiếm',
+            element: 'Kim',
+            desc: `Vật phẩm gắn liền với ${nodeName}`,
+            status: 'Nguyên vẹn',
+          });
+          if (itemId) weaponItemIds.push(itemId);
+        }
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode)
-          WHERE item.name <> $weapon AND item.id <> $weapon
+          WHERE NOT (item.id IN $weaponItemIds)
           DELETE r
-        `, { nodeId, weapon });
-        const itemId = await findOrCreateProjectEntity(projectId, weapon, 'item', {
-          role: 'Quý hiếm',
-          rarity: 'Quý hiếm',
-          element: 'Kim',
-          desc: `Vật phẩm gắn liền với ${nodeName}`,
-          status: 'Nguyên vẹn',
-        });
-        await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })
-          MATCH (item:StoryNode { id: $itemId })
-          MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
-          ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                        r.label = 'Sở hữu / Sử dụng',
-                        r.type = 'solid',
-                        r.tone = 'possession',
-                        r.createdAt = timestamp()
-          ON MATCH SET r.label = 'Sở hữu / Sử dụng',
-                       r.updatedAt = timestamp()
-        `, { nodeId, itemId });
+        `, { nodeId, weaponItemIds });
+        for (const itemId of weaponItemIds) {
+          await runQuery(`
+            MATCH (c:StoryNode { id: $nodeId })
+            MATCH (item:StoryNode { id: $itemId })
+            MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
+            ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
+                          r.label = 'Sở hữu / Sử dụng',
+                          r.type = 'solid',
+                          r.tone = 'possession',
+                          r.createdAt = timestamp()
+            ON MATCH SET r.label = 'Sở hữu / Sử dụng',
+                         r.updatedAt = timestamp()
+          `, { nodeId, itemId });
+        }
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(:StoryNode)
@@ -1245,27 +1262,48 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
     if (nodeType === 'item') {
+      const charRes = await runQuery(`
+        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        WHERE c.weapon IS NOT NULL AND trim(c.weapon) <> ''
+        RETURN c.id AS id, c.weapon AS weapon
+      `, { projectId });
+      const itemNameLower = nodeName.toLowerCase();
+      const matchingCharIds = [];
+      for (const rec of charRes.records) {
+        const cId = rec.get('id');
+        const cWeapon = rec.get('weapon');
+        const parsedWeapons = parseParticipantNames(cWeapon)
+          .map((w) => cleanRelationalValue(w))
+          .filter(Boolean);
+        const matchesItem = parsedWeapons.some(
+          (w) => w.toLowerCase() === itemNameLower || w === nodeId
+        );
+        if (matchesItem) matchingCharIds.push(cId);
+      }
+
       // Xóa các link EQUIPPED cũ thuộc dự án này trỏ tới item này mà c.weapon không còn khớp
       await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         MATCH (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode { id: $nodeId })
-        WHERE toLower(coalesce(c.weapon, '')) <> toLower(item.name)
-          AND coalesce(c.weapon, '') <> item.id
+        WHERE NOT (c.id IN $matchingCharIds)
         DELETE r
-      `, { nodeId, projectId });
+      `, { nodeId, projectId, matchingCharIds });
 
-      await runQuery(`
-        MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
-        MATCH (item:StoryNode { id: $nodeId })
-        WHERE (toLower(c.weapon) = toLower(item.name) OR c.weapon = item.id)
-          AND c.weapon IS NOT NULL AND c.weapon <> ''
-        MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
-        ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                      r.label = 'Vật dụng',
-                      r.type = 'solid',
-                      r.tone = 'possession',
-                      r.createdAt = timestamp()
-      `, { nodeId, projectId });
+      if (matchingCharIds.length > 0) {
+        await runQuery(`
+          MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+          MATCH (item:StoryNode { id: $nodeId })
+          WHERE c.id IN $matchingCharIds
+          MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
+                        r.label = 'Sở hữu / Sử dụng',
+                        r.type = 'solid',
+                        r.tone = 'possession',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Sở hữu / Sử dụng',
+                       r.updatedAt = timestamp()
+        `, { nodeId, projectId, matchingCharIds });
+      }
     } else if (nodeType === 'location') {
       // Xóa các link BIRTHPLACE cũ thuộc dự án này trỏ tới location này mà c.birthplace không còn khớp
       await runQuery(`

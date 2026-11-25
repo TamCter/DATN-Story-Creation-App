@@ -31,6 +31,7 @@ import {
   FACTION_STATUS_OPTIONS,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterOwnedItems,
   getProjectChapters,
   INITIAL_PROJECTS,
   parseEventParticipants,
@@ -262,7 +263,8 @@ export default function GraphScreen() {
   const [formDob, setFormDob] = useState('');
   const [formBirthplace, setFormBirthplace] = useState('');
   const [formGender, setFormGender] = useState('Nam');
-  const [formWeapon, setFormWeapon] = useState('');
+  const [formWeapons, setFormWeapons] = useState<string[]>([]);
+  const [formCustomWeaponInput, setFormCustomWeaponInput] = useState('');
   const [formSect, setFormSect] = useState('');
   const [formPersonality, setFormPersonality] = useState('');
 
@@ -431,7 +433,8 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormDob('');
   setFormBirthplace('');
   setFormGender('Nam');
-  setFormWeapon('');
+  setFormWeapons([]);
+  setFormCustomWeaponInput('');
   setFormSect('');
   setFormPersonality('');
   setFormRarity('Quý hiếm');
@@ -481,7 +484,7 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   if (nodeData.gender) setFormGender(nodeData.gender);
   if (nodeData.dob) setFormDob(nodeData.dob);
   if (nodeData.birthplace) setFormBirthplace(nodeData.birthplace);
-  if (nodeData.weapon) setFormWeapon(nodeData.weapon);
+  if (nodeData.weapon) setFormWeapons(parseEventParticipants(nodeData.weapon));
   if (nodeData.sect) setFormSect(nodeData.sect);
   if (nodeData.personality) setFormPersonality(nodeData.personality);
   if (nodeData.rarity) setFormRarity(nodeData.rarity);
@@ -804,7 +807,8 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormDob(node.dob || '');
   setFormBirthplace(node.birthplace || '');
   setFormGender(node.gender || 'Nam');
-  setFormWeapon(node.weapon || '');
+  setFormWeapons(getCharacterOwnedItems(node, nodes, links));
+  setFormCustomWeaponInput('');
   setFormSect(node.sect || '');
   setFormPersonality(node.personality || '');
   setFormRarity(node.rarity || 'Quý hiếm');
@@ -877,7 +881,18 @@ const handleSaveNode = async () => {
     payload.dob = formDob.trim();
     payload.birthplace = formBirthplace.trim();
     payload.gender = formGender.trim() || 'Nam';
-    payload.weapon = formWeapon.trim();
+    const mergedWeapons: string[] = [];
+    const seenWeaponLower = new Set<string>();
+    [...formWeapons, ...parseEventParticipants(formCustomWeaponInput)].forEach((w) => {
+      const trimmed = w.trim();
+      if (!trimmed) return;
+      const key = trimmed.toLowerCase();
+      if (!seenWeaponLower.has(key)) {
+        seenWeaponLower.add(key);
+        mergedWeapons.push(trimmed);
+      }
+    });
+    payload.weapon = mergedWeapons.join(', ');
     payload.sect = formSect.trim();
     payload.personality = formPersonality.trim();
   } else if (formType === 'item') {
@@ -936,7 +951,32 @@ const handleSaveNode = async () => {
 
   try {
     if (isEditingNode && editingNodeId) {
+      const editingNode = nodes.find((n) => n.id === editingNodeId);
       const updated = await projectStore.updateNode(currentProject.id, editingNodeId, payload);
+      if (formType === 'character') {
+        const selectedWeaponLower = new Set(
+          parseEventParticipants(payload.weapon).map((w) => w.toLowerCase())
+        );
+        const charMatchKeys = new Set(
+          [editingNodeId, editingNode?.name, payload.name]
+            .map((v) => String(v || '').trim().toLowerCase())
+            .filter(Boolean)
+        );
+        const itemsToClear = itemNodes.filter((item) => {
+          const holderLower = (item.holderOrLocation || '').trim().toLowerCase();
+          if (!holderLower || !charMatchKeys.has(holderLower)) return false;
+          return (
+            !selectedWeaponLower.has((item.name || '').trim().toLowerCase()) &&
+            !selectedWeaponLower.has(item.id.toLowerCase())
+          );
+        });
+        for (const item of itemsToClear) {
+          await projectStore.updateNode(currentProject.id, item.id, {
+            ...item,
+            holderOrLocation: '',
+          });
+        }
+      }
       // Tải lại toàn bộ đồ thị để cập nhật cả nodes và links/edges mới từ backend
       await refreshGraphData(updated.id);
     } else {
@@ -1445,7 +1485,7 @@ return (
                             </View>
                           </View>
 
-                          {/* Gender & Weapon */}
+                          {/* Gender & Sect */}
                           <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
                               <Text style={styles.modalInputLabel}>Giới tính</Text>
@@ -1456,26 +1496,6 @@ return (
                                 placeholder="-- Chọn giới tính --"
                               />
                             </View>
-                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Vật dụng / Vật phẩm</Text>
-                              <FormSelectField
-                                value={formWeapon}
-                                onChange={setFormWeapon}
-                                options={itemNodes.map((it) => ({
-                                  label: it.name,
-                                  value: it.name,
-                                  subtitle: it.rarity || it.role || 'Vật phẩm',
-                                  icon: '🗡️',
-                                }))}
-                                placeholder="-- Chọn vật phẩm hoặc bỏ trống --"
-                                allowCustom={true}
-                                customPlaceholder="Nhập tên vật phẩm mới để tự tạo node..."
-                              />
-                            </View>
-                          </View>
-
-                          {/* Sect & Personality */}
-                          <View style={styles.formRow}>
                             <View style={[styles.modalInputGroup, { flex: 1 }]}>
                               <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
                               <FormSelectField
@@ -1492,16 +1512,135 @@ return (
                                 customPlaceholder="Nhập tên tổ chức mới để tự tạo node..."
                               />
                             </View>
-                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Tính cách</Text>
+                          </View>
+
+                          {/* Owned Items (Multi-select) */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>
+                              Vật phẩm sở hữu (chọn nhiều)
+                            </Text>
+                            {(() => {
+                              const existingItemNamesLower = new Set(
+                                itemNodes.map((it) => (it.name || '').trim().toLowerCase())
+                              );
+                              const customSelectedWeapons = formWeapons.filter(
+                                (w) => !existingItemNamesLower.has(w.trim().toLowerCase())
+                              );
+                              const allChipNames = [
+                                ...itemNodes.map((it) => it.name),
+                                ...customSelectedWeapons,
+                              ];
+                              return allChipNames.length > 0 ? (
+                                <View style={styles.eventCharacterOptions}>
+                                  {allChipNames.map((itemName) => {
+                                    const itemLower = itemName.trim().toLowerCase();
+                                    const isSelected = formWeapons.some(
+                                      (w) => w.trim().toLowerCase() === itemLower
+                                    );
+                                    return (
+                                      <Pressable
+                                        key={`char-item-${itemLower}`}
+                                        style={[
+                                          styles.eventCharacterChip,
+                                          isSelected && styles.eventCharacterChipSelected,
+                                        ]}
+                                        onPress={() =>
+                                          setFormWeapons((selected) =>
+                                            isSelected
+                                              ? selected.filter(
+                                                  (w) => w.trim().toLowerCase() !== itemLower
+                                                )
+                                              : [...selected, itemName]
+                                          )
+                                        }
+                                        accessibilityRole="checkbox"
+                                        accessibilityState={{ checked: isSelected }}>
+                                        <Text
+                                          style={[
+                                            styles.eventCharacterChipText,
+                                            isSelected && styles.eventCharacterChipTextSelected,
+                                          ]}>
+                                          {isSelected ? '✓ ' : ''}🗡️ {itemName}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                              ) : (
+                                <Text style={styles.eventCharacterEmpty}>
+                                  Chưa có node vật phẩm nào. Nhập tên bên dưới để tự tạo vật phẩm mới.
+                                </Text>
+                              );
+                            })()}
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
                               <TextInput
-                                style={styles.modalInput}
-                                value={formPersonality}
-                                onChangeText={setFormPersonality}
-                                placeholder="Ví dụ: Trầm mặc, kiên định"
+                                style={[styles.modalInput, { flex: 1 }]}
+                                value={formCustomWeaponInput}
+                                onChangeText={setFormCustomWeaponInput}
+                                placeholder="Nhập tên vật phẩm mới để thêm..."
                                 placeholderTextColor="#665f52"
+                                onSubmitEditing={() => {
+                                  const additions = parseEventParticipants(formCustomWeaponInput);
+                                  if (additions.length === 0) return;
+                                  setFormWeapons((prev) => {
+                                    const seen = new Set(prev.map((w) => w.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomWeaponInput('');
+                                }}
                               />
+                              <Pressable
+                                style={[
+                                  styles.eventCharacterChip,
+                                  styles.eventCharacterChipSelected,
+                                  { justifyContent: 'center', paddingHorizontal: 14 },
+                                ]}
+                                onPress={() => {
+                                  const additions = parseEventParticipants(formCustomWeaponInput);
+                                  if (additions.length === 0) return;
+                                  setFormWeapons((prev) => {
+                                    const seen = new Set(prev.map((w) => w.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomWeaponInput('');
+                                }}>
+                                <Text
+                                  style={[
+                                    styles.eventCharacterChipText,
+                                    styles.eventCharacterChipTextSelected,
+                                  ]}>
+                                  + Thêm
+                                </Text>
+                              </Pressable>
                             </View>
+                          </View>
+
+                          {/* Personality */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Tính cách</Text>
+                            <TextInput
+                              style={styles.modalInput}
+                              value={formPersonality}
+                              onChangeText={setFormPersonality}
+                              placeholder="Ví dụ: Trầm mặc, kiên định"
+                              placeholderTextColor="#665f52"
+                            />
                           </View>
                         </View>
                       )}
@@ -2150,12 +2289,16 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.gender}</Text>
                                   </View>
                                 ) : null}
-                                {selectedNode.weapon ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Vật dụng:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.weapon}</Text>
-                                  </View>
-                                ) : null}
+                                {(() => {
+                                  const ownedItems = getCharacterOwnedItems(selectedNode, nodes, links);
+                                  if (ownedItems.length === 0) return null;
+                                  return (
+                                    <View style={styles.detailRowItem}>
+                                      <Text style={styles.detailItemKey}>Vật phẩm sở hữu:</Text>
+                                      <Text style={styles.detailItemVal}>🗡️ {ownedItems.join(', ')}</Text>
+                                    </View>
+                                  );
+                                })()}
                                 {selectedNode.sect ? (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Tổ chức:</Text>

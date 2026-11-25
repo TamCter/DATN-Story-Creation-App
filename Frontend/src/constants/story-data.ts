@@ -75,6 +75,64 @@ export function parseEventParticipants(value?: string | string[]): string[] {
   return [...new Set(names.map((name) => String(name).trim()).filter(Boolean))];
 }
 
+const OWNED_ITEM_PLACEHOLDER_PATTERN =
+  /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
+
+export function getCharacterOwnedItems(
+  character: Pick<StoryNode, 'id' | 'name' | 'weapon'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): string[] {
+  const charId = (character.id || '').trim();
+  const charNameLower = (character.name || '').trim().toLowerCase();
+  const itemNodes = allNodes.filter((n) => n.type === 'item');
+  const itemById = new Map<string, StoryNode>();
+  const itemByNameLower = new Map<string, StoryNode>();
+  itemNodes.forEach((item) => {
+    itemById.set(item.id, item);
+    itemByNameLower.set((item.name || '').trim().toLowerCase(), item);
+  });
+
+  const seenLower = new Set<string>();
+  const result: string[] = [];
+  const addItemName = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matchedNode = itemById.get(trimmed) || itemByNameLower.get(trimmed.toLowerCase());
+    const displayName = matchedNode ? matchedNode.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenLower.has(key)) {
+      seenLower.add(key);
+      result.push(displayName);
+    }
+  };
+
+  parseEventParticipants(character.weapon).forEach(addItemName);
+
+  itemNodes.forEach((item) => {
+    const holder = (item.holderOrLocation || '').trim();
+    if (!holder) return;
+    if ((charNameLower && holder.toLowerCase() === charNameLower) || (charId && holder === charId)) {
+      addItemName(item.name);
+    }
+  });
+
+  allLinks.forEach((link) => {
+    const category = (link.category || '').toUpperCase();
+    if (category !== 'OWNS' && category !== 'EQUIPPED') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (charId && sourceId === charId && targetId) {
+      const targetItem = itemById.get(targetId);
+      if (targetItem) {
+        addItemName(targetItem.name);
+      }
+    }
+  });
+
+  return result;
+}
+
 export interface StoryLink {
   id: string;
   source: string;

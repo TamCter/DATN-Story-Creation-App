@@ -129,8 +129,14 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
 
   if (node.type === 'character') {
     removeObsoleteGeneratedLinks('outgoing', node.id, 'EQUIPPED');
-    const weapon = cleanRelationalVal(node.weapon);
-    if (weapon) {
+    const weapons = parseEventParticipants(node.weapon)
+      .map((w) => cleanRelationalVal(w))
+      .filter(Boolean);
+    const seenWeaponLower = new Set<string>();
+    weapons.forEach((weapon) => {
+      const key = weapon.toLowerCase();
+      if (seenWeaponLower.has(key)) return;
+      seenWeaponLower.add(key);
       const item = findOrAddNode(weapon, 'item', {
         role: 'Quý hiếm',
         rarity: 'Quý hiếm',
@@ -138,7 +144,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         status: 'Nguyên vẹn',
       });
       ensureLink(node.id, item.id, 'EQUIPPED', 'Sở hữu / Sử dụng', 'solid');
-    }
+    });
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'BIRTHPLACE');
     const birthplace = cleanRelationalVal(node.birthplace);
