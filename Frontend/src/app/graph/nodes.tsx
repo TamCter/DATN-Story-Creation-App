@@ -232,7 +232,7 @@ export default function NodesDetailScreen() {
     setFormDob(node.dob || '');
     setFormBirthplace(node.birthplace || '');
     setFormGender(node.gender || 'Nam');
-    setFormWeapons(getCharacterOwnedItems(node, currentProject.nodes, currentProject.links));
+    setFormWeapons(getCharacterOwnedItems(node, nodes, currentProject.links));
     setFormCustomWeaponInput('');
     setFormSect(node.sect || '');
     setFormPersonality(node.personality || '');
@@ -351,7 +351,7 @@ export default function NodesDetailScreen() {
             parseEventParticipants(payload.weapon).map((w) => w.toLowerCase())
           );
           const charMatchKeys = new Set(
-            [editingNodeId, editingNode?.name, payload.name]
+            [editingNodeId, editingNode?.name]
               .map((v) => String(v || '').trim().toLowerCase())
               .filter(Boolean)
           );
@@ -562,7 +562,7 @@ export default function NodesDetailScreen() {
                     ? (() => {
                         const ownedItems = getCharacterOwnedItems(
                           node,
-                          currentProject.nodes,
+                          nodes,
                           currentProject.links
                         );
                         return ownedItems.length > 0 ? (
