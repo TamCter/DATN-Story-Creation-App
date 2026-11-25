@@ -716,22 +716,54 @@ async function chatWithAI(req, res, next) {
     if (projectContext.projectTitle) {
       contextText += `\n\nDự án hiện tại: "${projectContext.projectTitle}"`;
     }
+
+    // Lấy danh sách thực thể THỰC TẾ của đúng projectId từ Neo4j (nếu dự án tồn tại trên DB)
+    // để tránh dữ liệu cũ/stale từ client hoặc trùng tên dự án đã xóa
+    let effectiveNodes = Array.isArray(projectContext.nodes) ? projectContext.nodes : [];
+    const reqProjectId =
+      typeof projectContext.projectId === 'string' ? projectContext.projectId.trim() : '';
+    const reqUserId = req.user?.id;
+    if (reqProjectId && reqUserId) {
+      try {
+        const dbProjectCheck = await runQuery(
+          `
+          MATCH (u:User { id: $userId })-[:OWNS]->(p:Project { id: $projectId })
+          OPTIONAL MATCH (n:StoryNode)-[:BELONGS_TO]->(p)
+          RETURN p.id AS projectId, collect(n) AS nodes
+          `,
+          { userId: reqUserId, projectId: reqProjectId },
+          'READ'
+        );
+        if (dbProjectCheck.length > 0 && dbProjectCheck[0]?.projectId) {
+          const dbNodes = Array.isArray(dbProjectCheck[0].nodes)
+            ? dbProjectCheck[0].nodes.filter((n) => n && n.type && n.name)
+            : [];
+          effectiveNodes = dbNodes;
+        }
+      } catch (dbErr) {
+        console.warn('[AI Chat] Không thể đọc danh sách node thực tế từ Neo4j, dùng fallback client:', dbErr.message);
+      }
+    }
+
     const existingProjectNodeKeys = new Set(
-      (Array.isArray(projectContext.nodes) ? projectContext.nodes : [])
+      effectiveNodes
         .filter((n) => n && n.type && n.name)
         .map((n) => `${String(n.type).toLowerCase()}::${String(n.name).trim().toLocaleLowerCase('vi')}`)
     );
 
-    if (projectContext.nodes && projectContext.nodes.length > 0) {
+    if (effectiveNodes.length > 0) {
       const MAX_CHAT_CTX_NODES = 120;
-      const nodesSummary = projectContext.nodes
+      const nodesSummary = effectiveNodes
         .slice(0, MAX_CHAT_CTX_NODES)
         .map((n) => `- ${n.name} (${n.type})`)
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị (KHÔNG tạo trùng tên các thực thể này): \n${nodesSummary}`;
-      if (projectContext.nodes.length > MAX_CHAT_CTX_NODES) {
-        contextText += `\n... và ${projectContext.nodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này): \n${nodesSummary}`;
+      if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
+        contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
+    } else {
+      contextText +=
+        '\n\nCác thực thể đã có trong đồ thị hiện tại: (TRỐNG — hiện có 0 thực thể. Dự án này chưa có bất kỳ nhân vật, địa điểm, vật phẩm, tổ chức hay sự kiện nào. Mọi thực thể người dùng yêu cầu đều là THỰC THỂ MỚI; TUYỆT ĐỐI KHÔNG được nói là đã tồn tại trong đồ thị.)';
     }
 
     const provider = (process.env.AI_PROVIDER || (process.env.AIMLAPI_API_KEY ? 'aimlapi' : 'gemini')).trim().toLowerCase();
@@ -872,7 +904,7 @@ async function chatWithAI(req, res, next) {
         cleanMessage += `\n\n💡 Mỗi lượt chỉ tạo tối đa ${MAX_NODES_PER_CHAT_TURN} node (còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
       }
     } else {
-      const linkResponse = extractCreateLinkResponse(responseText, projectContext.nodes);
+      const linkResponse = extractCreateLinkResponse(responseText, effectiveNodes);
       if (linkResponse) {
         linkDataList = linkResponse.linkDataList;
         const beforeJson = responseText

@@ -798,6 +798,17 @@ export class ProjectStore {
       await AsyncStorage.removeItem(cacheKey);
     }
 
+    // Dọn sạch các khóa lịch sử AI Chat local của dự án đã xóa
+    const encodedAuthor = encodeURIComponent(context.accountId || 'guest');
+    const encodedProject = encodeURIComponent(projectId);
+    const scopeSuffix = `${encodedAuthor}_${encodedProject}`;
+    await AsyncStorage.multiRemove([
+      `@story_app_ai_chat_${scopeSuffix}`,
+      `@story_app_ai_chat_pending_delete_${scopeSuffix}`,
+      `@story_app_ai_chat_local_cleanup_${scopeSuffix}`,
+      `@story_app_ai_chat_server_rev_${scopeSuffix}`,
+    ]).catch(() => undefined);
+
     await this.enqueueLocalProjectsWrite(context.accountId, async () => {
       this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
       const locals = await this.getLocalProjects(context.accountId);

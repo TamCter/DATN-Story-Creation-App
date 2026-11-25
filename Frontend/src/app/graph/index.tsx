@@ -113,6 +113,34 @@ export default function GraphScreen() {
     }
   };
 
+  // Reset state ngay lập tức khi đổi sang projectId khác để không bao giờ rò rỉ nodes/links của dự án cũ
+  const prevProjectIdRef = useRef<string>(projectId);
+  useEffect(() => {
+    if (prevProjectIdRef.current !== projectId) {
+      prevProjectIdRef.current = projectId;
+      const match = INITIAL_PROJECTS.find((p) => p.id === projectId);
+      setCurrentProject(
+        match || {
+          id: projectId,
+          title: 'Đang tải dự án...',
+          genre: '',
+          number: '№ 01',
+          nodeCount: 0,
+          linkCount: 0,
+          updatedAt: 'Vừa xong',
+          nodes: [],
+          links: [],
+        }
+      );
+      setNodes(match?.nodes || []);
+      setLinks(match?.links || []);
+      setSelectedNodeId(routeFocusSourceId || routeFocusNodeId || null);
+      setChapterFilter(null);
+      setAiChatOpen(false);
+      setIsLoading(true);
+    }
+  }, [projectId, routeFocusSourceId, routeFocusNodeId]);
+
   // Reload whenever this screen regains focus so graph, nodes, and chapter counts stay current.
   useFocusEffect(
     useCallback(() => {
@@ -2658,10 +2686,10 @@ return (
                 onCreateNode={handleCreateNodeFromAI}
                 onCreateNodes={handleCreateNodesFromAI}
                 onCreateLinks={handleCreateLinksFromAI}
-                projectId={currentProject.id}
-                projectTitle={currentProject.title}
-                existingNodes={nodes}
-                existingLinks={visibleLinks}
+                projectId={projectId}
+                projectTitle={currentProject.id === projectId ? currentProject.title : ''}
+                existingNodes={currentProject.id === projectId ? nodes : []}
+                existingLinks={currentProject.id === projectId ? visibleLinks : []}
               />
 
       {/* AI Story Generator Modal */}
