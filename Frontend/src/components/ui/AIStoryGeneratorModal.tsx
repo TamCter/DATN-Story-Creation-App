@@ -151,7 +151,7 @@ export default function AIStoryGeneratorModal({
       arcName: target.arcName || '',
       sequenceOrder: target.sequenceOrder || String(index + 1),
       time: target.time || '',
-      timelineType: target.timelineType || 'Hiện tại',
+      timelineType: target.timelineType || '',
       duration: target.duration || '',
       characterRoles: target.characterRoles || '',
     });
@@ -182,7 +182,7 @@ export default function AIStoryGeneratorModal({
     const nextSequenceOrder =
       editingEventDraft.sequenceOrder.trim() || String(editingEventIndex + 1);
     const nextTime = editingEventDraft.time.trim();
-    const nextTimelineType = editingEventDraft.timelineType.trim() || 'Hiện tại';
+    const nextTimelineType = editingEventDraft.timelineType.trim();
     const nextDuration = editingEventDraft.duration.trim();
     const nextCharacterRoles = editingEventDraft.characterRoles.trim();
 
@@ -193,7 +193,7 @@ export default function AIStoryGeneratorModal({
       nextArcName !== (currentTarget.arcName || '').trim() ||
       nextSequenceOrder !== (currentTarget.sequenceOrder || String(editingEventIndex + 1)).trim() ||
       nextTime !== (currentTarget.time || '').trim() ||
-      nextTimelineType !== (currentTarget.timelineType || 'Hiện tại').trim() ||
+      nextTimelineType !== (currentTarget.timelineType || '').trim() ||
       nextDuration !== (currentTarget.duration || '').trim() ||
       nextCharacterRoles !== (currentTarget.characterRoles || '').trim();
 
@@ -577,7 +577,7 @@ export default function AIStoryGeneratorModal({
               chapter: generatedChapter.title,
               location: ev.location || '',
               time: ev.time || '',
-              timelineType: ev.timelineType || 'Hiện tại',
+              timelineType: ev.timelineType || '',
               duration: ev.duration || '',
               eventType: ev.eventType || '',
               importance: ev.importance || '',

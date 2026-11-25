@@ -38,6 +38,18 @@ const RELATIONAL_NODE_FIELDS = [
 ];
 const PLACEHOLDER_VALUE_PATTERN = /^(unknown|not known|n\/a|none|null|undefined|không rõ|chưa rõ|không xác định|chưa xác định|không có|trống)$/i;
 
+function isValidCalendarDate(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCFullYear(year);
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
 function parseDateParts(value) {
   const trimmed = String(value || '').trim();
   if (!trimmed) return null;
@@ -56,8 +68,7 @@ function parseDateParts(value) {
     month = p2;
     year = p3;
   }
-  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
-  if (year <= 0 || month < 1 || month > 12 || day < 1 || day > 31) return null;
+  if (!isValidCalendarDate(year, month, day)) return null;
   const dd = String(day).padStart(2, '0');
   const mm = String(month).padStart(2, '0');
   const yyyy = String(year).padStart(4, '0');
@@ -93,21 +104,33 @@ function addDaysDDMMYYYY(parsed, days = 1) {
 }
 
 function calculateAgeFromDob(dob, refDate = new Date()) {
-  const parsed = parseDateParts(dob);
+  const trimmed = String(dob || '').trim();
+  if (!trimmed) return '';
   const currentYear = refDate.getFullYear();
   const currentMonth = refDate.getMonth() + 1;
   const currentDay = refDate.getDate();
-  if (parsed) {
+
+  if (/^\d{1,4}[-/]\d{1,2}[-/]\d{1,4}$/.test(trimmed)) {
+    const parsed = parseDateParts(trimmed);
+    if (!parsed) return '';
+    if (
+      parsed.year > currentYear ||
+      (parsed.year === currentYear && parsed.month > currentMonth) ||
+      (parsed.year === currentYear && parsed.month === currentMonth && parsed.day > currentDay)
+    ) {
+      return '';
+    }
     let age = currentYear - parsed.year;
     if (currentMonth < parsed.month || (currentMonth === parsed.month && currentDay < parsed.day)) {
       age -= 1;
     }
     return String(Math.max(0, age));
   }
-  const yearMatch = String(dob || '').match(/\b(\d{3,4})\b/);
+
+  const yearMatch = trimmed.match(/^\s*(\d{1,4})\s*$/);
   if (yearMatch) {
     const year = parseInt(yearMatch[1], 10);
-    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+    if (Number.isInteger(year) && year >= 1 && year <= currentYear) {
       return String(Math.max(0, currentYear - year));
     }
   }
@@ -383,17 +406,25 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
   if (validNodes.length < 2) return null;
 
   const nodeById = new Map();
-  const nodeByNameLower = new Map();
+  const nodesByNameLower = new Map();
   for (const n of validNodes) {
     nodeById.set(String(n.id), n);
-    nodeByNameLower.set(String(n.name).trim().toLocaleLowerCase('vi'), n);
+    const nameKey = String(n.name).trim().toLocaleLowerCase('vi');
+    if (!nodesByNameLower.has(nameKey)) {
+      nodesByNameLower.set(nameKey, []);
+    }
+    nodesByNameLower.get(nameKey).push(n);
   }
 
   const resolveNode = (idOrName) => {
     if (typeof idOrName !== 'string') return null;
     const trimmed = idOrName.trim();
     if (!trimmed) return null;
-    return nodeById.get(trimmed) || nodeByNameLower.get(trimmed.toLocaleLowerCase('vi')) || null;
+    const byId = nodeById.get(trimmed);
+    if (byId) return byId;
+    const byNameMatches = nodesByNameLower.get(trimmed.toLocaleLowerCase('vi')) || [];
+    // Chỉ phân giải theo tên khi tên khớp duy nhất 1 node; nếu trùng tên thì bắt buộc dùng ID
+    return byNameMatches.length === 1 ? byNameMatches[0] : null;
   };
 
   const VALID_TONES = new Set(['loyalty', 'hostile', 'possession', 'sect', 'event', 'location']);
@@ -489,7 +520,12 @@ function getNodeCreationRequest(messages) {
   const nodeTopicPattern = /(?<![\p{L}\p{N}])(?:node|nodes|thực thể|nhân vật|vật phẩm|địa điểm|tổ chức(?!\s+(?:một|các|những|buổi|sự kiện|hoạt động|cuộc họp|chương trình|lễ))|nhóm|phe phái|sự kiện|character|item|location|faction|event)(?![\p{L}\p{N}])/iu;
   const latestUserIndex = messages.map((message) => message.role === 'user').lastIndexOf(true);
   const latestUserMessage = latestUserIndex >= 0 ? messages[latestUserIndex].content || '' : '';
-  if (linkIntentPattern.test(latestUserMessage)) {
+  const latestUserIntent =
+    creationIntentPattern.test(latestUserMessage) &&
+    nodeTopicPattern.test(latestUserMessage);
+
+  // Chỉ thoát sớm khi người dùng chỉ yêu cầu nối/tạo quan hệ giữa node có sẵn mà không yêu cầu tạo node mới
+  if (linkIntentPattern.test(latestUserMessage) && !latestUserIntent) {
     return { wantsNodes: false, requestedCount: 1 };
   }
 
@@ -512,10 +548,6 @@ function getNodeCreationRequest(messages) {
     /\?\s*$/.test(trailingAssistantMessage) &&
     creationIntentPattern.test(pendingUserMessage.content || '') &&
     nodeTopicPattern.test(pendingUserMessage.content || '');
-
-  const latestUserIntent =
-    creationIntentPattern.test(latestUserMessage) &&
-    nodeTopicPattern.test(latestUserMessage);
 
   const wantsNodes = latestUserIntent || hasPendingCreationIntent;
   if (!wantsNodes) return { wantsNodes: false, requestedCount: 1 };
@@ -755,8 +787,11 @@ async function chatWithAI(req, res, next) {
     }
 
     // Lấy danh sách thực thể THỰC TẾ của đúng projectId từ Neo4j (nếu dự án tồn tại trên DB)
-    // để tránh dữ liệu cũ/stale từ client hoặc trùng tên dự án đã xóa
-    let effectiveNodes = Array.isArray(projectContext.nodes) ? projectContext.nodes : [];
+    // kết hợp giữ lại các node pending của client chưa đồng bộ lên server theo ID
+    const clientNodes = Array.isArray(projectContext.nodes)
+      ? projectContext.nodes.filter((n) => n && n.type && n.name)
+      : [];
+    let effectiveNodes = clientNodes;
     const reqProjectId =
       typeof projectContext.projectId === 'string' ? projectContext.projectId.trim() : '';
     const reqUserId = req.user?.id;
@@ -775,7 +810,11 @@ async function chatWithAI(req, res, next) {
           const dbNodes = Array.isArray(dbProjectCheck[0].nodes)
             ? dbProjectCheck[0].nodes.filter((n) => n && n.type && n.name)
             : [];
-          effectiveNodes = dbNodes;
+          const dbNodeIds = new Set(dbNodes.map((n) => String(n.id)));
+          const pendingClientNodes = clientNodes.filter(
+            (n) => n.syncStatus === 'pending' && n.id && !dbNodeIds.has(String(n.id))
+          );
+          effectiveNodes = [...dbNodes, ...pendingClientNodes];
         }
       } catch (dbErr) {
         console.warn('[AI Chat] Không thể đọc danh sách node thực tế từ Neo4j, dùng fallback client:', dbErr.message);
@@ -792,9 +831,9 @@ async function chatWithAI(req, res, next) {
       const MAX_CHAT_CTX_NODES = 120;
       const nodesSummary = effectiveNodes
         .slice(0, MAX_CHAT_CTX_NODES)
-        .map((n) => `- ${n.name} (${n.type})`)
+        .map((n) => `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}`)
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này): \n${nodesSummary}`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
       if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
         contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
@@ -929,16 +968,22 @@ async function chatWithAI(req, res, next) {
         suggestedPrompt = sanitizeAIChatDisplayText(promptMatch[1].trim());
       }
 
-      // Nếu người dùng yêu cầu hơn 3 node (hoặc bị giới hạn 3 node mỗi lượt), đảm bảo luôn có gợi ý prompt tiếp theo
+      // Nếu chưa đủ số node yêu cầu (do giới hạn mỗi lượt hoặc kết quả một phần), báo rõ số lượng và gợi ý prompt tiếp theo
       const remainingToCreate = Math.max(
         rawRequestedCount - nodeDataList.length,
         nodeResponse.truncatedCount || 0
       );
+      const exceededTurnCap =
+        rawRequestedCount > MAX_NODES_PER_CHAT_TURN || (nodeResponse.truncatedCount || 0) > 0;
       if (remainingToCreate > 0 && !suggestedPrompt) {
         const createdNames = nodeDataList.map((n) => n.name).filter(Boolean).join(', ');
         const nextBatchCount = Math.min(MAX_NODES_PER_CHAT_TURN, remainingToCreate);
         suggestedPrompt = `Tạo tiếp ${nextBatchCount} node còn lại liên kết với ${createdNames || 'các thực thể vừa tạo'}`;
-        cleanMessage += `\n\n💡 Mỗi lượt chỉ tạo tối đa ${MAX_NODES_PER_CHAT_TURN} node (còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
+        if (exceededTurnCap) {
+          cleanMessage += `\n\n💡 Mỗi lượt chỉ tạo tối đa ${MAX_NODES_PER_CHAT_TURN} node (đã tạo ${nodeDataList.length}/${rawRequestedCount}, còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
+        } else {
+          cleanMessage += `\n\n💡 Hiện mới tạo được ${nodeDataList.length}/${requestedCount} node hợp lệ (còn thiếu ${remainingToCreate} node). Gợi ý prompt tiếp theo: "${suggestedPrompt}"`;
+        }
       }
     } else {
       const linkResponse = extractCreateLinkResponse(responseText, effectiveNodes);
@@ -1251,31 +1296,11 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
     const events = normalizeEventCharacters(parsedData.events, characterNodes).map((event, idx) => {
       const cleanLocation = cleanEventScalar(event.location);
       const cleanCharacters = cleanEventList(event.charactersInvolved);
-      const eventText = `${event.name || ''} ${event.desc || ''}`;
-
+      // Chỉ giữ danh sách vật phẩm / tổ chức được AI xác định tường minh cho sự kiện
+      // (không tự động thêm chỉ vì tên xuất hiện trong mô tả)
       const matchedItems = cleanEventList(event.itemsInvolved);
-      for (const itemNode of itemNodes) {
-        const itemName = itemNode.name.trim();
-        if (
-          itemName.length >= 2 &&
-          hasWholeEntityMention(eventText, itemName) &&
-          !matchedItems.some((existing) => existing.toLocaleLowerCase('vi') === itemName.toLocaleLowerCase('vi'))
-        ) {
-          matchedItems.push(itemName);
-        }
-      }
-
       const matchedFactions = cleanEventList(event.factionsInvolved);
-      for (const facNode of factionNodes) {
-        const facName = facNode.name.trim();
-        if (
-          facName.length >= 2 &&
-          hasWholeEntityMention(eventText, facName) &&
-          !matchedFactions.some((existing) => existing.toLocaleLowerCase('vi') === facName.toLocaleLowerCase('vi'))
-        ) {
-          matchedFactions.push(facName);
-        }
-      }
+      const parsedEventDate = parseDateParts(cleanEventScalar(event.time));
 
       return {
         ...event,
@@ -1283,7 +1308,7 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
         importance: cleanEventScalar(event.importance) || (idx === 0 ? 'Bước ngoặt' : 'Nút thắt chính'),
         arcName: cleanEventScalar(event.arcName) || `Chương ${nextChapterNumber}`,
         sequenceOrder: cleanEventScalar(event.sequenceOrder) || String(idx + 1),
-        time: formatDateDDMMYYYY(cleanEventScalar(event.time)) || defaultEventDate,
+        time: parsedEventDate ? parsedEventDate.formatted : defaultEventDate,
         timelineType: '',
         duration: '',
         cause: cleanEventScalar(event.cause),
@@ -1637,6 +1662,8 @@ async function saveChatHistory(req, res) {
         nodeData: m.nodeData || null,
         nodeDataList: Array.isArray(m.nodeDataList) ? m.nodeDataList : [],
         timestamp: Number(m.timestamp) || Date.now(),
+        linkDataList: Array.isArray(m.linkDataList) ? m.linkDataList : [],
+        linksAdded: Boolean(m.linksAdded),
         canRetry: Boolean(m.canRetry),
       }));
 
@@ -1973,6 +2000,23 @@ async function analyzeChapterText(req, res, next) {
     const itemById = new Map(allItems.map((it) => [String(it.id), it]));
     const eventById = new Map(allEvents.map((ev) => [String(ev.id), ev]));
 
+    const itemByNameLower = new Map(
+      allItems.map((it) => [String(it.name || '').trim().toLowerCase(), it])
+    );
+
+    const parseListFieldValues = (raw) => {
+      if (Array.isArray(raw)) return raw;
+      const str = String(raw || '').trim();
+      if (!str) return [];
+      try {
+        const parsed = JSON.parse(str);
+        if (Array.isArray(parsed)) return parsed;
+      } catch {
+        // Fallback to delimiter split
+      }
+      return str.split(/[,;\n]+/);
+    };
+
     const getCharOwnedItems = (charNode) => {
       const charId = String(charNode.id || '').trim();
       const charNameLower = String(charNode.name || '').trim().toLowerCase();
@@ -1981,15 +2025,15 @@ async function analyzeChapterText(req, res, next) {
       const addItem = (raw) => {
         const t = String(raw || '').trim();
         if (!t || /^(none|null|n\/a|unknown|không có|chưa rõ|không rõ|trống)$/i.test(t)) return;
-        const key = t.toLowerCase();
-        if (!seen.has(key)) {
+        const matched = itemById.get(t) || itemByNameLower.get(t.toLowerCase());
+        const displayName = matched ? String(matched.name || '').trim() : t;
+        const key = displayName.toLowerCase();
+        if (displayName && !seen.has(key)) {
           seen.add(key);
-          owned.push(t);
+          owned.push(displayName);
         }
       };
-      String(charNode.weapon || '')
-        .split(/[,;\n]+/)
-        .forEach(addItem);
+      parseListFieldValues(charNode.weapon).forEach(addItem);
       allItems.forEach((it) => {
         const holder = String(it.holderOrLocation || '').trim();
         if (holder && (holder.toLowerCase() === charNameLower || holder === charId)) {
@@ -2006,23 +2050,30 @@ async function analyzeChapterText(req, res, next) {
       return owned;
     };
 
+    const compareEventsDeterministically = (a, b) => {
+      const pa = parseDateParts(a.time);
+      const pb = parseDateParts(b.time);
+      if (pa && pb && pa.sortKey !== pb.sortKey) {
+        return pa.sortKey.localeCompare(pb.sortKey);
+      }
+      if (pa && !pb) return -1;
+      if (!pa && pb) return 1;
+      const seqA = Number(a.sequenceOrder);
+      const seqB = Number(b.sequenceOrder);
+      const hasSeqA = Number.isFinite(seqA) && String(a.sequenceOrder || '').trim() !== '';
+      const hasSeqB = Number.isFinite(seqB) && String(b.sequenceOrder || '').trim() !== '';
+      if (hasSeqA && hasSeqB && seqA !== seqB) return seqA - seqB;
+      if (hasSeqA && !hasSeqB) return -1;
+      if (!hasSeqA && hasSeqB) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''), 'vi');
+    };
+
     const getCharEventsSummary = (charNode) => {
       const charId = String(charNode.id || '').trim();
       const charNameLower = String(charNode.name || '').trim().toLowerCase();
       const evMap = new Map();
       allEvents.forEach((ev) => {
-        const rawParts = ev.charactersInvolved || ev.characters || '';
-        let parts = [];
-        if (Array.isArray(rawParts)) {
-          parts = rawParts;
-        } else {
-          try {
-            const parsed = JSON.parse(String(rawParts));
-            parts = Array.isArray(parsed) ? parsed : String(rawParts).split(/[,;\n]+/);
-          } catch {
-            parts = String(rawParts).split(/[,;\n]+/);
-          }
-        }
+        const parts = parseListFieldValues(ev.charactersInvolved || ev.characters);
         if (
           parts.some((p) => {
             const t = String(p || '').trim();
@@ -2033,17 +2084,14 @@ async function analyzeChapterText(req, res, next) {
         }
       });
       safeLinks.forEach((l) => {
+        if (String(l.category || '').toUpperCase() !== 'PARTICIPATED_IN') return;
         const src = String(l.source);
         const tgt = String(l.target);
         if (src === charId && eventById.has(tgt)) evMap.set(tgt, eventById.get(tgt));
         if (tgt === charId && eventById.has(src)) evMap.set(src, eventById.get(src));
       });
       return Array.from(evMap.values())
-        .sort((a, b) => {
-          const ka = parseDateParts(a.time)?.sortKey || String(a.time || '');
-          const kb = parseDateParts(b.time)?.sortKey || String(b.time || '');
-          return ka.localeCompare(kb);
-        })
+        .sort(compareEventsDeterministically)
         .slice(0, 10)
         .map((ev) => `${ev.name}${ev.time ? ` (${formatDateDDMMYYYY(ev.time)})` : ''}`);
     };
@@ -2161,12 +2209,7 @@ async function analyzeChapterText(req, res, next) {
 
     const chronologicalTimelineLines = [...allEvents]
       .filter((ev) => ev.time || ev.chapter)
-      .sort((a, b) => {
-        const ka = parseDateParts(a.time)?.sortKey || String(a.time || '').trim();
-        const kb = parseDateParts(b.time)?.sortKey || String(b.time || '').trim();
-        if (ka && kb && ka !== kb) return ka.localeCompare(kb);
-        return (Number(a.sequenceOrder) || 0) - (Number(b.sequenceOrder) || 0);
-      })
+      .sort(compareEventsDeterministically)
       .slice(-MAX_CTX_EVENTS)
       .map(
         (ev) =>
@@ -2201,7 +2244,7 @@ Hãy rà soát toàn diện các nhóm lỗi sau (chỉ báo lỗi thực sự c
   + Mâu thuẫn nhân quả theo thời gian: nhắc tới kết quả/hệ quả của sự kiện A (hoặc sự kiện nối cause từ A) nhưng mốc thời gian lại trước ngày diễn ra sự kiện A.
   + Sai khoảng thời gian chênh lệch (VD: văn bản nói "3 ngày sau sự kiện X" nhưng ngày/tháng/năm thực tế chênh lệch khác hẳn hoặc đi ngược thời gian).
   + Mâu thuẫn ngày sinh (dob) / tuổi (age) / năm sự kiện:
-    * Văn bản nêu số tuổi của nhân vật không khớp với trường "tuổi" hoặc không khớp với hiệu số (năm sự kiện hoặc năm hiện tại ${currentYear}) trừ năm sinh (dob).
+    * Khi có đủ ngày/tháng/năm sinh (dob) và ngày/tháng/năm sự kiện (hoặc ngày hiện tại ${todayStr}), tính tuổi chính xác theo việc đã qua sinh nhật trong năm đó hay chưa; nếu chỉ có năm sinh hoặc năm sự kiện thì coi phép tính tuổi là xấp xỉ (±1 tuổi) và chỉ bắt lỗi khi lệch rõ rệt ngoài phạm vi xấp xỉ.
     * Nhân vật chưa ra đời vào ngày/năm diễn ra sự kiện, hoặc chênh lệch tuổi giữa hai nhân vật trái ngược với năm sinh đã lưu.
     * Văn bản nêu cả năm sinh và tuổi của cùng một nhân vật nhưng tự mâu thuẫn với nhau.
   + Nhân vật xuất hiện cùng một ngày/tháng/năm ở hai địa điểm xa nhau không có giải thích di chuyển.

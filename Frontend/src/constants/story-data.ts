@@ -184,6 +184,7 @@ export function getFactionMembers(
     const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
     const displayName = matched ? matched.name.trim() : trimmed;
     const key = displayName.toLowerCase();
+    if (seenSeniorLower.has(key)) return;
     if (!seenMemberLower.has(key)) {
       seenMemberLower.add(key);
       members.push(displayName);
@@ -243,6 +244,18 @@ export function getDateSortKey(value?: string): string {
   return `${String(p3).padStart(4, '0')}-${String(p2).padStart(2, '0')}-${String(p1).padStart(2, '0')}`;
 }
 
+export function isValidCalendarDate(year: number, month: number, day: number): boolean {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCFullYear(year);
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
 export function calculateAgeFromDob(dob?: string, referenceDate: Date = new Date()): string {
   const trimmed = String(dob || '').trim();
   if (!trimmed) return '';
@@ -267,7 +280,14 @@ export function calculateAgeFromDob(dob?: string, referenceDate: Date = new Date
       month = p2;
       year = p3;
     }
-    if (!Number.isFinite(year) || year <= 0) return '';
+    if (!isValidCalendarDate(year, month, day)) return '';
+    if (
+      year > currentYear ||
+      (year === currentYear && month > currentMonth) ||
+      (year === currentYear && month === currentMonth && day > currentDay)
+    ) {
+      return '';
+    }
     let age = currentYear - year;
     if (currentMonth < month || (currentMonth === month && currentDay < day)) {
       age -= 1;
@@ -275,10 +295,10 @@ export function calculateAgeFromDob(dob?: string, referenceDate: Date = new Date
     return String(Math.max(0, age));
   }
 
-  const yearMatch = trimmed.match(/\b(\d{3,4})\b/);
+  const yearMatch = trimmed.match(/^\s*(\d{1,4})\s*$/);
   if (yearMatch) {
     const year = parseInt(yearMatch[1], 10);
-    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+    if (Number.isInteger(year) && year >= 1 && year <= currentYear) {
       return String(Math.max(0, currentYear - year));
     }
   }

@@ -98,6 +98,7 @@ interface EditableSuggestedNode {
   gender: string;
   dob: string;
   age: string;
+  ageManuallyEdited?: boolean;
   birthplace: string;
   weapon: string;
   sect: string;
@@ -739,6 +740,7 @@ export default function TextCheckerScreen() {
         gender: n.gender || '',
         dob: formatDateDDMMYYYY(n.dob || ''),
         age: n.age ? String(n.age) : '',
+        ageManuallyEdited: false,
         birthplace: n.birthplace || '',
         weapon: n.weapon || '',
         sect: n.sect || '',
@@ -771,7 +773,7 @@ export default function TextCheckerScreen() {
         sequenceOrder: ev.sequenceOrder || String(idx + 1),
         location: ev.location || '',
         time: ev.time || '',
-        timelineType: ev.timelineType || 'Hiện tại',
+        timelineType: ev.timelineType || '',
         duration: ev.duration || '',
         cause: ev.cause || '',
         conflict: ev.conflict || '',
@@ -1092,7 +1094,9 @@ export default function TextCheckerScreen() {
           statusEvent: item.statusEvent.trim(),
           gender: item.gender.trim(),
           dob: formatDateDDMMYYYY(item.dob),
-          age: item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob)),
+          age: item.ageManuallyEdited
+            ? item.age.trim() || calculateAgeFromDob(formatDateDDMMYYYY(item.dob))
+            : calculateAgeFromDob(formatDateDDMMYYYY(item.dob)) || item.age.trim(),
           birthplace: item.birthplace.trim(),
           weapon: item.weapon.trim(),
           sect: item.sect.trim(),
@@ -1170,7 +1174,7 @@ export default function TextCheckerScreen() {
             sequenceOrder: ev.sequenceOrder.trim(),
             location: ev.location.trim(),
             time: ev.time.trim(),
-            timelineType: ev.timelineType.trim() || 'Hiện tại',
+            timelineType: ev.timelineType.trim(),
             duration: ev.duration.trim(),
             cause: ev.cause.trim(),
             conflict: ev.conflict.trim(),
@@ -2099,7 +2103,7 @@ export default function TextCheckerScreen() {
             </Text>
             {editingNode && (
               <ScrollView showsVerticalScrollIndicator={false} style={{ maxHeight: 490 }}>
-                {isAddingNewNode && (
+                {(isAddingNewNode || !activeSaveAttemptRef.current?.committedNodeIds[editingNode.localId]) && (
                   <>
                     <Text style={styles.fieldLabel}>Phân loại thực thể</Text>
                     <View style={styles.typeChipsRow}>
@@ -2207,14 +2211,28 @@ export default function TextCheckerScreen() {
                     <Text style={styles.fieldLabel}>Ngày / Năm sinh</Text>
                     <DatePickerField
                       value={editingNode.dob}
-                      onChange={(v) => setEditingNode({ ...editingNode, dob: v })}
+                      onChange={(v) =>
+                        setEditingNode({
+                          ...editingNode,
+                          dob: v,
+                          age: editingNode.ageManuallyEdited
+                            ? editingNode.age
+                            : calculateAgeFromDob(formatDateDDMMYYYY(v)),
+                        })
+                      }
                       placeholder="DD/MM/YYYY"
                     />
                     <Text style={styles.fieldLabel}>Tuổi</Text>
                     <TextInput
                       style={styles.input}
                       value={editingNode.age}
-                      onChangeText={(v) => setEditingNode({ ...editingNode, age: v })}
+                      onChangeText={(v) =>
+                        setEditingNode({
+                          ...editingNode,
+                          age: v,
+                          ageManuallyEdited: v.trim() !== '',
+                        })
+                      }
                       placeholder="Để trống sẽ tự tính theo năm sinh"
                       placeholderTextColor="#6d6253"
                       keyboardType="numeric"

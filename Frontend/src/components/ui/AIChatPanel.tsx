@@ -18,6 +18,7 @@ import * as Clipboard from 'expo-clipboard';
 import { AppFonts } from '@/constants/theme';
 import { useAuth } from '@/context/auth-context';
 import { api, ApiError } from '@/services/api';
+import { projectStore } from '@/services/project-store';
 import { StoryLink, StoryNode } from '@/constants/story-data';
 
 const AI_CHAT_STORAGE_PREFIX = '@story_app_ai_chat_';
@@ -450,6 +451,11 @@ export default function AIChatPanel({
           ...(supersededClearMarker ? { replacedClearId: supersededClearMarker.clearId } : {}),
         };
 
+        if (targetProjectId && projectStore.isProjectDeleted(targetProjectId)) {
+          workingHistoryByScopeRef.current.delete(targetScopeKey);
+          return;
+        }
+
         let localWriteSucceeded = false;
         try {
           // Ghi snapshot thay thế gắn với clearId và pendingWriteId TRƯỚC khi đánh dấu dọn dẹp cục bộ đã xong
@@ -457,6 +463,16 @@ export default function AIChatPanel({
           localWriteSucceeded = true;
         } catch (err) {
           console.warn('[AIChatPanel] Không thể lưu lịch sử chat vào bộ nhớ cục bộ:', err);
+        }
+
+        if (targetProjectId && projectStore.isProjectDeleted(targetProjectId)) {
+          await AsyncStorage.multiRemove([
+            targetScopeKey,
+            targetPendingDeleteKey,
+            targetLocalCleanupKey,
+            targetServerRevKey,
+          ]).catch(() => undefined);
+          return;
         }
 
         // Chỉ cập nhật/gỡ targetLocalCleanupKey SAU KHI snapshot thay thế đã được ghi bền vững
@@ -482,8 +498,8 @@ export default function AIChatPanel({
         if (!isServerBacked || !targetProjectId || !targetUserId) {
           return;
         }
-        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động
-        if (activeUserIdRef.current !== targetUserId) {
+        // Chỉ gửi PUT khi phiên tài khoản tạo ra thay đổi vẫn đang hoạt động và dự án chưa bị xóa
+        if (activeUserIdRef.current !== targetUserId || projectStore.isProjectDeleted(targetProjectId)) {
           return;
         }
 
@@ -500,6 +516,15 @@ export default function AIChatPanel({
             expectedRevision: baseRevisionForPut,
             writeId,
           });
+          if (projectStore.isProjectDeleted(targetProjectId)) {
+            await AsyncStorage.multiRemove([
+              targetScopeKey,
+              targetPendingDeleteKey,
+              targetLocalCleanupKey,
+              targetServerRevKey,
+            ]).catch(() => undefined);
+            return;
+          }
           const confirmedRevision = Number(saveRes.data?.revision) || baseRevisionForPut + 1;
           turnRevision.current = confirmedRevision;
           lastLocalWriteAckRef.current.set(targetScopeKey, {
@@ -2046,8 +2071,8 @@ function MessageBubble({
   const [localLinksAdded, setLocalLinksAdded] = useState(Boolean(message.linksAdded));
   const linksAdded = Boolean(message.linksAdded) || localLinksAdded || allLinksAlreadyInGraph;
   const isAddingLinksRef = useRef(false);
-  const hasAddedLinksRef = useRef(linksAdded);
-  if (linksAdded) {
+  const hasAddedLinksRef = useRef(Boolean(message.linksAdded));
+  if (message.linksAdded) {
     hasAddedLinksRef.current = true;
   }
 

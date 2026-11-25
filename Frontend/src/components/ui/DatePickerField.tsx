@@ -120,14 +120,17 @@ export function DatePickerField({
     setViewMode('days');
   };
 
+  const MIN_YEAR = 1;
+  const MAX_YEAR = 9999;
+
   const handleSelectYear = (y: number) => {
-    setActiveYear(y);
+    setActiveYear(Math.min(MAX_YEAR, Math.max(MIN_YEAR, y)));
     setViewMode('days');
   };
 
   const handleApplyYearInput = () => {
     const y = parseInt(yearInput.trim(), 10);
-    if (!isNaN(y) && y > 0) {
+    if (!isNaN(y) && y >= MIN_YEAR && y <= MAX_YEAR) {
       setActiveYear(y);
     }
     setViewMode('days');
@@ -221,7 +224,7 @@ export function DatePickerField({
                     setActiveMonth(activeMonth - 1);
                   } else {
                     setActiveMonth(12);
-                    setActiveYear(activeYear - 1);
+                    setActiveYear(Math.max(MIN_YEAR, activeYear - 1));
                   }
                 }}>
                 <Text style={styles.navBtnText}>‹</Text>
@@ -261,7 +264,7 @@ export function DatePickerField({
                     setActiveMonth(activeMonth + 1);
                   } else {
                     setActiveMonth(1);
-                    setActiveYear(activeYear + 1);
+                    setActiveYear(Math.min(MAX_YEAR, activeYear + 1));
                   }
                 }}>
                 <Text style={styles.navBtnText}>›</Text>

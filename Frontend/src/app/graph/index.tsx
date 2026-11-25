@@ -101,8 +101,10 @@ export default function GraphScreen() {
 
   // Tải lại đồ thị (nodes + links) mới nhất từ Backend
   const refreshGraphData = async (selectNodeId?: string | null) => {
+    const targetProjectId = projectId;
     try {
-      const proj = await projectStore.getProject(projectId);
+      const proj = await projectStore.getProject(targetProjectId);
+      if (prevProjectIdRef.current !== targetProjectId) return;
       setCurrentProject(proj);
       setNodes(proj.nodes || []);
       setLinks(proj.edges || proj.links || []);
@@ -695,7 +697,7 @@ const handleCreateNodesFromAI = async (
       const t = (nodeData.type || 'character') as StoryNode['type'];
       const cleaned: Partial<StoryNode> = { ...nodeData, autoCreatedStub: false };
       if (t === 'character') {
-        cleaned.weapon = keepIfAllowed(nodeData.weapon, 'item');
+        cleaned.weapon = filterAllowedList(nodeData.weapon, 'item');
         cleaned.birthplace = keepIfAllowed(nodeData.birthplace, 'location');
         cleaned.sect = keepIfAllowed(nodeData.sect, 'faction');
         cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
@@ -704,6 +706,8 @@ const handleCreateNodesFromAI = async (
         cleaned.origin = keepIfAllowed(nodeData.origin, 'location');
       } else if (t === 'faction') {
         cleaned.leader = keepIfAllowed(nodeData.leader, 'character');
+        cleaned.members = filterAllowedList(nodeData.members, 'character');
+        cleaned.seniorMembers = filterAllowedList(nodeData.seniorMembers, 'character');
         cleaned.headquarters = keepIfAllowed(nodeData.headquarters, 'location');
         cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
       } else if (t === 'location') {
@@ -813,11 +817,17 @@ const handleCreateLinksFromAI = async (
   if (isCreatingAILinksRef.current) {
     return false;
   }
+  const capturedProjectId = projectId;
   isCreatingAILinksRef.current = true;
   const createdLinks: StoryLink[] = [];
+  const skippedStaleLinks: string[] = [];
 
   try {
-    const initialProject = await projectStore.getProject(currentProject.id);
+    const initialProject = await projectStore.getProject(capturedProjectId);
+    if (prevProjectIdRef.current !== capturedProjectId) {
+      return false;
+    }
+    const validNodeIds = new Set((initialProject.nodes || []).map((n) => n.id));
     const existingLinksList = initialProject.links || [];
     const existingKeys = new Set(
       existingLinksList.map(
@@ -827,12 +837,17 @@ const handleCreateLinksFromAI = async (
 
     for (const linkData of linkDataList) {
       if (!linkData.source || !linkData.target || linkData.source === linkData.target) continue;
+      if (!validNodeIds.has(linkData.source) || !validNodeIds.has(linkData.target)) {
+        const desc = `${linkData.sourceName || linkData.source} → ${linkData.targetName || linkData.target}`;
+        skippedStaleLinks.push(desc);
+        continue;
+      }
       const label = (linkData.label || 'Liên kết').trim();
       const key = `${linkData.source}::${linkData.target}::${label.toLocaleLowerCase('vi')}`;
       if (existingKeys.has(key)) continue;
       existingKeys.add(key);
 
-      const saved = await projectStore.createLink(currentProject.id, {
+      const saved = await projectStore.createLink(capturedProjectId, {
         source: linkData.source,
         target: linkData.target,
         label,
@@ -844,24 +859,43 @@ const handleCreateLinksFromAI = async (
       createdLinks.push(saved);
     }
 
+    if (prevProjectIdRef.current !== capturedProjectId) {
+      return createdLinks.length > 0;
+    }
+
     const focusLink = createdLinks[createdLinks.length - 1];
     await refreshGraphData(focusLink?.source ?? null);
+    if (prevProjectIdRef.current !== capturedProjectId) {
+      return createdLinks.length > 0;
+    }
     setAiChatOpen(false);
     if (focusLink) {
       setTimeout(() => {
-        graphRef.current?.focusRelation(focusLink.source, focusLink.target);
+        if (prevProjectIdRef.current === capturedProjectId) {
+          graphRef.current?.focusRelation(focusLink.source, focusLink.target);
+        }
       }, 200);
     }
-    return true;
+    if (skippedStaleLinks.length > 0) {
+      const warnMsg = `Đã bỏ qua ${skippedStaleLinks.length} quan hệ vì node đích/nguồn không còn tồn tại trong dự án: ${skippedStaleLinks.join('; ')}.`;
+      if (Platform.OS === 'web') {
+        window.alert(warnMsg);
+      } else {
+        Alert.alert('Một số quan hệ đã bị bỏ qua', warnMsg);
+      }
+    }
+    return createdLinks.length > 0 || skippedStaleLinks.length === 0;
   } catch (err: any) {
-    if (createdLinks.length > 0) {
+    if (createdLinks.length > 0 && prevProjectIdRef.current === capturedProjectId) {
       await refreshGraphData(createdLinks[createdLinks.length - 1].source);
     }
-    const message = err?.message || 'Không thể lưu quan hệ vào đồ thị.';
-    if (Platform.OS === 'web') {
-      window.alert(message);
-    } else {
-      Alert.alert('Không thể tạo quan hệ', message);
+    if (prevProjectIdRef.current === capturedProjectId) {
+      const message = err?.message || 'Không thể lưu quan hệ vào đồ thị.';
+      if (Platform.OS === 'web') {
+        window.alert(message);
+      } else {
+        Alert.alert('Không thể tạo quan hệ', message);
+      }
     }
     return false;
   } finally {
@@ -982,7 +1016,7 @@ const handleSaveNode = async () => {
         mergedWeapons.push(trimmed);
       }
     });
-    payload.weapon = mergedWeapons.join(', ');
+    payload.weapon = mergedWeapons.length > 0 ? JSON.stringify(mergedWeapons) : '';
     payload.sect = formSect.trim();
     payload.personality = formPersonality.trim();
   } else if (formType === 'item') {
@@ -1035,8 +1069,9 @@ const handleSaveNode = async () => {
       ...formFactionMembers,
       ...parseEventParticipants(formCustomMemberInput),
     ]);
-    payload.seniorMembers = mergedSeniorMembers.join(', ');
-    payload.members = mergedMembers.join(', ');
+    payload.seniorMembers =
+      mergedSeniorMembers.length > 0 ? JSON.stringify(mergedSeniorMembers) : '';
+    payload.members = mergedMembers.length > 0 ? JSON.stringify(mergedMembers) : '';
     payload.headquarters = formHeadquarters.trim();
     payload.motto = formMotto.trim();
   } else if (formType === 'event') {
@@ -1044,9 +1079,11 @@ const handleSaveNode = async () => {
     payload.subType = formSubType.trim();
     payload.status = formStatus.trim() || 'Đã diễn ra';
     payload.chapter = formChapter.trim();
-    payload.time = formTime.trim();
-    payload.timelineType = '';
-    payload.duration = '';
+    payload.time = formatDateDDMMYYYY(formTime);
+    if (!isEditingNode) {
+      payload.timelineType = '';
+      payload.duration = '';
+    }
     payload.eventType = formEventType.trim();
     payload.importance = formImportance.trim();
     payload.arcName = formArcName.trim();
@@ -1086,7 +1123,6 @@ const handleSaveNode = async () => {
         });
         for (const item of itemsToClear) {
           await projectStore.updateNode(currentProject.id, item.id, {
-            ...item,
             holderOrLocation: '',
           });
         }
@@ -2910,6 +2946,7 @@ return (
                             });
 
                             links.forEach((link) => {
+                              if ((link.category || '').toUpperCase() !== 'PARTICIPATED_IN') return;
                               const otherId =
                                 link.source === selectedNode.id
                                   ? link.target

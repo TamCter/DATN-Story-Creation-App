@@ -288,7 +288,7 @@ export default function CharactersScreen() {
                 <View style={styles.metaRow}>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🎒 Vật phẩm sở hữu:</Text>
-                    <Text style={styles.metaValueHighlight}>
+                    <Text style={[styles.metaValueHighlight, { flex: 1 }]}>
                       {(() => {
                         const ownedItems = getCharacterOwnedItems(
                           char,

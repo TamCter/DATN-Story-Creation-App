@@ -402,7 +402,7 @@ export default function FactionsScreen() {
                           <View style={styles.metaItem}>
                             <Text style={styles.metaIcon}>⭐</Text>
                             <Text style={styles.metaLabel}>Thành viên cấp cao:</Text>
-                            <Text style={styles.metaValueHighlight}>
+                            <Text style={[styles.metaValueHighlight, { flex: 1 }]}>
                               {seniorMembers.join(', ')}
                             </Text>
                           </View>
@@ -411,7 +411,7 @@ export default function FactionsScreen() {
                           <View style={styles.metaItem}>
                             <Text style={styles.metaIcon}>👥</Text>
                             <Text style={styles.metaLabel}>Thành viên:</Text>
-                            <Text style={styles.metaValue}>{members.join(', ')}</Text>
+                            <Text style={[styles.metaValue, { flex: 1 }]}>{members.join(', ')}</Text>
                           </View>
                         )}
                       </>

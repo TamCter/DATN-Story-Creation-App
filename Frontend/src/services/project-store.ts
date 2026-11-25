@@ -67,7 +67,8 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
   const GENERATED_LINK_SUFFIX_BY_CATEGORY: Record<string, string[]> = {
     EQUIPPED: ['equipped', 'weapon'],
     BIRTHPLACE: ['birthplace'],
-    MEMBER_OF: ['member_of', 'sect'],
+    MEMBER_OF: ['member_of', 'sect', 'member'],
+    SENIOR_MEMBER_OF: ['senior_member_of', 'senior-member'],
     STATUS_EVENT: ['status_event', 'event'],
     OWNS: ['owns', 'holder'],
     ORIGIN: ['origin'],
@@ -158,7 +159,22 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(node.id, loc.id, 'BIRTHPLACE', 'Nơi sinh', 'dashed');
     }
 
-    removeObsoleteGeneratedLinks('outgoing', node.id, 'MEMBER_OF');
+    const charNameLower = (node.name || '').trim().toLowerCase();
+    const rosterBackedFactionIds = new Set(
+      (project.nodes || [])
+        .filter((n) => n.type === 'faction')
+        .filter((fac) =>
+          parseEventParticipants(fac.members)
+            .map((m) => cleanRelationalVal(m))
+            .some((m) => m && (m.toLowerCase() === charNameLower || m === node.id))
+        )
+        .map((fac) => fac.id)
+    );
+    project.links = (project.links || []).filter((l) => {
+      if (l.category !== 'MEMBER_OF' || !isGeneratedDerivedLink(l, 'MEMBER_OF')) return true;
+      if (l.source !== node.id) return true;
+      return rosterBackedFactionIds.has(l.target);
+    });
     const sect = cleanRelationalVal(node.sect);
     if (sect) {
       const fac = findOrAddNode(sect, 'faction', {
@@ -246,6 +262,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       .map((s) => cleanRelationalVal(s))
       .filter(Boolean);
     const seenMemberLower = new Set<string>();
+    const memberCharIds = new Set<string>();
     factionMembers.forEach((memberName) => {
       const key = memberName.toLowerCase();
       if (seenMemberLower.has(key)) return;
@@ -256,7 +273,22 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
         desc: `Thành viên của ${node.name}`,
         status: 'Còn sống',
       });
+      memberCharIds.add(ch.id);
       ensureLink(ch.id, node.id, 'MEMBER_OF', 'Thành viên', 'solid');
+    });
+
+    // Xóa các cạnh MEMBER_OF tự sinh không còn nằm trong danh sách members và cũng không còn c.sect trỏ tới tổ chức này
+    const facNameLower = (node.name || '').trim().toLowerCase();
+    const charById = new Map(
+      (project.nodes || []).filter((n) => n.type === 'character').map((c) => [c.id, c])
+    );
+    project.links = (project.links || []).filter((l) => {
+      if (l.category !== 'MEMBER_OF' || l.target !== node.id) return true;
+      if (!isGeneratedDerivedLink(l, 'MEMBER_OF')) return true;
+      if (memberCharIds.has(l.source)) return true;
+      const srcChar = charById.get(l.source);
+      const srcSect = cleanRelationalVal(srcChar?.sect);
+      return Boolean(srcSect && (srcSect.toLowerCase() === facNameLower || srcSect === node.id));
     });
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'HEADQUARTERS');
@@ -781,6 +813,10 @@ export class ProjectStore {
     });
   }
 
+  isProjectDeleted(projectId: string): boolean {
+    return this.deletedProjects.has(projectId);
+  }
+
   /**
    * Xóa vĩnh viễn một dự án trên Backend (Neo4j) và dọn sạch bộ nhớ đệm local
    */
@@ -828,32 +864,50 @@ export class ProjectStore {
     this.projectVersions.delete(projectId);
     this.graphRequestVersions.delete(projectId);
 
+    const cleanupErrors: unknown[] = [];
+
     const cacheKey = this.getProjectCacheKey(projectId, context.accountId);
     if (cacheKey) {
-      await AsyncStorage.removeItem(cacheKey);
+      try {
+        await AsyncStorage.removeItem(cacheKey);
+      } catch (err) {
+        cleanupErrors.push(err);
+      }
     }
 
-    // Dọn sạch các khóa lịch sử AI Chat local của dự án đã xóa
+    // Dọn sạch các khóa lịch sử AI Chat local của dự án đã xóa (độc lập với cache đồ thị)
     const encodedAuthor = encodeURIComponent(context.accountId || 'guest');
     const encodedProject = encodeURIComponent(projectId);
     const scopeSuffix = `${encodedAuthor}_${encodedProject}`;
-    await AsyncStorage.multiRemove([
-      `@story_app_ai_chat_${scopeSuffix}`,
-      `@story_app_ai_chat_pending_delete_${scopeSuffix}`,
-      `@story_app_ai_chat_local_cleanup_${scopeSuffix}`,
-      `@story_app_ai_chat_server_rev_${scopeSuffix}`,
-    ]).catch(() => undefined);
+    try {
+      await AsyncStorage.multiRemove([
+        `@story_app_ai_chat_${scopeSuffix}`,
+        `@story_app_ai_chat_pending_delete_${scopeSuffix}`,
+        `@story_app_ai_chat_local_cleanup_${scopeSuffix}`,
+        `@story_app_ai_chat_server_rev_${scopeSuffix}`,
+      ]);
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
 
-    await this.enqueueLocalProjectsWrite(context.accountId, async () => {
-      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
-      const locals = await this.getLocalProjects(context.accountId);
-      this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
-      const filteredLocals = locals.filter((p) => p.id !== projectId);
-      const localProjectsKey = this.getLocalProjectsKey(context.accountId);
-      if (localProjectsKey) {
-        await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
-      }
-    });
+    try {
+      await this.enqueueLocalProjectsWrite(context.accountId, async () => {
+        this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+        const locals = await this.getLocalProjects(context.accountId);
+        this.assertAccountContext(context, 'Tài khoản đã thay đổi trong lúc xóa dự án.');
+        const filteredLocals = locals.filter((p) => p.id !== projectId);
+        const localProjectsKey = this.getLocalProjectsKey(context.accountId);
+        if (localProjectsKey) {
+          await AsyncStorage.setItem(localProjectsKey, JSON.stringify(filteredLocals));
+        }
+      });
+    } catch (err) {
+      cleanupErrors.push(err);
+    }
+
+    if (cleanupErrors.length > 0) {
+      console.warn('[projectStore] Một số bước dọn dẹp cục bộ sau khi xóa dự án thất bại:', cleanupErrors[0]);
+    }
   }
 
   /**

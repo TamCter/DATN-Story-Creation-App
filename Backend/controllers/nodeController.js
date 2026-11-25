@@ -178,6 +178,18 @@ const ALLOWED_NODE_SCALARS = new Set([
   'statusEvent',
 ]);
 
+function isValidCalendarDate(year, month, day) {
+  if (!Number.isInteger(year) || !Number.isInteger(month) || !Number.isInteger(day)) return false;
+  if (year < 1 || year > 9999 || month < 1 || month > 12 || day < 1 || day > 31) return false;
+  const d = new Date(Date.UTC(year, month - 1, day));
+  d.setUTCFullYear(year);
+  return (
+    d.getUTCFullYear() === year &&
+    d.getUTCMonth() === month - 1 &&
+    d.getUTCDate() === day
+  );
+}
+
 function calculateAgeFromDob(dob) {
   const trimmed = String(dob || '').trim();
   if (!trimmed) return '';
@@ -201,7 +213,14 @@ function calculateAgeFromDob(dob) {
       month = p2;
       year = p3;
     }
-    if (!Number.isFinite(year) || year <= 0) return '';
+    if (!isValidCalendarDate(year, month, day)) return '';
+    if (
+      year > currentYear ||
+      (year === currentYear && month > currentMonth) ||
+      (year === currentYear && month === currentMonth && day > currentDay)
+    ) {
+      return '';
+    }
     let age = currentYear - year;
     if (currentMonth < month || (currentMonth === month && currentDay < day)) {
       age -= 1;
@@ -209,10 +228,10 @@ function calculateAgeFromDob(dob) {
     return String(Math.max(0, age));
   }
 
-  const yearMatch = trimmed.match(/\b(\d{3,4})\b/);
+  const yearMatch = trimmed.match(/^\s*(\d{1,4})\s*$/);
   if (yearMatch) {
     const year = parseInt(yearMatch[1], 10);
-    if (Number.isFinite(year) && year > 0 && year <= currentYear) {
+    if (Number.isInteger(year) && year >= 1 && year <= currentYear) {
       return String(Math.max(0, currentYear - year));
     }
   }
@@ -607,16 +626,6 @@ async function updateNode(req, res, next) {
     if (updates.time) {
       updates.time = formatDateDDMMYYYY(updates.time);
     }
-    if (currentType === 'character') {
-      const effectiveDob = updates.dob !== undefined ? updates.dob : (checkResult[0].n.dob || '');
-      const effectiveAge = updates.age !== undefined ? updates.age : (checkResult[0].n.age || '');
-      if (!effectiveAge && effectiveDob) {
-        const computedAge = calculateAgeFromDob(effectiveDob);
-        if (computedAge) {
-          updates.age = computedAge;
-        }
-      }
-    }
     if (participantFieldsChanged && currentType === 'event') {
       updates._participantSyncRevision = crypto.randomUUID();
     }
@@ -674,7 +683,29 @@ async function updateNode(req, res, next) {
       });
     }
 
-    const updatedNode = records[0].n;
+    let updatedNode = records[0].n;
+    if (
+      updatedNode.type === 'character' &&
+      !String(updatedNode.age || '').trim() &&
+      String(updatedNode.dob || '').trim()
+    ) {
+      const committedDob = String(updatedNode.dob).trim();
+      const computedAge = calculateAgeFromDob(committedDob);
+      if (computedAge) {
+        const backfillRes = await runQuery(
+          `
+          MATCH (n:StoryNode { id: $id })
+          WHERE coalesce(n.age, '') = '' AND coalesce(n.dob, '') = $committedDob
+          SET n.age = $computedAge
+          RETURN n
+          `,
+          { id, committedDob, computedAge }
+        );
+        if (backfillRes.length && backfillRes[0].n) {
+          updatedNode = backfillRes[0].n;
+        }
+      }
+    }
     const targetProjectId = checkResult[0].projectId;
     if (targetProjectId) {
       await syncNodeRelationships(id, targetProjectId, updatedNode);
@@ -827,25 +858,24 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           });
           if (itemId) weaponItemIds.push(itemId);
         }
+        // Thay thế nguyên tử các cạnh EQUIPPED (xóa cạnh cũ + hợp nhất tất cả cạnh mới trong 1 truy vấn)
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(item:StoryNode)
-          WHERE NOT (item.id IN $weaponItemIds)
-          DELETE r
+          MATCH (c:StoryNode { id: $nodeId })
+          OPTIONAL MATCH (c)-[oldRel:RELATES_TO { category: 'EQUIPPED' }]->(oldItem:StoryNode)
+          WHERE NOT (oldItem.id IN $weaponItemIds)
+          DELETE oldRel
+          WITH DISTINCT c
+          UNWIND $weaponItemIds AS itemId
+          MATCH (item:StoryNode { id: itemId })
+          MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
+                        r.label = 'Sở hữu / Sử dụng',
+                        r.type = 'solid',
+                        r.tone = 'possession',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Sở hữu / Sử dụng',
+                       r.updatedAt = timestamp()
         `, { nodeId, weaponItemIds });
-        for (const itemId of weaponItemIds) {
-          await runQuery(`
-            MATCH (c:StoryNode { id: $nodeId })
-            MATCH (item:StoryNode { id: $itemId })
-            MERGE (c)-[r:RELATES_TO { category: 'EQUIPPED' }]->(item)
-            ON CREATE SET r.id = 'link-' + c.id + '-' + item.id + '-weapon',
-                          r.label = 'Sở hữu / Sử dụng',
-                          r.type = 'solid',
-                          r.tone = 'possession',
-                          r.createdAt = timestamp()
-            ON MATCH SET r.label = 'Sở hữu / Sử dụng',
-                         r.updatedAt = timestamp()
-          `, { nodeId, itemId });
-        }
       } else {
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'EQUIPPED' }]->(:StoryNode)
@@ -889,14 +919,25 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         `, { nodeId });
       }
 
-      // Tổ chức -> Faction
+      // Tổ chức -> Faction (bảo toàn cả cạnh do c.sect lẫn danh sách faction.members hỗ trợ)
+      const facRosterRows = await runQuery(`
+        MATCH (fac:StoryNode { type: 'faction' })-[:BELONGS_TO]->(p:Project { id: $projectId })
+        WHERE fac.members IS NOT NULL AND trim(fac.members) <> ''
+        RETURN fac.id AS id, fac.members AS members
+      `, { projectId }, 'READ');
+      const charNameLower = nodeName.toLowerCase();
+      const rosterBackedFactionIds = [];
+      for (const row of facRosterRows) {
+        const parsedMembers = parseParticipantNames(row.members)
+          .map((m) => cleanRelationalValue(m))
+          .filter(Boolean);
+        if (parsedMembers.some((m) => m.toLowerCase() === charNameLower || m === nodeId)) {
+          rosterBackedFactionIds.push(row.id);
+        }
+      }
+
       const sect = cleanRelationalValue(nodeData.sect);
       if (sect) {
-        await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac:StoryNode)
-          WHERE fac.name <> $sect AND fac.id <> $sect
-          DELETE r
-        `, { nodeId, sect });
         const facId = await findOrCreateProjectEntity(projectId, sect, 'faction', {
           role: 'TỔ CHỨC',
           subType: 'Trung lập',
@@ -905,6 +946,12 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           desc: `Tổ chức có thành viên ${nodeName}`,
           status: 'Đang hoạt động',
         });
+        const keepFactionIds = Array.from(new Set([...rosterBackedFactionIds, facId].filter(Boolean)));
+        await runQuery(`
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac:StoryNode)
+          WHERE NOT (fac.id IN $keepFactionIds)
+          DELETE r
+        `, { nodeId, keepFactionIds });
         await runQuery(`
           MATCH (c:StoryNode { id: $nodeId })
           MATCH (fac:StoryNode { id: $facId })
@@ -919,9 +966,10 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
         `, { nodeId, facId });
       } else {
         await runQuery(`
-          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(:StoryNode)
+          MATCH (c:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac:StoryNode)
+          WHERE NOT (fac.id IN $rosterBackedFactionIds)
           DELETE r
-        `, { nodeId });
+        `, { nodeId, rosterBackedFactionIds });
       }
 
       // Biến cố tử nạn / hồi sinh -> Event
@@ -1439,16 +1487,16 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
 
     // 6. LIÊN KẾT ĐẢO CHIỀU (Reverse auto-link):
     if (nodeType === 'item') {
-      const charRes = await runQuery(`
+      const charRows = await runQuery(`
         MATCH (c:StoryNode { type: 'character' })-[:BELONGS_TO]->(p:Project { id: $projectId })
         WHERE c.weapon IS NOT NULL AND trim(c.weapon) <> ''
         RETURN c.id AS id, c.weapon AS weapon
-      `, { projectId });
+      `, { projectId }, 'READ');
       const itemNameLower = nodeName.toLowerCase();
       const matchingCharIds = [];
-      for (const rec of charRes.records) {
-        const cId = rec.get('id');
-        const cWeapon = rec.get('weapon');
+      for (const row of Array.isArray(charRows) ? charRows : []) {
+        const cId = row.id;
+        const cWeapon = row.weapon;
         const parsedWeapons = parseParticipantNames(cWeapon)
           .map((w) => cleanRelationalValue(w))
           .filter(Boolean);
