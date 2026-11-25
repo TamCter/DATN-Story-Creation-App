@@ -232,7 +232,7 @@ export default function NodesDetailScreen() {
     setFormDob(node.dob || '');
     setFormBirthplace(node.birthplace || '');
     setFormGender(node.gender || 'Nam');
-    setFormWeapons(parseEventParticipants(node.weapon));
+    setFormWeapons(getCharacterOwnedItems(node, currentProject.nodes, currentProject.links));
     setFormCustomWeaponInput('');
     setFormSect(node.sect || '');
     setFormPersonality(node.personality || '');
@@ -340,13 +340,38 @@ export default function NodesDetailScreen() {
       payload.location = formLocation.trim();
     }
 
+    let didPersistNode = false;
     try {
       if (isEditing && editingNodeId) {
-        const updated = await projectStore.updateNode(currentProject.id, editingNodeId, payload);
-        setNodes((prev) => prev.map((n) => (n.id === editingNodeId ? { ...n, ...updated } : n)));
+        const editingNode = nodes.find((n) => n.id === editingNodeId);
+        await projectStore.updateNode(currentProject.id, editingNodeId, payload);
+        didPersistNode = true;
+        if (formType === 'character') {
+          const selectedWeaponLower = new Set(
+            parseEventParticipants(payload.weapon).map((w) => w.toLowerCase())
+          );
+          const charMatchKeys = new Set(
+            [editingNodeId, editingNode?.name, payload.name]
+              .map((v) => String(v || '').trim().toLowerCase())
+              .filter(Boolean)
+          );
+          const itemsToClear = itemNodes.filter((item) => {
+            const holderLower = (item.holderOrLocation || '').trim().toLowerCase();
+            if (!holderLower || !charMatchKeys.has(holderLower)) return false;
+            return (
+              !selectedWeaponLower.has((item.name || '').trim().toLowerCase()) &&
+              !selectedWeaponLower.has(item.id.toLowerCase())
+            );
+          });
+          for (const item of itemsToClear) {
+            await projectStore.updateNode(currentProject.id, item.id, {
+              holderOrLocation: '',
+            });
+          }
+        }
       } else {
-        const created = await projectStore.createNode(currentProject.id, payload);
-        setNodes((prev) => [...prev, created]);
+        await projectStore.createNode(currentProject.id, payload);
+        didPersistNode = true;
       }
       setModalOpen(false);
     } catch (err: any) {
@@ -354,6 +379,15 @@ export default function NodesDetailScreen() {
       if (Platform.OS === 'web') window.alert(msg);
       else Alert.alert('Lỗi', msg);
     } finally {
+      if (didPersistNode) {
+        try {
+          const refreshed = await projectStore.getProject(currentProject.id);
+          setCurrentProject(refreshed);
+          setNodes(refreshed.nodes || []);
+        } catch (refreshErr) {
+          console.warn('Lỗi tải lại dữ liệu dự án sau khi lưu node:', refreshErr);
+        }
+      }
       setIsSubmitting(false);
     }
   };
