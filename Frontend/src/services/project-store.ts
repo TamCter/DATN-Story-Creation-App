@@ -224,6 +224,41 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       ensureLink(ch.id, node.id, 'LEADER_OF', 'Người đại diện / Thủ lĩnh', 'solid');
     }
 
+    removeObsoleteGeneratedLinks('incoming', node.id, 'SENIOR_MEMBER_OF');
+    const seniorMembers = parseEventParticipants(node.seniorMembers)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    const seenSeniorLower = new Set<string>();
+    seniorMembers.forEach((memberName) => {
+      const key = memberName.toLowerCase();
+      if (seenSeniorLower.has(key)) return;
+      seenSeniorLower.add(key);
+      const ch = findOrAddNode(memberName, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Thành viên cấp cao của ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'SENIOR_MEMBER_OF', 'Thành viên cấp cao', 'solid');
+    });
+
+    const factionMembers = parseEventParticipants(node.members)
+      .map((s) => cleanRelationalVal(s))
+      .filter(Boolean);
+    const seenMemberLower = new Set<string>();
+    factionMembers.forEach((memberName) => {
+      const key = memberName.toLowerCase();
+      if (seenMemberLower.has(key)) return;
+      seenMemberLower.add(key);
+      const ch = findOrAddNode(memberName, 'character', {
+        role: 'TRUNG LẬP',
+        gender: 'Nam',
+        desc: `Thành viên của ${node.name}`,
+        status: 'Còn sống',
+      });
+      ensureLink(ch.id, node.id, 'MEMBER_OF', 'Thành viên', 'solid');
+    });
+
     removeObsoleteGeneratedLinks('outgoing', node.id, 'HEADQUARTERS');
     const hq = cleanRelationalVal(node.headquarters);
     if (hq) {
@@ -871,6 +906,8 @@ export class ProjectStore {
       dangerLevel: nodeData.dangerLevel?.trim() || '',
       ruler: nodeData.ruler?.trim() || '',
       leader: nodeData.leader?.trim() || '',
+      members: nodeData.members?.trim() || '',
+      seniorMembers: nodeData.seniorMembers?.trim() || '',
       headquarters: nodeData.headquarters?.trim() || '',
       motto: nodeData.motto?.trim() || '',
       alignment: nodeData.alignment?.trim() || '',

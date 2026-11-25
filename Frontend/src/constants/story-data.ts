@@ -30,6 +30,8 @@ export interface StoryNode {
   ruler?: string;
   // Faction fields
   leader?: string;
+  members?: string;
+  seniorMembers?: string;
   headquarters?: string;
   motto?: string;
   alignment?: string;
@@ -132,6 +134,85 @@ export function getCharacterOwnedItems(
   });
 
   return result;
+}
+
+export function getFactionMembers(
+  faction: Pick<StoryNode, 'id' | 'name' | 'members' | 'seniorMembers'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): { seniorMembers: string[]; members: string[] } {
+  const facId = (faction.id || '').trim();
+  const facNameLower = (faction.name || '').trim().toLowerCase();
+  const charNodes = allNodes.filter((n) => n.type === 'character');
+  const charById = new Map<string, StoryNode>();
+  const charByNameLower = new Map<string, StoryNode>();
+  charNodes.forEach((c) => {
+    charById.set(c.id, c);
+    charByNameLower.set((c.name || '').trim().toLowerCase(), c);
+  });
+
+  const seenSeniorLower = new Set<string>();
+  const seniorMembers: string[] = [];
+  const addSenior = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenSeniorLower.has(key)) {
+      seenSeniorLower.add(key);
+      seniorMembers.push(displayName);
+    }
+  };
+
+  parseEventParticipants(faction.seniorMembers).forEach(addSenior);
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'SENIOR_MEMBER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (facId && targetId === facId && sourceId) {
+      const ch = charById.get(sourceId);
+      if (ch) addSenior(ch.name);
+    }
+  });
+
+  const seenMemberLower = new Set<string>();
+  const members: string[] = [];
+  const addMember = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenMemberLower.has(key)) {
+      seenMemberLower.add(key);
+      members.push(displayName);
+    }
+  };
+
+  parseEventParticipants(faction.members).forEach(addMember);
+  charNodes.forEach((c) => {
+    const sect = (c.sect || '').trim();
+    if (!sect) return;
+    if ((facNameLower && sect.toLowerCase() === facNameLower) || (facId && sect === facId)) {
+      if (!seenSeniorLower.has((c.name || '').trim().toLowerCase())) {
+        addMember(c.name);
+      }
+    }
+  });
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'MEMBER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (facId && targetId === facId && sourceId) {
+      const ch = charById.get(sourceId);
+      if (ch && !seenSeniorLower.has((ch.name || '').trim().toLowerCase())) {
+        addMember(ch.name);
+      }
+    }
+  });
+
+  return { seniorMembers, members };
 }
 
 export function formatDateDDMMYYYY(value?: string): string {

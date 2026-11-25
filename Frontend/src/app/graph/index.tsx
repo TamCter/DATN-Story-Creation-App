@@ -35,6 +35,7 @@ import {
   generateUniqueNodeId,
   getCharacterOwnedItems,
   getDateSortKey,
+  getFactionMembers,
   getProjectChapters,
   INITIAL_PROJECTS,
   parseEventParticipants,
@@ -325,6 +326,10 @@ export default function GraphScreen() {
 
   // Tổ chức (Faction)
   const [formLeader, setFormLeader] = useState('');
+  const [formFactionSeniorMembers, setFormFactionSeniorMembers] = useState<string[]>([]);
+  const [formFactionMembers, setFormFactionMembers] = useState<string[]>([]);
+  const [formCustomSeniorInput, setFormCustomSeniorInput] = useState('');
+  const [formCustomMemberInput, setFormCustomMemberInput] = useState('');
   const [formHeadquarters, setFormHeadquarters] = useState('');
   const [formMotto, setFormMotto] = useState('');
   const [formAlignment, setFormAlignment] = useState<string>('ĐỒNG MINH');
@@ -509,6 +514,10 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormClimate('Ôn hòa');
   setFormRuler('');
   setFormLeader('');
+  setFormFactionSeniorMembers([]);
+  setFormFactionMembers([]);
+  setFormCustomSeniorInput('');
+  setFormCustomMemberInput('');
   setFormHeadquarters('');
   setFormMotto('');
   setFormAlignment('ĐỒNG MINH');
@@ -560,6 +569,12 @@ const handleCreateNodeFromAI = (nodeData: Partial<StoryNode>) => {
   if (nodeData.climate) setFormClimate(nodeData.climate);
   if (nodeData.ruler) setFormRuler(nodeData.ruler);
   if (nodeData.leader) setFormLeader(nodeData.leader);
+  if (nodeData.seniorMembers) {
+    setFormFactionSeniorMembers(parseEventParticipants(nodeData.seniorMembers));
+  }
+  if (nodeData.members) {
+    setFormFactionMembers(parseEventParticipants(nodeData.members));
+  }
   if (nodeData.headquarters) setFormHeadquarters(nodeData.headquarters);
   if (nodeData.motto) setFormMotto(nodeData.motto);
   if (nodeData.alignment) setFormAlignment(nodeData.alignment);
@@ -885,6 +900,16 @@ const handleOpenEditModal = (node: StoryNode) => {
   setFormClimate(node.climate || 'Ôn hòa');
   setFormRuler(node.ruler || '');
   setFormLeader(node.leader || '');
+  if (node.type === 'faction') {
+    const facMembers = getFactionMembers(node, nodes, links);
+    setFormFactionSeniorMembers(facMembers.seniorMembers);
+    setFormFactionMembers(facMembers.members);
+  } else {
+    setFormFactionSeniorMembers([]);
+    setFormFactionMembers([]);
+  }
+  setFormCustomSeniorInput('');
+  setFormCustomMemberInput('');
   setFormHeadquarters(node.headquarters || '');
   setFormMotto(node.motto || '');
   setFormAlignment(node.alignment || 'ĐỒNG MINH');
@@ -988,6 +1013,30 @@ const handleSaveNode = async () => {
       payload.statusEvent = '';
     }
     payload.leader = formLeader.trim();
+    const dedupNames = (list: string[]) => {
+      const seen = new Set<string>();
+      const out: string[] = [];
+      list.forEach((raw) => {
+        const trimmed = raw.trim();
+        if (!trimmed) return;
+        const key = trimmed.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          out.push(trimmed);
+        }
+      });
+      return out;
+    };
+    const mergedSeniorMembers = dedupNames([
+      ...formFactionSeniorMembers,
+      ...parseEventParticipants(formCustomSeniorInput),
+    ]);
+    const mergedMembers = dedupNames([
+      ...formFactionMembers,
+      ...parseEventParticipants(formCustomMemberInput),
+    ]);
+    payload.seniorMembers = mergedSeniorMembers.join(', ');
+    payload.members = mergedMembers.join(', ');
     payload.headquarters = formHeadquarters.trim();
     payload.motto = formMotto.trim();
   } else if (formType === 'event') {
@@ -1917,6 +1966,238 @@ return (
                             </View>
                           </View>
 
+                          {/* Thành viên cấp cao (chọn nhiều) */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>
+                              Thành viên cấp cao (chọn nhiều)
+                            </Text>
+                            {(() => {
+                              const existingCharNamesLower = new Set(
+                                characterNodes.map((c) => (c.name || '').trim().toLowerCase())
+                              );
+                              const customSelected = formFactionSeniorMembers.filter(
+                                (m) => !existingCharNamesLower.has(m.trim().toLowerCase())
+                              );
+                              const allNames = [
+                                ...characterNodes.map((c) => c.name),
+                                ...customSelected,
+                              ];
+                              return allNames.length > 0 ? (
+                                <View style={styles.eventCharacterOptions}>
+                                  {allNames.map((charName) => {
+                                    const keyLower = charName.trim().toLowerCase();
+                                    const isSelected = formFactionSeniorMembers.some(
+                                      (m) => m.trim().toLowerCase() === keyLower
+                                    );
+                                    return (
+                                      <Pressable
+                                        key={`fac-senior-${keyLower}`}
+                                        style={[
+                                          styles.eventCharacterChip,
+                                          isSelected && styles.eventCharacterChipSelected,
+                                        ]}
+                                        onPress={() =>
+                                          setFormFactionSeniorMembers((selected) =>
+                                            isSelected
+                                              ? selected.filter(
+                                                  (m) => m.trim().toLowerCase() !== keyLower
+                                                )
+                                              : [...selected, charName]
+                                          )
+                                        }
+                                        accessibilityRole="checkbox"
+                                        accessibilityState={{ checked: isSelected }}>
+                                        <Text
+                                          style={[
+                                            styles.eventCharacterChipText,
+                                            isSelected && styles.eventCharacterChipTextSelected,
+                                          ]}>
+                                          {isSelected ? '✓ ' : ''}⭐ {charName}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                              ) : (
+                                <Text style={styles.eventCharacterEmpty}>
+                                  Chưa có node nhân vật nào. Nhập tên bên dưới để thêm.
+                                </Text>
+                              );
+                            })()}
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                              <TextInput
+                                style={[styles.modalInput, { flex: 1 }]}
+                                value={formCustomSeniorInput}
+                                onChangeText={setFormCustomSeniorInput}
+                                placeholder="Nhập tên thành viên cấp cao mới..."
+                                placeholderTextColor="#665f52"
+                                onSubmitEditing={() => {
+                                  const additions = parseEventParticipants(formCustomSeniorInput);
+                                  if (additions.length === 0) return;
+                                  setFormFactionSeniorMembers((prev) => {
+                                    const seen = new Set(prev.map((m) => m.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomSeniorInput('');
+                                }}
+                              />
+                              <Pressable
+                                style={[
+                                  styles.eventCharacterChip,
+                                  styles.eventCharacterChipSelected,
+                                  { justifyContent: 'center', paddingHorizontal: 14 },
+                                ]}
+                                onPress={() => {
+                                  const additions = parseEventParticipants(formCustomSeniorInput);
+                                  if (additions.length === 0) return;
+                                  setFormFactionSeniorMembers((prev) => {
+                                    const seen = new Set(prev.map((m) => m.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomSeniorInput('');
+                                }}>
+                                <Text
+                                  style={[
+                                    styles.eventCharacterChipText,
+                                    styles.eventCharacterChipTextSelected,
+                                  ]}>
+                                  + Thêm
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+
+                          {/* Thành viên (chọn nhiều) */}
+                          <View style={styles.modalInputGroup}>
+                            <Text style={styles.modalInputLabel}>Thành viên (chọn nhiều)</Text>
+                            {(() => {
+                              const existingCharNamesLower = new Set(
+                                characterNodes.map((c) => (c.name || '').trim().toLowerCase())
+                              );
+                              const customSelected = formFactionMembers.filter(
+                                (m) => !existingCharNamesLower.has(m.trim().toLowerCase())
+                              );
+                              const allNames = [
+                                ...characterNodes.map((c) => c.name),
+                                ...customSelected,
+                              ];
+                              return allNames.length > 0 ? (
+                                <View style={styles.eventCharacterOptions}>
+                                  {allNames.map((charName) => {
+                                    const keyLower = charName.trim().toLowerCase();
+                                    const isSelected = formFactionMembers.some(
+                                      (m) => m.trim().toLowerCase() === keyLower
+                                    );
+                                    return (
+                                      <Pressable
+                                        key={`fac-member-${keyLower}`}
+                                        style={[
+                                          styles.eventCharacterChip,
+                                          isSelected && styles.eventCharacterChipSelected,
+                                        ]}
+                                        onPress={() =>
+                                          setFormFactionMembers((selected) =>
+                                            isSelected
+                                              ? selected.filter(
+                                                  (m) => m.trim().toLowerCase() !== keyLower
+                                                )
+                                              : [...selected, charName]
+                                          )
+                                        }
+                                        accessibilityRole="checkbox"
+                                        accessibilityState={{ checked: isSelected }}>
+                                        <Text
+                                          style={[
+                                            styles.eventCharacterChipText,
+                                            isSelected && styles.eventCharacterChipTextSelected,
+                                          ]}>
+                                          {isSelected ? '✓ ' : ''}👤 {charName}
+                                        </Text>
+                                      </Pressable>
+                                    );
+                                  })}
+                                </View>
+                              ) : (
+                                <Text style={styles.eventCharacterEmpty}>
+                                  Chưa có node nhân vật nào. Nhập tên bên dưới để thêm.
+                                </Text>
+                              );
+                            })()}
+                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                              <TextInput
+                                style={[styles.modalInput, { flex: 1 }]}
+                                value={formCustomMemberInput}
+                                onChangeText={setFormCustomMemberInput}
+                                placeholder="Nhập tên thành viên mới..."
+                                placeholderTextColor="#665f52"
+                                onSubmitEditing={() => {
+                                  const additions = parseEventParticipants(formCustomMemberInput);
+                                  if (additions.length === 0) return;
+                                  setFormFactionMembers((prev) => {
+                                    const seen = new Set(prev.map((m) => m.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomMemberInput('');
+                                }}
+                              />
+                              <Pressable
+                                style={[
+                                  styles.eventCharacterChip,
+                                  styles.eventCharacterChipSelected,
+                                  { justifyContent: 'center', paddingHorizontal: 14 },
+                                ]}
+                                onPress={() => {
+                                  const additions = parseEventParticipants(formCustomMemberInput);
+                                  if (additions.length === 0) return;
+                                  setFormFactionMembers((prev) => {
+                                    const seen = new Set(prev.map((m) => m.trim().toLowerCase()));
+                                    const next = [...prev];
+                                    additions.forEach((name) => {
+                                      const key = name.trim().toLowerCase();
+                                      if (!seen.has(key)) {
+                                        seen.add(key);
+                                        next.push(name);
+                                      }
+                                    });
+                                    return next;
+                                  });
+                                  setFormCustomMemberInput('');
+                                }}>
+                                <Text
+                                  style={[
+                                    styles.eventCharacterChipText,
+                                    styles.eventCharacterChipTextSelected,
+                                  ]}>
+                                  + Thêm
+                                </Text>
+                              </Pressable>
+                            </View>
+                          </View>
+
                           <View style={styles.modalInputGroup}>
                             <Text style={styles.modalInputLabel}>Tôn chỉ</Text>
                             <TextInput
@@ -2452,6 +2733,33 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.leader}</Text>
                                   </View>
                                 ) : null}
+                                {(() => {
+                                  const { seniorMembers, members } = getFactionMembers(
+                                    selectedNode,
+                                    nodes,
+                                    links
+                                  );
+                                  return (
+                                    <>
+                                      {seniorMembers.length > 0 ? (
+                                        <View style={styles.detailRowItem}>
+                                          <Text style={styles.detailItemKey}>Thành viên cấp cao:</Text>
+                                          <Text style={[styles.detailItemVal, { color: '#e5a93c' }]}>
+                                            ⭐ {seniorMembers.join(', ')}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                      {members.length > 0 ? (
+                                        <View style={styles.detailRowItem}>
+                                          <Text style={styles.detailItemKey}>Thành viên:</Text>
+                                          <Text style={styles.detailItemVal}>
+                                            👤 {members.join(', ')}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
                                 {selectedNode.headquarters ? (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Trụ sở:</Text>

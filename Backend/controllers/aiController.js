@@ -25,6 +25,8 @@ const RELATIONAL_NODE_FIELDS = [
   'holderOrLocation',
   'ruler',
   'leader',
+  'members',
+  'seniorMembers',
   'headquarters',
   'location',
   'chapter',
@@ -119,7 +121,7 @@ Có 5 loại node:
 1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob (Ngày/Tháng/Năm sinh định dạng DD/MM/YYYY, VD: 15/08/1998), age (số tuổi), birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
-4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
+4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, seniorMembers (danh sách tên thành viên cấp cao phân tách bằng dấu phẩy), members (danh sách tên thành viên phân tách bằng dấu phẩy), headquarters, motto, statusEvent
 5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng DD/MM/YYYY, VD: 15/08/2024), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
 QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
@@ -263,50 +265,85 @@ function extractCreateNodeResponse(responseText) {
                 : null;
 
             if (Array.isArray(rawNodes) && rawNodes.length > 0) {
+              const DEFAULT_STATUS_BY_TYPE = {
+                character: 'Còn sống',
+                item: 'Nguyên vẹn',
+                location: 'Hoạt động',
+                faction: 'Đang hoạt động',
+                event: 'Đã diễn ra',
+              };
               const sanitizeNode = (node) => {
                 if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
-                const copy = { ...node };
+                const copy = {};
+                for (const [key, value] of Object.entries(node)) {
+                  if (key === 'x' || key === 'y') {
+                    if (typeof value === 'number' && Number.isFinite(value)) {
+                      copy[key] = value;
+                    }
+                    continue;
+                  }
+                  if (key === 'autoCreatedStub') {
+                    if (typeof value === 'boolean') copy[key] = value;
+                    continue;
+                  }
+                  if (value === null || value === undefined) {
+                    copy[key] = '';
+                  } else if (Array.isArray(value)) {
+                    copy[key] = value
+                      .map((item) => String(item ?? '').trim())
+                      .filter((item) => item && !PLACEHOLDER_VALUE_PATTERN.test(item))
+                      .join(', ');
+                  } else if (typeof value === 'number' && Number.isFinite(value)) {
+                    copy[key] = String(value);
+                  } else if (typeof value === 'boolean') {
+                    copy[key] = String(value);
+                  } else if (typeof value === 'string') {
+                    const trimmed = value.trim();
+                    copy[key] = PLACEHOLDER_VALUE_PATTERN.test(trimmed) ? '' : trimmed;
+                  }
+                }
+
+                copy.type = String(copy.type || '').trim().toLowerCase();
                 for (const relField of RELATIONAL_NODE_FIELDS) {
-                  if (copy[relField] === null || copy[relField] === undefined) {
-                    copy[relField] = '';
-                  } else if (typeof copy[relField] === 'string') {
-                    const trimmed = copy[relField].trim();
+                  if (relField in copy) {
+                    const trimmed = String(copy[relField] || '').trim();
                     copy[relField] = PLACEHOLDER_VALUE_PATTERN.test(trimmed) ? '' : trimmed;
                   }
                 }
-                if (typeof copy.sequenceOrder === 'number' && Number.isFinite(copy.sequenceOrder)) {
-                  copy.sequenceOrder = String(copy.sequenceOrder);
+                if (copy.dob) copy.dob = formatDateDDMMYYYY(copy.dob);
+                if (copy.time) copy.time = formatDateDDMMYYYY(copy.time);
+                if (copy.type === 'character' && !copy.age && copy.dob) {
+                  copy.age = calculateAgeFromDob(copy.dob);
+                }
+                if (NODE_TYPES.includes(copy.type) && !copy.status) {
+                  copy.status = DEFAULT_STATUS_BY_TYPE[copy.type] || 'Hoạt động';
+                }
+                if (copy.type === 'character' && !copy.role) {
+                  copy.role = 'NHÂN VẬT CHÍNH';
                 }
                 return copy;
               };
 
-              const NON_STRING_NODE_FIELDS = new Set(['x', 'y', 'autoCreatedStub']);
               const sanitizedNodes = rawNodes.map(sanitizeNode);
               const isCompleteNode = (node) =>
-                node &&
-                typeof node === 'object' &&
-                !Array.isArray(node) &&
-                NODE_TYPES.includes(node.type) &&
-                CORE_REQUIRED_NODE_FIELDS[node.type].every(
-                  (field) =>
-                    typeof node[field] === 'string' &&
-                    node[field].trim() !== '' &&
-                    !PLACEHOLDER_VALUE_PATTERN.test(node[field].trim())
-                ) &&
-                RELATIONAL_NODE_FIELDS.every(
-                  (field) => !(field in node) || typeof node[field] === 'string'
-                ) &&
-                Object.entries(node).every(([key, value]) => {
-                  if (key === 'x' || key === 'y') return typeof value === 'number' && Number.isFinite(value);
-                  if (key === 'autoCreatedStub') return typeof value === 'boolean';
-                  return !NON_STRING_NODE_FIELDS.has(key) && typeof value === 'string';
-                });
+                Boolean(
+                  node &&
+                  typeof node === 'object' &&
+                  !Array.isArray(node) &&
+                  NODE_TYPES.includes(node.type) &&
+                  typeof node.name === 'string' &&
+                  node.name.trim() !== '' &&
+                  !PLACEHOLDER_VALUE_PATTERN.test(node.name.trim()) &&
+                  typeof node.desc === 'string' &&
+                  node.desc.trim() !== ''
+                );
 
-              if (sanitizedNodes.every(isCompleteNode)) {
+              const validNodes = sanitizedNodes.filter(isCompleteNode);
+              if (validNodes.length > 0) {
                 // Khử trùng lặp nếu AI trả về 2 node giống nhau (cùng type + name)
                 const seenKeys = new Set();
                 const uniqueNodes = [];
-                for (const node of sanitizedNodes) {
+                for (const node of validNodes) {
                   const key = `${node.type}::${node.name.trim().toLocaleLowerCase('vi')}`;
                   if (seenKeys.has(key)) continue;
                   seenKeys.add(key);
@@ -852,7 +889,7 @@ async function chatWithAI(req, res, next) {
     }
 
     const generatedCount = nodeResponse?.nodeDataList.length || 0;
-    if (wantsNodes && (!nodeResponse || generatedCount < requestedCount)) {
+    if (wantsNodes && generatedCount === 0) {
       if (attemptedNodeCreation) {
         return res.status(502).json({
           success: false,
@@ -2084,6 +2121,8 @@ async function analyzeChapterText(req, res, next) {
           n.status && `trạng thái=${n.status}`,
           n.statusEvent && `biến cố trạng thái=${n.statusEvent}`,
           n.leader && `thủ lĩnh=${n.leader}`,
+          n.seniorMembers && `thành viên cấp cao=${n.seniorMembers}`,
+          n.members && `thành viên=${n.members}`,
           n.headquarters && `trụ sở=${n.headquarters}`,
           n.motto && `tôn chỉ=${n.motto}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,

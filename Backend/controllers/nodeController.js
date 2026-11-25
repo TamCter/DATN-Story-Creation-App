@@ -148,6 +148,8 @@ const ALLOWED_NODE_SCALARS = new Set([
   'ruler',
   // Faction specific
   'leader',
+  'members',
+  'seniorMembers',
   'headquarters',
   'motto',
   'alignment',
@@ -1061,6 +1063,100 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
           MATCH (:StoryNode)-[r:RELATES_TO { category: 'LEADER_OF' }]->(fac:StoryNode { id: $nodeId })
           DELETE r
         `, { nodeId });
+      }
+
+      // Thành viên cấp cao -> Character (nhiều nhân vật)
+      const seniorMemberNames = [];
+      const seenSeniorLower = new Set();
+      for (const rawName of parseParticipantNames(nodeData.seniorMembers)) {
+        const cleaned = cleanRelationalValue(rawName);
+        if (!cleaned) continue;
+        const key = cleaned.toLowerCase();
+        if (!seenSeniorLower.has(key)) {
+          seenSeniorLower.add(key);
+          seniorMemberNames.push(cleaned);
+        }
+      }
+      if (seniorMemberNames.length > 0) {
+        const seniorCharIds = [];
+        for (const memberName of seniorMemberNames) {
+          const charId = await findOrCreateProjectEntity(projectId, memberName, 'character', {
+            role: 'TRUNG LẬP',
+            gender: 'Nam',
+            desc: `Thành viên cấp cao của ${nodeName}`,
+            status: 'Còn sống',
+          });
+          if (charId) seniorCharIds.push(charId);
+        }
+        await runQuery(`
+          MATCH (c:StoryNode)-[r:RELATES_TO { category: 'SENIOR_MEMBER_OF' }]->(fac:StoryNode { id: $nodeId })
+          WHERE NOT (c.id IN $seniorCharIds)
+          DELETE r
+        `, { nodeId, seniorCharIds });
+        for (const charId of seniorCharIds) {
+          await runQuery(`
+            MATCH (fac:StoryNode { id: $nodeId })
+            MATCH (c:StoryNode { id: $charId })
+            MERGE (c)-[r:RELATES_TO { category: 'SENIOR_MEMBER_OF' }]->(fac)
+            ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-senior-member',
+                          r.label = 'Thành viên cấp cao',
+                          r.type = 'solid',
+                          r.tone = 'sect',
+                          r.createdAt = timestamp()
+            ON MATCH SET r.label = 'Thành viên cấp cao',
+                         r.updatedAt = timestamp()
+          `, { nodeId, charId });
+        }
+      } else {
+        await runQuery(`
+          MATCH (:StoryNode)-[r:RELATES_TO { category: 'SENIOR_MEMBER_OF' }]->(fac:StoryNode { id: $nodeId })
+          DELETE r
+        `, { nodeId });
+      }
+
+      // Thành viên -> Character (nhiều nhân vật)
+      const memberNames = [];
+      const seenMemberLower = new Set();
+      for (const rawName of parseParticipantNames(nodeData.members)) {
+        const cleaned = cleanRelationalValue(rawName);
+        if (!cleaned) continue;
+        const key = cleaned.toLowerCase();
+        if (!seenMemberLower.has(key)) {
+          seenMemberLower.add(key);
+          memberNames.push(cleaned);
+        }
+      }
+      const memberCharIds = [];
+      for (const memberName of memberNames) {
+        const charId = await findOrCreateProjectEntity(projectId, memberName, 'character', {
+          role: 'TRUNG LẬP',
+          gender: 'Nam',
+          desc: `Thành viên của ${nodeName}`,
+          status: 'Còn sống',
+        });
+        if (charId) memberCharIds.push(charId);
+      }
+      // Xóa các link MEMBER_OF cũ không còn trong members và cũng không còn c.sect trỏ tới tổ chức này
+      await runQuery(`
+        MATCH (c:StoryNode)-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac:StoryNode { id: $nodeId })
+        WHERE NOT (c.id IN $memberCharIds)
+          AND toLower(coalesce(c.sect, '')) <> toLower(fac.name)
+          AND coalesce(c.sect, '') <> fac.id
+        DELETE r
+      `, { nodeId, memberCharIds });
+      for (const charId of memberCharIds) {
+        await runQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })
+          MATCH (c:StoryNode { id: $charId })
+          MERGE (c)-[r:RELATES_TO { category: 'MEMBER_OF' }]->(fac)
+          ON CREATE SET r.id = 'link-' + c.id + '-' + fac.id + '-member',
+                        r.label = 'Thành viên',
+                        r.type = 'solid',
+                        r.tone = 'sect',
+                        r.createdAt = timestamp()
+          ON MATCH SET r.label = 'Thành viên',
+                       r.updatedAt = timestamp()
+        `, { nodeId, charId });
       }
 
       // Căn cứ -> Location
