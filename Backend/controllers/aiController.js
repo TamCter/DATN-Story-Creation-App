@@ -44,7 +44,7 @@ Có 5 loại node:
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
 4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, headquarters, motto, statusEvent
-5. event (Sự kiện): name, type="event", desc, chapter, time, timelineType (Hiện tại/Hồi tưởng/Tiên tri / Giấc mơ/Lời kể gián tiếp), duration, location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
+5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng YYYY-MM-DD, VD: 2024-08-15), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
 QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
 Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
@@ -916,7 +916,7 @@ Nhiệm vụ của bạn:
 2. Tạo 2 đến 4 SỰ KIỆN CHÍNH (events) diễn ra theo trình tự thời gian trong chương này. Sự kiện cần gắn kết chặt chẽ với các nhân vật, địa điểm, vật phẩm, tổ chức hiện có (hoặc giới thiệu mới nếu phù hợp với mạch truyện).
 
 QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN (BẮT BUỘC):
-- MỖI sự kiện BẮT BUỘC phải điền ĐẦY ĐỦ và CỤ THỂ (KHÔNG ĐƯỢC ĐỂ TRỐNG) tất cả các trường: "name", "desc", "eventType", "importance", "arcName", "sequenceOrder", "location", "time", "timelineType", "duration", "cause", "conflict", "outcome", "consequences", "impact", "charactersInvolved", "characterRoles".
+- MỖI sự kiện BẮT BUỘC phải điền ĐẦY ĐỦ và CỤ THỂ (KHÔNG ĐƯỢC ĐỂ TRỐNG) tất cả các trường: "name", "desc", "eventType", "importance", "arcName", "sequenceOrder", "location", "time", "cause", "conflict", "outcome", "consequences", "impact", "charactersInvolved", "characterRoles".
 - "charactersInvolved": mảng tên tất cả nhân vật tham gia trực tiếp; ưu tiên dùng chính xác tên nhân vật hiện có ở trên. Nếu tên nhân vật xuất hiện trong tên/mô tả sự kiện thì bắt buộc đưa vào mảng này.
 - "characterRoles": ghi ngắn gọn vai trò từng nhân vật tham gia (VD: "Lăng Tiêu: Chủ động điều tra; Mộc Lan: Hỗ trợ").
 - "location": tên địa điểm cụ thể (ưu tiên địa điểm đã có ở trên) để nối quan hệ Diễn ra tại (EVENT_LOCATION).
@@ -929,8 +929,7 @@ QUY TẮC THỐNG NHẤT QUAN HỆ & ĐIỀN ĐẦY ĐỦ CHI TIẾT SỰ KIỆN
 - "impact": tác động lâu dài tới mạch truyện các chương sau.
 - "eventType": chọn 1 trong: "Chiến đấu", "Đối thoại / Đàm phán", "Tiết lộ bí mật", "Du hành", "Biến cố / Hy sinh", "Giao dịch / Vật phẩm", "Hồi tưởng", "Khác".
 - "importance": chọn 1 trong: "Nút thắt chính", "Bước ngoặt", "Gieo mầm", "Sự kiện phụ".
-- "timelineType": chọn 1 trong: "Hiện tại", "Hồi tưởng", "Tiên tri / Giấc mơ", "Lời kể gián tiếp".
-- "duration": thời lượng ước tính cụ thể (VD: "30 phút", "Một đêm", "2 giờ").
+- "time": Ngày/Tháng/Năm diễn ra sự kiện định dạng YYYY-MM-DD (VD: "2024-08-15"), phải nối tiếp hợp lý theo niên biểu các sự kiện trước đó.
 - "characterStatusChanges": mảng ghi nhận khi sự kiện thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" trong diễn biến hiện tại (dùng [] nếu không có). Nhân vật thay đổi trạng thái phải có trong "charactersInvolved".
 ${userIdea ? `Ý tưởng định hướng từ tác giả: "${userIdea}"` : 'Tác giả muốn bạn tự do phát triển tiếp nối các diễn biến trước một cách kịch tính, hấp dẫn.'}
 
@@ -951,9 +950,7 @@ BẮT BUỘC trả về định dạng JSON thuần túy (không thêm lời d�
       "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
       "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm nơi diễn ra>",
-      "time": "<Thời điểm diễn ra, ví dụ: Đầu chương / Ban đêm / Khi trăng tròn>",
-      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
-      "duration": "<Thời lượng, ví dụ: 30 phút / Một đêm / 2 ngày>",
+      "time": "<Ngày/Tháng/Năm diễn ra định dạng YYYY-MM-DD, VD: 2024-08-15>",
       "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới sự kiện này>",
       "conflict": "<Xung đột chính trong sự kiện>",
       "outcome": "<Kết quả trực tiếp của sự kiện>",
@@ -1802,25 +1799,102 @@ async function analyzeChapterText(req, res, next) {
       contextOmissions.omittedChapters +
       contextOmissions.omittedLinks;
 
+    const itemById = new Map(allItems.map((it) => [String(it.id), it]));
+    const eventById = new Map(allEvents.map((ev) => [String(ev.id), ev]));
+
+    const getCharOwnedItems = (charNode) => {
+      const charId = String(charNode.id || '').trim();
+      const charNameLower = String(charNode.name || '').trim().toLowerCase();
+      const seen = new Set();
+      const owned = [];
+      const addItem = (raw) => {
+        const t = String(raw || '').trim();
+        if (!t || /^(none|null|n\/a|unknown|không có|chưa rõ|không rõ|trống)$/i.test(t)) return;
+        const key = t.toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          owned.push(t);
+        }
+      };
+      String(charNode.weapon || '')
+        .split(/[,;\n]+/)
+        .forEach(addItem);
+      allItems.forEach((it) => {
+        const holder = String(it.holderOrLocation || '').trim();
+        if (holder && (holder.toLowerCase() === charNameLower || holder === charId)) {
+          addItem(it.name);
+        }
+      });
+      safeLinks.forEach((l) => {
+        const cat = String(l.category || '').toUpperCase();
+        if ((cat === 'OWNS' || cat === 'EQUIPPED') && String(l.source) === charId) {
+          const it = itemById.get(String(l.target));
+          if (it) addItem(it.name);
+        }
+      });
+      return owned;
+    };
+
+    const getCharEventsSummary = (charNode) => {
+      const charId = String(charNode.id || '').trim();
+      const charNameLower = String(charNode.name || '').trim().toLowerCase();
+      const evMap = new Map();
+      allEvents.forEach((ev) => {
+        const rawParts = ev.charactersInvolved || ev.characters || '';
+        let parts = [];
+        if (Array.isArray(rawParts)) {
+          parts = rawParts;
+        } else {
+          try {
+            const parsed = JSON.parse(String(rawParts));
+            parts = Array.isArray(parsed) ? parsed : String(rawParts).split(/[,;\n]+/);
+          } catch {
+            parts = String(rawParts).split(/[,;\n]+/);
+          }
+        }
+        if (
+          parts.some((p) => {
+            const t = String(p || '').trim();
+            return t.toLowerCase() === charNameLower || t === charId;
+          })
+        ) {
+          evMap.set(ev.id, ev);
+        }
+      });
+      safeLinks.forEach((l) => {
+        const src = String(l.source);
+        const tgt = String(l.target);
+        if (src === charId && eventById.has(tgt)) evMap.set(tgt, eventById.get(tgt));
+        if (tgt === charId && eventById.has(src)) evMap.set(src, eventById.get(src));
+      });
+      return Array.from(evMap.values())
+        .sort((a, b) => String(a.time || '').localeCompare(String(b.time || '')))
+        .slice(0, 10)
+        .map((ev) => `${ev.name}${ev.time ? ` (${ev.time})` : ''}`);
+    };
+
     const characterLines = allCharacters
       .slice(0, MAX_CTX_CHARACTERS)
-      .map((n) =>
-        [
+      .map((n) => {
+        const ownedItems = getCharOwnedItems(n);
+        const charEvents = getCharEventsSummary(n);
+        return [
           n.name,
           n.status && `trạng thái=${n.status}`,
           n.statusEvent && `biến cố trạng thái=${n.statusEvent}`,
           n.role && `vai trò=${n.role}`,
           n.gender && `giới tính=${n.gender}`,
-          n.dob && `ngày sinh/tuổi=${n.dob}`,
+          n.dob && `ngày sinh=${n.dob}`,
           n.birthplace && `nơi sinh=${n.birthplace}`,
-          n.weapon && `vật dụng/vũ khí=${n.weapon}`,
+          ownedItems.length > 0 && `vật phẩm sở hữu=[${ownedItems.join(', ')}]`,
           n.sect && `tổ chức=${n.sect}`,
+          charEvents.length > 0 && `sự kiện đã tham gia=[${charEvents.join('; ')}]`,
           n.personality && `tính cách=${String(n.personality).slice(0, 120)}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 160)}`,
         ]
           .filter(Boolean)
-          .join(' | ')
-      );
+          .join(' | ');
+      });
 
     const locationLines = allLocations
       .slice(0, MAX_CTX_LOCATIONS)
@@ -1849,6 +1923,7 @@ async function analyzeChapterText(req, res, next) {
           n.holderOrLocation && `người giữ/vị trí=${n.holderOrLocation}`,
           n.origin && `nguồn gốc=${n.origin}`,
           n.element && `nguyên tố=${n.element}`,
+          n.power && `uy lực=${String(n.power).slice(0, 100)}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
         ]
           .filter(Boolean)
@@ -1863,6 +1938,7 @@ async function analyzeChapterText(req, res, next) {
           n.subType && `loại=${n.subType}`,
           n.alignment && `phe=${n.alignment}`,
           n.status && `trạng thái=${n.status}`,
+          n.statusEvent && `biến cố trạng thái=${n.statusEvent}`,
           n.leader && `thủ lĩnh=${n.leader}`,
           n.headquarters && `trụ sở=${n.headquarters}`,
           n.motto && `tôn chỉ=${n.motto}`,
@@ -1878,23 +1954,40 @@ async function analyzeChapterText(req, res, next) {
         [
           n.name,
           n.chapter && `chương=${n.chapter}`,
+          n.sequenceOrder && `thứ tự=#${n.sequenceOrder}`,
           n.eventType && `loại=${n.eventType}`,
           n.importance && `mức độ=${n.importance}`,
           n.arcName && `arc=${n.arcName}`,
-          n.time && `thời gian=${n.time}`,
-          n.timelineType && `dòng thời gian=${n.timelineType}`,
-          n.duration && `thời lượng=${n.duration}`,
+          n.time && `ngày/tháng/năm=${n.time}`,
           n.location && `địa điểm=${n.location}`,
+          n.cause && `nguyên nhân=${String(n.cause).slice(0, 120)}`,
+          n.conflict && `xung đột=${String(n.conflict).slice(0, 120)}`,
           (n.charactersInvolved || n.characters) &&
           `nhân vật=${String(n.charactersInvolved || n.characters).slice(0, 140)}`,
+          n.characterRoles && `vai trò nhân vật=${String(n.characterRoles).slice(0, 120)}`,
           n.itemsInvolved && `vật phẩm=${String(n.itemsInvolved).slice(0, 120)}`,
           n.factionsInvolved && `tổ chức=${String(n.factionsInvolved).slice(0, 120)}`,
           n.outcome && `kết quả=${String(n.outcome).slice(0, 120)}`,
+          n.consequences && `hệ quả=${String(n.consequences).slice(0, 120)}`,
           n.impact && `tác động=${String(n.impact).slice(0, 120)}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,
         ]
           .filter(Boolean)
           .join(' | ')
+      );
+
+    const chronologicalTimelineLines = [...allEvents]
+      .filter((ev) => ev.time || ev.chapter)
+      .sort((a, b) => {
+        const ta = String(a.time || '').trim();
+        const tb = String(b.time || '').trim();
+        if (ta && tb && ta !== tb) return ta.localeCompare(tb);
+        return (Number(a.sequenceOrder) || 0) - (Number(b.sequenceOrder) || 0);
+      })
+      .slice(-MAX_CTX_EVENTS)
+      .map(
+        (ev) =>
+          `- [${ev.time || 'Chưa rõ ngày'}] ${ev.name}${ev.chapter ? ` (${ev.chapter})` : ''}${ev.location ? ` @ ${ev.location}` : ''}${ev.cause ? ` | nguyên nhân: ${ev.cause}` : ''}${ev.charactersInvolved || ev.characters ? ` | nhân vật: ${ev.charactersInvolved || ev.characters}` : ''}`
       );
 
     const chapterLines = eligibleChapters
@@ -1915,30 +2008,37 @@ async function analyzeChapterText(req, res, next) {
     const boundedChapterText = cleanText;
 
     const contextPrompt = `Bạn là biên tập viên văn học & chuyên gia kiểm tra tính nhất quán (Continuity Editor) xuất sắc cho tiểu thuyết "${projectTitle}".
-Nhiệm vụ của bạn là đọc kỹ VĂN BẢN CHƯƠNG MỚI do tác giả tự viết, đối chiếu chặt chẽ với BẢN ĐỒ THỰC THỂ & LỊCH SỬ CÁC CHƯƠNG TRƯỚC của dự án để thực hiện 3 việc:
+Nhiệm vụ của bạn là đọc kỹ VĂN BẢN CHƯƠNG MỚI do tác giả tự viết, đối chiếu chặt chẽ với BẢN ĐỒ THỰC THỂ, NIÊN BIỂU SỰ KIỆN & LỊCH SỬ CÁC CHƯƠNG TRƯỚC của dự án để thực hiện 3 việc:
 
 1. BẮT LỖI TÍNH NHẤT QUÁN & LOGIC (issues):
 Hãy rà soát toàn diện các nhóm lỗi sau (chỉ báo lỗi thực sự có căn cứ từ dữ liệu đồ thị hoặc mâu thuẫn nội tại trong chương, KHÔNG bịa đặt):
-- "Nhân vật đã chết": Nhân vật đang có trạng thái "Đã chết" nhưng lại xuất hiện hành động/đối thoại trực tiếp trong hiện tại (trừ khi văn bản nêu rõ là hồi tưởng, linh hồn hoặc sự kiện hồi sinh).
-- "Mâu thuẫn địa điểm": Nhân vật đã từng đến địa điểm đó (trong sự kiện trước, nơi sinh, trụ sở hoặc liên kết) nhưng văn bản lại viết là "lần đầu đặt chân đến", "chưa từng nghe qua" hoặc không nhận ra nơi đó.
-- "Vật phẩm & Sở hữu": Vật phẩm đang thuộc về nhân vật khác, đã bị phá hủy/thất lạc, hoặc có thuộc tính/nguyên tố khác nhưng nhân vật lại dùng trái ngược không giải thích.
-- "Tổ chức & Phe phái": Tổ chức đã "Suy tàn" / "Tạm ngừng" nhưng vẫn hoạt động bình thường; nhân vật thuộc phe "Đối lập" bỗng hành xử như đồng minh không có lý do; nhầm thủ lĩnh/trụ sở.
-- "Dòng thời gian": Thứ tự sự kiện, thời gian trôi qua, ngày sinh/độ tuổi mâu thuẫn với các chương trước hoặc mâu thuẫn ngay trong chương.
+- "Lỗi thời gian & Niên biểu": RÀ SOÁT ĐẶC BIỆT KỸ các mốc ngày/tháng/năm giữa các sự kiện:
+  + Viết nhầm ngày/tháng/năm trong chương so với niên biểu các sự kiện đã có (VD: chương sau hoặc sự kiện diễn ra sau nhưng ghi ngày/tháng/năm SỚM HƠN sự kiện trước mà không phải hồi tưởng).
+  + Mâu thuẫn nhân quả theo thời gian: nhắc tới kết quả/hệ quả của sự kiện A (hoặc sự kiện nối cause từ A) nhưng mốc thời gian lại trước ngày diễn ra sự kiện A.
+  + Sai khoảng thời gian chênh lệch (VD: văn bản nói "3 ngày sau sự kiện X" nhưng ngày/tháng/năm thực tế chênh lệch khác hẳn hoặc đi ngược thời gian).
+  + Mâu thuẫn ngày sinh (dob) / tuổi nhân vật với ngày diễn ra sự kiện (nhân vật chưa ra đời hoặc sai số tuổi).
+  + Nhân vật xuất hiện cùng một ngày/tháng/năm ở hai địa điểm xa nhau không có giải thích di chuyển.
+  + Nhầm trình tự thời gian giữa các sự kiện ngay trong cùng một chương.
+- "Nhân vật đã chết": Nhân vật đang có trạng thái "Đã chết" (hoặc đã tử nạn ở sự kiện statusEvent vào ngày X) nhưng lại xuất hiện hành động/đối thoại trực tiếp ở thời điểm sau ngày X (trừ khi văn bản nêu rõ là hồi tưởng trước ngày chết, linh hồn hoặc sự kiện hồi sinh).
+- "Vật phẩm & Sở hữu": Đối chiếu danh sách ĐA VẬT PHẨM mỗi nhân vật đang sở hữu (weapon, item.holderOrLocation, liên kết OWNS/EQUIPPED) và itemsInvolved: bắt lỗi nhân vật sử dụng vật phẩm thuộc sở hữu của người khác mà chưa có sự kiện chuyển giao; dùng vật phẩm đã bị phá hủy/thất lạc/hư hại trong hệ quả (consequences) sự kiện trước; sai độ hiếm, nguyên tố, nguồn gốc hoặc uy lực (power).
+- "Nhân quả & Hệ quả sự kiện": Đối chiếu chặt chẽ cause, conflict, outcome, consequences, impact và characterRoles của các sự kiện trước: bắt lỗi chương mới mô tả trạng thái nhân vật/vật phẩm/địa điểm/phe phái trái ngược với kết quả/hệ quả đã chốt ở sự kiện trước (VD: bị thương nặng, mất vũ khí, phá hủy công trình nhưng chương sau bình thường không giải thích), hoặc sai vai trò đã thiết lập.
+- "Tổ chức & Phe phái": Tổ chức đã "Suy tàn" / "Tạm ngừng" (theo status và statusEvent) nhưng vẫn hoạt động bình thường; nhân vật thuộc tổ chức/phe "Đối lập" bỗng hành xử như đồng minh không lý do; nhầm thủ lĩnh (leader), trụ sở (headquarters), tôn chỉ (motto) hoặc factionsInvolved.
+- "Mâu thuẫn địa điểm": Nhân vật đã từng đến địa điểm đó (trong sự kiện đã tham gia, nơi sinh, trụ sở hoặc liên kết) nhưng văn bản lại viết là "lần đầu đặt chân đến", "chưa từng nghe qua" hoặc không nhận ra nơi đó.
 - "Đặc điểm nhân vật": Sai giới tính, sai vai trò, tính cách/năng lực trái ngược hoàn toàn với hồ sơ đã thiết lập.
 - "Mâu thuẫn quan hệ": Cách xưng hô hoặc thái độ thù địch/thân thiết mâu thuẫn với các mối liên kết hiện có trên đồ thị.
-- "Bối cảnh & Địa lý": Mô tả khí hậu, địa hình, mức độ nguy hiểm, vùng miền trái ngược với thiết lập của địa điểm.
+- "Bối cảnh & Địa lý": Mô tả khí hậu, địa hình, mức độ nguy hiểm, vùng miền, thế lực cai quản (ruler) trái ngược với thiết lập của địa điểm.
 - "Mâu thuẫn nội tại": Mâu thuẫn tự thân ngay trong văn bản chương (đổi tên nhân vật, buổi sáng đột ngột thành đêm khuya không chuyển cảnh, chi tiết trước đá chi tiết sau).
 
 Phân loại mức độ severity:
-- "error": Lỗi logic/nhất quán nghiêm trọng (VD: người đã chết xuất hiện, sai sự thật đã khẳng định).
-- "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, nhân vật hành xử khác thường).
-- "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn.
+- "error": Lỗi logic/nhất quán nghiêm trọng (VD: sai ngày/tháng/năm đảo ngược niên biểu sự kiện, người đã chết xuất hiện sau ngày tử nạn, sai sự thật đã khẳng định, dùng vật phẩm đã bị phá hủy).
+- "warning": Cảnh báo mâu thuẫn nhẹ hoặc cần giải thích thêm (VD: vật phẩm đổi chủ đột ngột, khoảng cách thời gian đáng ngờ, nhân vật hành xử khác thường).
+- "info": Gợi ý làm rõ/bổ sung để mạch truyện chặt chẽ hơn (VD: nên ghi rõ ngày/tháng/năm để đồng bộ niên biểu).
 
 2. ĐỀ XUẤT CÁC NODE MỚI CẦN TẠO (suggestedNodes) & QUY TẮC THỐNG NHẤT QUAN HỆ:
 - Trích xuất các thực thể MỚI xuất hiện rõ ràng trong chương thuộc 4 loại: "character", "item", "location", "faction" mà CHƯA CÓ trong danh sách thực thể hiện có ở dưới (so khớp không phân biệt hoa/thường).
 - KHÔNG tạo lại node đã tồn tại.
 - Điền đầy đủ các trường thông tin suy ra được từ văn bản để hệ thống tự động tạo đúng các cạnh quan hệ đồ thị:
-  + Nhân vật sở hữu/dùng vật phẩm -> điền tên vật phẩm vào character.weapon và/hoặc tên nhân vật vào item.holderOrLocation.
+  + Nhân vật sở hữu/dùng vật phẩm -> điền tên vật phẩm (nhiều vật phẩm phân tách bằng dấu phẩy) vào character.weapon và/hoặc tên nhân vật vào item.holderOrLocation.
   + Nhân vật thuộc tổ chức / lãnh đạo tổ chức -> character.sect và faction.leader.
   + Nhân vật sinh tại địa điểm -> character.birthplace.
   + Vật phẩm có nguồn gốc từ địa điểm -> item.origin.
@@ -1949,7 +2049,7 @@ Phân loại mức độ severity:
 - Rút ra 1 đến 5 SỰ KIỆN CHÍNH theo đúng trình tự thời gian diễn ra trong chương này để gắn vào Chi tiết chương.
 - Mỗi sự kiện phải có đầy đủ các trường chi tiết sau (để lưu thông tin phong phú & tự nối quan hệ đồ thị):
   + Cơ bản & Mạch truyện: "name", "desc", "eventType" (Chiến đấu / Đối thoại / Đàm phán / Tiết lộ bí mật / Du hành / Biến cố / Hy sinh / Giao dịch / Vật phẩm / Hồi tưởng / Khác), "importance" (Nút thắt chính / Bước ngoặt / Gieo mầm / Sự kiện phụ), "arcName", "sequenceOrder" ("1", "2",...).
-  + Thời gian & Địa điểm: "time", "timelineType" (Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp), "duration", "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
+  + Thời gian & Địa điểm: "time" (Ngày/Tháng/Năm diễn ra sự kiện định dạng YYYY-MM-DD, VD: "2024-08-15", hoặc chuỗi rỗng "" nếu văn bản không đề cập), "location" (tên địa điểm cụ thể để nối EVENT_LOCATION hoặc "").
   + Nhân quả & Mâu thuẫn: "cause" (nguyên nhân hoặc tên chính xác sự kiện trước để nối CAUSED_BY), "conflict", "outcome", "consequences", "impact".
   + Thực thể liên quan: "charactersInvolved" (mảng tên nhân vật tham gia để nối PARTICIPATED_IN), "characterRoles" (vai trò ngắn từng nhân vật), "itemsInvolved" (chỉ liệt kê tên các vật phẩm nhân vật tham gia thực sự mang theo/sử dụng trong sự kiện để hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện), "factionsInvolved" (chỉ liệt kê tên các tổ chức liên quan qua nhân vật tham gia để hiển thị chuỗi Tổ chức <--Tổ chức-- Nhân vật --Tham gia--> Sự kiện).
 - "characterStatusChanges": CHỈ ghi nhận khi diễn biến hiện tại trong chương thực sự làm nhân vật chuyển sang "Đã chết" hoặc "Hồi sinh" (không ghi vì hồi tưởng hay tin đồn).
@@ -1957,6 +2057,9 @@ Phân loại mức độ severity:
 DỮ LIỆU ĐỒ THỊ HIỆN TẠI CỦA DỰ ÁN:
 [Các chương trước]
 ${chapterLines.join('\n') || '(Chưa có chương nào)'}
+
+[Niên biểu các sự kiện đã có (sắp xếp theo ngày/tháng/năm)]
+${chronologicalTimelineLines.join('\n') || '(Chưa có mốc thời gian nào)'}
 
 [Nhân vật hiện có]
 ${characterLines.map((l) => `- ${l}`).join('\n') || '(Chưa có)'}
@@ -1983,10 +2086,10 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
   "issues": [
     {
       "severity": "error",
-      "category": "Nhân vật đã chết",
+      "category": "Lỗi thời gian & Niên biểu",
       "title": "<Tiêu đề ngắn gọn của lỗi>",
       "quote": "<Trích dẫn CHÍNH XÁC nguyên văn câu/đoạn ngắn chứa lỗi từ chương gốc để hệ thống có thể thay thế 1-1>",
-      "explanation": "<Giải thích rõ vì sao lỗi khi đối chiếu với đồ thị hiện có>",
+      "explanation": "<Giải thích rõ vì sao lỗi khi đối chiếu với đồ thị & niên biểu hiện có>",
       "suggestion": "<Gợi ý hướng xử lý ngắn gọn cho tác giả>",
       "suggestedRewrite": "<Đoạn văn đã được viết lại hoàn chỉnh, tự nhiên theo đúng văn phong chương để thay thế trực tiếp cho phần quote ở trên>",
       "relatedEntities": ["<Tên thực thể liên quan>"]
@@ -2030,9 +2133,7 @@ BẮT BUỘC trả về JSON thuần túy (không thêm lời giải thích ngo�
       "arcName": "<Tên cung truyện / Arc hoặc chuỗi rỗng>",
       "sequenceOrder": "<Số thứ tự 1, 2, 3...>",
       "location": "<Tên địa điểm hoặc chuỗi rỗng>",
-      "time": "<Thời điểm diễn ra>",
-      "timelineType": "<Hiện tại / Hồi tưởng / Tiên tri / Giấc mơ / Lời kể gián tiếp>",
-      "duration": "<Thời lượng diễn ra>",
+      "time": "<Ngày/Tháng/Năm diễn ra định dạng YYYY-MM-DD, VD: 2024-08-15>",
       "cause": "<Nguyên nhân hoặc tên sự kiện dẫn tới>",
       "conflict": "<Xung đột chính>",
       "outcome": "<Kết quả trực tiếp>",

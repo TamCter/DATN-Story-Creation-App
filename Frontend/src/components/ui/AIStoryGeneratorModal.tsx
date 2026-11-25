@@ -25,6 +25,7 @@ import {
   StoryProject,
 } from '@/constants/story-data';
 import { FormSelectField } from '@/components/ui/FormSelectField';
+import { DatePickerField } from '@/components/ui/DatePickerField';
 import { api, ApiError } from '@/services/api';
 import { projectStore } from '@/services/project-store';
 import * as Clipboard from 'expo-clipboard';
@@ -1107,41 +1108,13 @@ export default function AIStoryGeneratorModal({
                     </View>
                   </View>
 
-                  <View style={styles.editRow}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.editFieldLabel}>Thời điểm</Text>
-                      <TextInput
-                        style={styles.editInput}
-                        value={editingEventDraft.time}
-                        onChangeText={(v) =>
-                          setEditingEventDraft({ ...editingEventDraft, time: v })
-                        }
-                        placeholder="VD: Đêm khuya"
-                        placeholderTextColor="#685f50"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.editFieldLabel}>Thời lượng</Text>
-                      <TextInput
-                        style={styles.editInput}
-                        value={editingEventDraft.duration}
-                        onChangeText={(v) =>
-                          setEditingEventDraft({ ...editingEventDraft, duration: v })
-                        }
-                        placeholder="VD: 30 phút"
-                        placeholderTextColor="#685f50"
-                      />
-                    </View>
-                  </View>
-
-                  <Text style={styles.editFieldLabel}>Dòng thời gian</Text>
-                  <FormSelectField
-                    value={editingEventDraft.timelineType}
+                  <Text style={styles.editFieldLabel}>Ngày / Tháng / Năm diễn ra</Text>
+                  <DatePickerField
+                    value={editingEventDraft.time}
                     onChange={(v) =>
-                      setEditingEventDraft({ ...editingEventDraft, timelineType: v })
+                      setEditingEventDraft({ ...editingEventDraft, time: v })
                     }
-                    options={EVENT_TIMELINE_OPTIONS}
-                    placeholder="Hiện tại"
+                    placeholder="Chọn ngày / tháng / năm sự kiện"
                   />
 
                   <Text style={styles.editFieldLabel}>Vai trò nhân vật (ghi chú)</Text>

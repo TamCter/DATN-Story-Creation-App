@@ -1984,9 +1984,7 @@ export default function TextCheckerScreen() {
                             {[
                               ev.eventType,
                               ev.importance,
-                              ev.timelineType && ev.timelineType !== 'Hiện tại' ? ev.timelineType : '',
-                              ev.time,
-                              ev.duration,
+                              ev.time ? `📅 ${ev.time}` : '',
                               ev.location,
                             ]
                               .filter(Boolean)
@@ -2519,35 +2517,11 @@ export default function TextCheckerScreen() {
                     customPlaceholder="Nhập tên địa điểm mới để tự tạo node..."
                   />
 
-                  <View style={{ flexDirection: 'row', gap: 10 }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Thời điểm diễn ra</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={editingEvent.time}
-                        onChangeText={(v) => setEditingEvent({ ...editingEvent, time: v })}
-                        placeholder="VD: Đầu chương / Đêm khuya"
-                        placeholderTextColor="#6d6253"
-                      />
-                    </View>
-                    <View style={{ flex: 1 }}>
-                      <Text style={styles.fieldLabel}>Thời lượng</Text>
-                      <TextInput
-                        style={styles.input}
-                        value={editingEvent.duration}
-                        onChangeText={(v) => setEditingEvent({ ...editingEvent, duration: v })}
-                        placeholder="VD: 30 phút / Một đêm"
-                        placeholderTextColor="#6d6253"
-                      />
-                    </View>
-                  </View>
-
-                  <Text style={styles.fieldLabel}>Dòng thời gian</Text>
-                  <FormSelectField
-                    value={editingEvent.timelineType}
-                    onChange={(v) => setEditingEvent({ ...editingEvent, timelineType: v })}
-                    options={EVENT_TIMELINE_OPTIONS}
-                    placeholder="Hiện tại"
+                  <Text style={styles.fieldLabel}>Ngày / Tháng / Năm diễn ra</Text>
+                  <DatePickerField
+                    value={editingEvent.time}
+                    onChange={(v) => setEditingEvent({ ...editingEvent, time: v })}
+                    placeholder="Chọn ngày / tháng / năm sự kiện"
                   />
 
                   <Text style={styles.fieldLabel}>Nguyên nhân / Ngòi nổ</Text>

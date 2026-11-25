@@ -452,8 +452,8 @@ const handleOpenAddModal = (defaultType: StoryNode['type'] = 'character') => {
   setFormMotto('');
   setFormAlignment('ĐỒNG MINH');
   setFormChapter(chapters[0]?.title || '');
-  setFormTime(chapters[0]?.title || '');
-  setFormTimelineType('Hiện tại');
+  setFormTime('');
+  setFormTimelineType('');
   setFormDuration('');
   setFormEventType('');
   setFormImportance('');
@@ -930,9 +930,9 @@ const handleSaveNode = async () => {
     payload.subType = formSubType.trim();
     payload.status = formStatus.trim() || 'Đã diễn ra';
     payload.chapter = formChapter.trim();
-    payload.time = formTime.trim() || formChapter.trim();
-    payload.timelineType = formTimelineType.trim() || 'Hiện tại';
-    payload.duration = formDuration.trim();
+    payload.time = formTime.trim();
+    payload.timelineType = '';
+    payload.duration = '';
     payload.eventType = formEventType.trim();
     payload.importance = formImportance.trim();
     payload.arcName = formArcName.trim();
@@ -1939,37 +1939,13 @@ return (
                             </View>
                           </View>
 
-                          {/* Nhóm 4: Thời gian, Dòng thời gian & Thời lượng */}
-                          <View style={styles.formRow}>
-                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Thời điểm</Text>
-                              <TextInput
-                                style={styles.modalInput}
-                                value={formTime}
-                                onChangeText={setFormTime}
-                                placeholder="VD: Đêm khuya, Đầu chương..."
-                                placeholderTextColor="#665f52"
-                              />
-                            </View>
-                            <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                              <Text style={styles.modalInputLabel}>Dòng thời gian</Text>
-                              <FormSelectField
-                                value={formTimelineType}
-                                onChange={setFormTimelineType}
-                                options={EVENT_TIMELINE_OPTIONS}
-                                placeholder="Hiện tại"
-                              />
-                            </View>
-                          </View>
-
+                          {/* Nhóm 4: Ngày / Tháng / Năm diễn ra */}
                           <View style={styles.modalInputGroup}>
-                            <Text style={styles.modalInputLabel}>Thời lượng</Text>
-                            <TextInput
-                              style={styles.modalInput}
-                              value={formDuration}
-                              onChangeText={setFormDuration}
-                              placeholder="VD: 30 phút, Một đêm, 3 ngày..."
-                              placeholderTextColor="#665f52"
+                            <Text style={styles.modalInputLabel}>Ngày / Tháng / Năm diễn ra</Text>
+                            <DatePickerField
+                              value={formTime}
+                              onChange={setFormTime}
+                              placeholder="Chọn ngày / tháng / năm sự kiện"
                             />
                           </View>
 
@@ -2439,20 +2415,8 @@ return (
                                 ) : null}
                                 {selectedNode.time ? (
                                   <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Thời điểm:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.time}</Text>
-                                  </View>
-                                ) : null}
-                                {selectedNode.timelineType ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Dòng thời gian:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.timelineType}</Text>
-                                  </View>
-                                ) : null}
-                                {selectedNode.duration ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Thời lượng:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.duration}</Text>
+                                    <Text style={styles.detailItemKey}>Ngày / Tháng / Năm:</Text>
+                                    <Text style={styles.detailItemVal}>📅 {selectedNode.time}</Text>
                                   </View>
                                 ) : null}
                                 {selectedNode.location ? (
@@ -2527,30 +2491,76 @@ return (
                             )}
                           </View>
 
-                          {/* Connected Links */}
-                          <View style={styles.nodeRelationsBox}>
-                            <Text style={styles.nodeRelationsHeader}>
-                              Các mối liên kết đồ thị ({connectedLinks.length}):
-                            </Text>
-                            {connectedLinks.map((link) => {
-                              const otherId =
-                                link.source === selectedNode.id ? link.target : link.source;
-                              const otherNode = nodes.find((n) => n.id === otherId);
-                              return (
-                                <View key={link.id} style={styles.relationRow}>
-                                  <Text style={styles.relationLabel}>{link.label || 'liên hệ'} ➜</Text>
-                                  <Text style={styles.relationTargetName}>
-                                    {otherNode?.name || otherId}
-                                  </Text>
-                                </View>
+                          {/* Connected Links - Chỉ hiển thị ở node nhân vật: danh sách sự kiện tham gia & mốc thời gian */}
+                          {selectedNode.type === 'character' && (() => {
+                            const charNameLower = (selectedNode.name || '').trim().toLowerCase();
+                            const eventMap = new Map<string, StoryNode>();
+
+                            nodes.forEach((n) => {
+                              if (n.type !== 'event') return;
+                              const participants = parseEventParticipants(
+                                n.charactersInvolved || n.characters
                               );
-                            })}
-                            {connectedLinks.length === 0 && (
-                              <Text style={{ color: '#6e6758', fontSize: 12, fontStyle: 'italic' }}>
-                                Chưa có liên kết với thực thể nào
-                              </Text>
-                            )}
-                          </View>
+                              const matched = participants.some(
+                                (p) =>
+                                  p.trim().toLowerCase() === charNameLower ||
+                                  p.trim() === selectedNode.id
+                              );
+                              if (matched) {
+                                eventMap.set(n.id, n);
+                              }
+                            });
+
+                            links.forEach((link) => {
+                              const otherId =
+                                link.source === selectedNode.id
+                                  ? link.target
+                                  : link.target === selectedNode.id
+                                    ? link.source
+                                    : null;
+                              if (!otherId) return;
+                              const otherNode = nodes.find((n) => n.id === otherId);
+                              if (otherNode && otherNode.type === 'event') {
+                                eventMap.set(otherNode.id, otherNode);
+                              }
+                            });
+
+                            const participatedEvents = Array.from(eventMap.values()).sort(
+                              (a, b) => {
+                                const timeA = (a.time || '').trim();
+                                const timeB = (b.time || '').trim();
+                                if (timeA && timeB && timeA !== timeB) {
+                                  return timeA.localeCompare(timeB);
+                                }
+                                const seqA = Number(a.sequenceOrder) || Number.MAX_SAFE_INTEGER;
+                                const seqB = Number(b.sequenceOrder) || Number.MAX_SAFE_INTEGER;
+                                return seqA - seqB;
+                              }
+                            );
+
+                            return (
+                              <View style={styles.nodeRelationsBox}>
+                                <Text style={styles.nodeRelationsHeader}>
+                                  Các mối liên kết đồ thị · Sự kiện tham gia ({participatedEvents.length}):
+                                </Text>
+                                {participatedEvents.map((ev) => (
+                                  <View key={ev.id} style={styles.relationRow}>
+                                    <Text style={[styles.relationTargetName, { flex: 1 }]}>
+                                      ⚡ {ev.name}
+                                    </Text>
+                                    <Text style={styles.relationLabel}>
+                                      📅 {ev.time || ev.chapter || 'Chưa rõ ngày'}
+                                    </Text>
+                                  </View>
+                                ))}
+                                {participatedEvents.length === 0 && (
+                                  <Text style={{ color: '#6e6758', fontSize: 12, fontStyle: 'italic' }}>
+                                    Nhân vật chưa tham gia sự kiện nào
+                                  </Text>
+                                )}
+                              </View>
+                            );
+                          })()}
                         </ScrollView>
 
                         {/* Bottom Actions */}
