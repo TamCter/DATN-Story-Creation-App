@@ -1105,10 +1105,12 @@ const handleSaveNode = async () => {
     payload.factionsInvolved = JSON.stringify(formFactionsInvolved);
   }
 
+  let savedNodeId: string | undefined;
   try {
     if (isEditingNode && editingNodeId) {
       const editingNode = nodes.find((n) => n.id === editingNodeId);
       const updated = await projectStore.updateNode(currentProject.id, editingNodeId, payload);
+      savedNodeId = updated.id;
       if (formType === 'character') {
         const selectedWeaponLower = new Set(
           parseEventParticipants(payload.weapon).map((w) => w.toLowerCase())
@@ -1132,12 +1134,9 @@ const handleSaveNode = async () => {
           });
         }
       }
-      // Tải lại toàn bộ đồ thị để cập nhật cả nodes và links/edges mới từ backend
-      await refreshGraphData(updated.id);
     } else {
       const created = await projectStore.createNode(currentProject.id, payload);
-      // Tải lại toàn bộ đồ thị để cập nhật cả nodes và links/edges mới từ backend
-      await refreshGraphData(created.id);
+      savedNodeId = created.id;
     }
     setNodeModalOpen(false);
   } catch (err: any) {
@@ -1148,6 +1147,9 @@ const handleSaveNode = async () => {
       Alert.alert('Lỗi', msg);
     }
   } finally {
+    if (savedNodeId !== undefined) {
+      await refreshGraphData(savedNodeId);
+    }
     setIsSubmitting(false);
   }
 };
