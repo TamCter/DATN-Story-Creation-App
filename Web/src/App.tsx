@@ -70,6 +70,10 @@ export default function App() {
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimersRef = useRef<Map<string, number>>(new Map());
+  const inFlightSavesRef = useRef<Map<string, Promise<'saved' | 'local' | 'error'>>>(new Map());
+  const queuedSavesRef = useRef<
+    Map<string, { chapter: StoryChapter; rev: number; sessionGen: number }>
+  >(new Map());
   const toastTimerRef = useRef<number | null>(null);
   const lastWordCountRef = useRef<number>(0);
 
@@ -86,6 +90,7 @@ export default function App() {
   const clearAllSaveTimers = useCallback(() => {
     saveTimersRef.current.forEach((timerId) => window.clearTimeout(timerId));
     saveTimersRef.current.clear();
+    queuedSavesRef.current.clear();
   }, []);
 
   useEffect(() => {
@@ -306,7 +311,7 @@ export default function App() {
     webStorage.saveLastSelection(activeProjectId, activeChapterId);
   }, [authChecked, activeProjectId, activeChapterId]);
 
-  // Sync a single chapter to backend, checking revision & session to avoid clobbering newer edits
+  // Sync a single chapter to backend, serialized per chapter so older saves never overwrite newer ones
   const syncChapterToServer = useCallback(
     async (
       chapter: StoryChapter,
@@ -314,45 +319,79 @@ export default function App() {
       expectedSessionGen: number
     ): Promise<'saved' | 'local' | 'error'> => {
       if (!user || chapter.isLocalOnly) {
-        setSaveStatus('local');
         return 'local';
       }
-      setSaveStatus('saving');
-      try {
-        await webApi.updateChapter(chapter.id, {
-          title: chapter.title,
-          desc: chapter.desc || '',
-          content: chapter.content || '',
+
+      const existingRunner = inFlightSavesRef.current.get(chapter.id);
+      if (existingRunner) {
+        queuedSavesRef.current.set(chapter.id, {
+          chapter,
+          rev: sentRev,
+          sessionGen: expectedSessionGen,
         });
-        if (sessionGenRef.current !== expectedSessionGen) {
-          return 'local';
-        }
-        const currentRev = chapterEditRevRef.current[chapter.id] || 0;
-        if (currentRev === sentRev) {
-          webStorage.clearChapterDraft(chapter.id);
-          setChapters((prev) =>
-            prev.map((c) => (c.id === chapter.id ? { ...c, dirty: false, updatedAt: Date.now() } : c))
-          );
-          setSaveStatus('saved');
-        }
-        return 'saved';
-      } catch {
-        if (sessionGenRef.current !== expectedSessionGen) {
-          return 'local';
-        }
-        const currentRev = chapterEditRevRef.current[chapter.id] || 0;
-        if (currentRev === sentRev) {
-          webStorage.saveChapterDraft(chapter.id, {
-            title: chapter.title,
-            desc: chapter.desc || '',
-            content: chapter.content || '',
-            updatedAt: Date.now(),
-            dirty: true,
-          });
-          setSaveStatus('local');
-        }
-        return 'error';
+        return existingRunner;
       }
+
+      const runner = (async (): Promise<'saved' | 'local' | 'error'> => {
+        let current = { chapter, rev: sentRev, sessionGen: expectedSessionGen };
+        let lastOutcome: 'saved' | 'local' | 'error' = 'local';
+
+        while (true) {
+          if (sessionGenRef.current !== current.sessionGen) {
+            return 'local';
+          }
+          setSaveStatus('saving');
+          try {
+            await webApi.updateChapter(current.chapter.id, {
+              title: current.chapter.title,
+              desc: current.chapter.desc || '',
+              content: current.chapter.content || '',
+            });
+            if (sessionGenRef.current !== current.sessionGen) {
+              return 'local';
+            }
+            lastOutcome = 'saved';
+            const latestRev = chapterEditRevRef.current[current.chapter.id] || 0;
+            if (latestRev === current.rev && !queuedSavesRef.current.has(current.chapter.id)) {
+              webStorage.clearChapterDraft(current.chapter.id);
+              setChapters((prev) =>
+                prev.map((c) =>
+                  c.id === current.chapter.id ? { ...c, dirty: false, updatedAt: Date.now() } : c
+                )
+              );
+              setSaveStatus('saved');
+            }
+          } catch {
+            if (sessionGenRef.current !== current.sessionGen) {
+              return 'local';
+            }
+            lastOutcome = 'error';
+            const latestRev = chapterEditRevRef.current[current.chapter.id] || 0;
+            if (latestRev === current.rev && !queuedSavesRef.current.has(current.chapter.id)) {
+              webStorage.saveChapterDraft(current.chapter.id, {
+                title: current.chapter.title,
+                desc: current.chapter.desc || '',
+                content: current.chapter.content || '',
+                updatedAt: Date.now(),
+                dirty: true,
+              });
+              setSaveStatus('local');
+            }
+          }
+
+          const nextQueued = queuedSavesRef.current.get(chapter.id);
+          if (!nextQueued) break;
+          queuedSavesRef.current.delete(chapter.id);
+          current = nextQueued;
+        }
+
+        return lastOutcome;
+      })().finally(() => {
+        inFlightSavesRef.current.delete(chapter.id);
+      });
+
+      inFlightSavesRef.current.set(chapter.id, runner);
+      return runner;
     },
     [user]
   );
@@ -421,7 +460,20 @@ export default function App() {
   );
 
   const handleManualSave = useCallback(async () => {
-    if (!activeChapter) return;
+    if (!activeChapter || !activeProject) return;
+    const isLocalWorkspace = !user || Boolean(activeProject.isLocalOnly) || Boolean(activeChapter.isLocalOnly);
+    if (isLocalWorkspace) {
+      const persisted = webStorage.saveLocalChapters(activeProject.id, chaptersRef.current);
+      if (persisted) {
+        setSaveStatus('local');
+        notify('Đã lưu bản thảo cục bộ.');
+      } else {
+        setSaveStatus('error');
+        notify('Không thể lưu vào bộ nhớ trình duyệt (bộ nhớ đầy hoặc bị chặn).');
+      }
+      return;
+    }
+
     const existingTimer = saveTimersRef.current.get(activeChapter.id);
     if (existingTimer) {
       window.clearTimeout(existingTimer);
@@ -436,7 +488,7 @@ export default function App() {
     } else {
       notify('Đã lưu bản thảo cục bộ.');
     }
-  }, [activeChapter, notify, syncChapterToServer]);
+  }, [activeChapter, activeProject, notify, syncChapterToServer, user]);
 
   // Keyboard shortcuts: Ctrl+S, Ctrl+Shift+F, Escape
   useEffect(() => {
@@ -566,7 +618,7 @@ export default function App() {
       updatedAt: Date.now(),
       isLocalOnly: true,
     };
-    const nextList = [...webStorage.getLocalChapters(originProjectId), localCh];
+    const nextList = [...chaptersRef.current, localCh];
     const persisted = webStorage.saveLocalChapters(originProjectId, nextList);
     if (
       sessionGenRef.current === originSessionGen &&
