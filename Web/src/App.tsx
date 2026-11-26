@@ -70,7 +70,9 @@ export default function App() {
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimersRef = useRef<Map<string, number>>(new Map());
-  const inFlightSavesRef = useRef<Map<string, Promise<'saved' | 'local' | 'error'>>>(new Map());
+  const inFlightSavesRef = useRef<
+    Map<string, { promise: Promise<'saved' | 'local' | 'error'>; sessionGen: number }>
+  >(new Map());
   const queuedSavesRef = useRef<
     Map<string, { chapter: StoryChapter; rev: number; sessionGen: number }>
   >(new Map());
@@ -322,15 +324,20 @@ export default function App() {
         return 'local';
       }
 
-      const existingRunner = inFlightSavesRef.current.get(chapter.id);
-      if (existingRunner) {
+      const existingEntry = inFlightSavesRef.current.get(chapter.id);
+      if (existingEntry && existingEntry.sessionGen === expectedSessionGen) {
         queuedSavesRef.current.set(chapter.id, {
           chapter,
           rev: sentRev,
           sessionGen: expectedSessionGen,
         });
-        return existingRunner;
+        return existingEntry.promise;
       }
+
+      const entry: { promise: Promise<'saved' | 'local' | 'error'>; sessionGen: number } = {
+        promise: Promise.resolve('local'),
+        sessionGen: expectedSessionGen,
+      };
 
       const runner = (async (): Promise<'saved' | 'local' | 'error'> => {
         let current = { chapter, rev: sentRev, sessionGen: expectedSessionGen };
@@ -352,7 +359,10 @@ export default function App() {
             }
             lastOutcome = 'saved';
             const latestRev = chapterEditRevRef.current[current.chapter.id] || 0;
-            if (latestRev === current.rev && !queuedSavesRef.current.has(current.chapter.id)) {
+            const queuedForChapter = queuedSavesRef.current.get(current.chapter.id);
+            const hasQueuedForSession =
+              Boolean(queuedForChapter) && queuedForChapter!.sessionGen === current.sessionGen;
+            if (latestRev === current.rev && !hasQueuedForSession) {
               webStorage.clearChapterDraft(current.chapter.id);
               setChapters((prev) =>
                 prev.map((c) =>
@@ -367,7 +377,10 @@ export default function App() {
             }
             lastOutcome = 'error';
             const latestRev = chapterEditRevRef.current[current.chapter.id] || 0;
-            if (latestRev === current.rev && !queuedSavesRef.current.has(current.chapter.id)) {
+            const queuedForChapter = queuedSavesRef.current.get(current.chapter.id);
+            const hasQueuedForSession =
+              Boolean(queuedForChapter) && queuedForChapter!.sessionGen === current.sessionGen;
+            if (latestRev === current.rev && !hasQueuedForSession) {
               webStorage.saveChapterDraft(current.chapter.id, {
                 title: current.chapter.title,
                 desc: current.chapter.desc || '',
@@ -380,17 +393,20 @@ export default function App() {
           }
 
           const nextQueued = queuedSavesRef.current.get(chapter.id);
-          if (!nextQueued) break;
+          if (!nextQueued || nextQueued.sessionGen !== expectedSessionGen) break;
           queuedSavesRef.current.delete(chapter.id);
           current = nextQueued;
         }
 
         return lastOutcome;
       })().finally(() => {
-        inFlightSavesRef.current.delete(chapter.id);
+        if (inFlightSavesRef.current.get(chapter.id) === entry) {
+          inFlightSavesRef.current.delete(chapter.id);
+        }
       });
 
-      inFlightSavesRef.current.set(chapter.id, runner);
+      entry.promise = runner;
+      inFlightSavesRef.current.set(chapter.id, entry);
       return runner;
     },
     [user]
