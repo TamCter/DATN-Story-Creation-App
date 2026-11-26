@@ -1944,9 +1944,11 @@ export default function AIChatPanel({
       <ScrollView
         ref={scrollRef}
         style={styles.messageList}
+        onScrollBeginDrag={() => {
+          pendingInitialScrollRef.current = false;
+        }}
         onContentSizeChange={() => {
           if (visible && pendingInitialScrollRef.current && isScopeLoaded) {
-            pendingInitialScrollRef.current = false;
             scrollRef.current?.scrollToEnd({ animated: false });
           }
         }}

@@ -463,9 +463,11 @@ export default function GraphScreen() {
       }
       if (activeChapterFilter) {
         const cat = (link.category || '').trim().toUpperCase();
-        const lbl = (link.label || '').trim().toLowerCase();
-        if (CHAPTER_HIDDEN_CATEGORIES.has(cat) || CHAPTER_HIDDEN_LABELS.has(lbl)) {
-          return false;
+        if (cat) {
+          if (CHAPTER_HIDDEN_CATEGORIES.has(cat)) return false;
+        } else {
+          const lbl = (link.label || '').trim().toLowerCase();
+          if (CHAPTER_HIDDEN_LABELS.has(lbl)) return false;
         }
       }
       return true;
@@ -752,7 +754,20 @@ export default function GraphScreen() {
           cleaned.leader = keepIfAllowed(nodeData.leader, 'character');
           cleaned.members = filterAllowedList(nodeData.members, 'character');
           cleaned.seniorMembers = filterAllowedList(nodeData.seniorMembers, 'character');
-          cleaned.subFactions = filterAllowedList(nodeData.subFactions, 'faction');
+          const existingFactionIds = new Set(
+            (initialProject.nodes || [])
+              .filter((n) => n.type === 'faction')
+              .map((n) => n.id)
+          );
+          const allowedSubFactions = parseEventParticipants(nodeData.subFactions).filter((entry) => {
+            const trimmed = entry.trim();
+            if (!trimmed) return false;
+            return (
+              existingFactionIds.has(trimmed) ||
+              allowedNamesByType.faction.has(trimmed.toLocaleLowerCase('vi'))
+            );
+          });
+          cleaned.subFactions = JSON.stringify(allowedSubFactions);
           cleaned.headquarters = keepIfAllowed(nodeData.headquarters, 'location');
           cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
         } else if (t === 'location') {
@@ -1758,51 +1773,72 @@ export default function GraphScreen() {
                     </Text>
                     {(() => {
                       const currentCharSnapshot = isEditingNode && editingNodeId
-                        ? nodes.find((n) => n.id === editingNodeId) || {
-                          id: editingNodeId,
-                          name: formName,
-                          sect: formSect,
-                        }
+                        ? {
+                            ...(nodes.find((n) => n.id === editingNodeId) || {
+                              id: editingNodeId,
+                              name: formName,
+                            }),
+                            sect: formSect,
+                          }
                         : { id: formId, name: formName, sect: formSect };
                       const memberships = getCharacterFactions(
                         currentCharSnapshot,
                         nodes,
                         links
                       );
-                      if (memberships.length === 0) {
-                        return (
-                          <Text style={styles.eventCharacterEmpty}>
-                            Chưa thuộc tổ chức nào
-                          </Text>
-                        );
-                      }
                       return (
-                        <View style={styles.eventCharacterOptions}>
-                          {memberships.map((m) => {
-                            const roleIcon =
-                              m.role === 'Thủ lĩnh'
-                                ? '👑'
-                                : m.role === 'Thành viên cấp cao'
-                                  ? '⭐'
-                                  : '👤';
-                            return (
-                              <View
-                                key={`char-fac-${m.factionName.toLowerCase()}`}
-                                style={[
-                                  styles.eventCharacterChip,
-                                  styles.eventCharacterChipSelected,
-                                ]}>
-                                <Text
-                                  style={[
-                                    styles.eventCharacterChipText,
-                                    styles.eventCharacterChipTextSelected,
-                                  ]}>
-                                  {roleIcon} {m.factionName} · {m.role}
-                                </Text>
-                              </View>
-                            );
-                          })}
-                        </View>
+                        <>
+                          {memberships.length === 0 ? (
+                            <Text style={styles.eventCharacterEmpty}>
+                              Chưa thuộc tổ chức nào
+                            </Text>
+                          ) : (
+                            <View style={styles.eventCharacterOptions}>
+                              {memberships.map((m) => {
+                                const roleIcon =
+                                  m.role === 'Thủ lĩnh'
+                                    ? '👑'
+                                    : m.role === 'Thành viên cấp cao'
+                                      ? '⭐'
+                                      : '👤';
+                                return (
+                                  <View
+                                    key={`char-fac-${m.factionName.toLowerCase()}`}
+                                    style={[
+                                      styles.eventCharacterChip,
+                                      styles.eventCharacterChipSelected,
+                                    ]}>
+                                    <Text
+                                      style={[
+                                        styles.eventCharacterChipText,
+                                        styles.eventCharacterChipTextSelected,
+                                      ]}>
+                                      {roleIcon} {m.factionName} · {m.role}
+                                    </Text>
+                                  </View>
+                                );
+                              })}
+                            </View>
+                          )}
+                          {formSect.trim() ? (
+                            <Pressable
+                              style={{
+                                marginTop: 8,
+                                alignSelf: 'flex-start',
+                                paddingHorizontal: 10,
+                                paddingVertical: 5,
+                                borderRadius: 6,
+                                borderWidth: 1,
+                                borderColor: '#7a3b32',
+                                backgroundColor: 'rgba(180, 68, 52, 0.14)',
+                              }}
+                              onPress={() => setFormSect('')}>
+                              <Text style={{ fontSize: 11, color: '#f0a69c' }}>
+                                ✕ Gỡ liên kết tổ chức cũ ({formSect.trim()})
+                              </Text>
+                            </Pressable>
+                          ) : null}
+                        </>
                       );
                     })()}
                   </View>
@@ -2397,123 +2433,148 @@ export default function GraphScreen() {
                           (!editingNodeId || f.id !== editingNodeId) &&
                           (f.name || '').trim().toLowerCase() !== selfLower
                       );
-                      const existingFacNamesLower = new Set(
-                        otherFactions.map((f) => (f.name || '').trim().toLowerCase())
+                      const otherById = new Map(otherFactions.map((f) => [f.id, f]));
+                      const otherByNameLower = new Map(
+                        otherFactions.map((f) => [(f.name || '').trim().toLowerCase(), f])
                       );
-                      const customSelected = formSubFactions.filter(
-                        (s) =>
-                          s.trim().toLowerCase() !== selfLower &&
-                          !existingFacNamesLower.has(s.trim().toLowerCase())
+                      const resolveSubSelectionKey = (raw: string): string => {
+                        const t = raw.trim();
+                        if (otherById.has(t)) return t;
+                        const byName = otherByNameLower.get(t.toLowerCase());
+                        return byName ? byName.id : t.toLowerCase();
+                      };
+                      const selectedKeySet = new Set(
+                        formSubFactions.map(resolveSubSelectionKey)
                       );
-                      const allNames = [
-                        ...otherFactions.map((f) => f.name),
-                        ...customSelected,
-                      ];
-                      return allNames.length > 0 ? (
-                        <View style={styles.eventCharacterOptions}>
-                          {allNames.map((facName) => {
-                            const keyLower = facName.trim().toLowerCase();
-                            const isSelected = formSubFactions.some(
-                              (s) => s.trim().toLowerCase() === keyLower
-                            );
-                            return (
-                              <Pressable
-                                key={`fac-sub-${keyLower}`}
-                                style={[
-                                  styles.eventCharacterChip,
-                                  isSelected && styles.eventCharacterChipSelected,
-                                ]}
-                                onPress={() =>
-                                  setFormSubFactions((selected) =>
-                                    isSelected
-                                      ? selected.filter(
+                      const customEntries = formSubFactions.filter((raw) => {
+                        const t = raw.trim();
+                        if (!t || t.toLowerCase() === selfLower) return false;
+                        return !otherById.has(t) && !otherByNameLower.has(t.toLowerCase());
+                      });
+
+                      const handleAddCustomSubFaction = () => {
+                        const additions = parseEventParticipants(
+                          formCustomSubFactionInput
+                        ).filter(
+                          (n) =>
+                            n.trim().toLowerCase() !== selfLower &&
+                            (!editingNodeId || n.trim() !== editingNodeId)
+                        );
+                        if (additions.length === 0) return;
+                        setFormSubFactions((prev) => {
+                          const seen = new Set(prev.map(resolveSubSelectionKey));
+                          const next = [...prev];
+                          additions.forEach((rawName) => {
+                            const t = rawName.trim();
+                            const matched = otherById.get(t) || otherByNameLower.get(t.toLowerCase());
+                            const valueToStore = matched ? matched.id : t;
+                            const key = matched ? matched.id : t.toLowerCase();
+                            if (!seen.has(key)) {
+                              seen.add(key);
+                              next.push(valueToStore);
+                            }
+                          });
+                          return next;
+                        });
+                        setFormCustomSubFactionInput('');
+                      };
+
+                      return (
+                        <>
+                          {otherFactions.length > 0 || customEntries.length > 0 ? (
+                            <View style={styles.eventCharacterOptions}>
+                              {otherFactions.map((fac) => {
+                                const isSelected = selectedKeySet.has(fac.id);
+                                return (
+                                  <Pressable
+                                    key={`fac-sub-${fac.id}`}
+                                    style={[
+                                      styles.eventCharacterChip,
+                                      isSelected && styles.eventCharacterChipSelected,
+                                    ]}
+                                    onPress={() =>
+                                      setFormSubFactions((selected) =>
+                                        isSelected
+                                          ? selected.filter(
+                                              (s) => resolveSubSelectionKey(s) !== fac.id
+                                            )
+                                          : [...selected, fac.id]
+                                      )
+                                    }
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: isSelected }}>
+                                    <Text
+                                      style={[
+                                        styles.eventCharacterChipText,
+                                        isSelected && styles.eventCharacterChipTextSelected,
+                                      ]}>
+                                      {isSelected ? '✓ ' : ''}🏢 {fac.name}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                              {customEntries.map((customName) => {
+                                const keyLower = customName.trim().toLowerCase();
+                                return (
+                                  <Pressable
+                                    key={`fac-sub-custom-${keyLower}`}
+                                    style={[
+                                      styles.eventCharacterChip,
+                                      styles.eventCharacterChipSelected,
+                                    ]}
+                                    onPress={() =>
+                                      setFormSubFactions((selected) =>
+                                        selected.filter(
                                           (s) => s.trim().toLowerCase() !== keyLower
                                         )
-                                      : [...selected, facName]
-                                  )
-                                }
-                                accessibilityRole="checkbox"
-                                accessibilityState={{ checked: isSelected }}>
-                                <Text
-                                  style={[
-                                    styles.eventCharacterChipText,
-                                    isSelected && styles.eventCharacterChipTextSelected,
-                                  ]}>
-                                  {isSelected ? '✓ ' : ''}🏢 {facName}
-                                </Text>
-                              </Pressable>
-                            );
-                          })}
-                        </View>
-                      ) : (
-                        <Text style={styles.eventCharacterEmpty}>
-                          Chưa có tổ chức khác. Nhập tên tổ chức trực thuộc bên dưới để tự tạo.
-                        </Text>
+                                      )
+                                    }
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{ checked: true }}>
+                                    <Text
+                                      style={[
+                                        styles.eventCharacterChipText,
+                                        styles.eventCharacterChipTextSelected,
+                                      ]}>
+                                      ✓ 🏢 {customName}
+                                    </Text>
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
+                          ) : (
+                            <Text style={styles.eventCharacterEmpty}>
+                              Chưa có tổ chức khác. Nhập tên tổ chức trực thuộc bên dưới để tự tạo.
+                            </Text>
+                          )}
+                          <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                            <TextInput
+                              style={[styles.modalInput, { flex: 1 }]}
+                              value={formCustomSubFactionInput}
+                              onChangeText={setFormCustomSubFactionInput}
+                              placeholder="VD: Đội Phản Ứng Nhanh, Phân hội Bắc..."
+                              placeholderTextColor="#665f52"
+                              onSubmitEditing={handleAddCustomSubFaction}
+                            />
+                            <Pressable
+                              style={[
+                                styles.eventCharacterChip,
+                                styles.eventCharacterChipSelected,
+                                { justifyContent: 'center', paddingHorizontal: 14 },
+                              ]}
+                              onPress={handleAddCustomSubFaction}>
+                              <Text
+                                style={[
+                                  styles.eventCharacterChipText,
+                                  styles.eventCharacterChipTextSelected,
+                                ]}>
+                                + Thêm
+                              </Text>
+                            </Pressable>
+                          </View>
+                        </>
                       );
                     })()}
-                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
-                      <TextInput
-                        style={[styles.modalInput, { flex: 1 }]}
-                        value={formCustomSubFactionInput}
-                        onChangeText={setFormCustomSubFactionInput}
-                        placeholder="VD: Đội Phản Ứng Nhanh, Phân hội Bắc..."
-                        placeholderTextColor="#665f52"
-                        onSubmitEditing={() => {
-                          const selfLower = formName.trim().toLowerCase();
-                          const additions = parseEventParticipants(
-                            formCustomSubFactionInput
-                          ).filter((n) => n.trim().toLowerCase() !== selfLower);
-                          if (additions.length === 0) return;
-                          setFormSubFactions((prev) => {
-                            const seen = new Set(prev.map((s) => s.trim().toLowerCase()));
-                            const next = [...prev];
-                            additions.forEach((name) => {
-                              const key = name.trim().toLowerCase();
-                              if (!seen.has(key)) {
-                                seen.add(key);
-                                next.push(name);
-                              }
-                            });
-                            return next;
-                          });
-                          setFormCustomSubFactionInput('');
-                        }}
-                      />
-                      <Pressable
-                        style={[
-                          styles.eventCharacterChip,
-                          styles.eventCharacterChipSelected,
-                          { justifyContent: 'center', paddingHorizontal: 14 },
-                        ]}
-                        onPress={() => {
-                          const selfLower = formName.trim().toLowerCase();
-                          const additions = parseEventParticipants(
-                            formCustomSubFactionInput
-                          ).filter((n) => n.trim().toLowerCase() !== selfLower);
-                          if (additions.length === 0) return;
-                          setFormSubFactions((prev) => {
-                            const seen = new Set(prev.map((s) => s.trim().toLowerCase()));
-                            const next = [...prev];
-                            additions.forEach((name) => {
-                              const key = name.trim().toLowerCase();
-                              if (!seen.has(key)) {
-                                seen.add(key);
-                                next.push(name);
-                              }
-                            });
-                            return next;
-                          });
-                          setFormCustomSubFactionInput('');
-                        }}>
-                        <Text
-                          style={[
-                            styles.eventCharacterChipText,
-                            styles.eventCharacterChipTextSelected,
-                          ]}>
-                          + Thêm
-                        </Text>
-                      </Pressable>
-                    </View>
                   </View>
 
                   <View style={styles.modalInputGroup}>
@@ -3311,12 +3372,15 @@ export default function GraphScreen() {
                       (a, b) => {
                         const timeA = getDateSortKey(a.time);
                         const timeB = getDateSortKey(b.time);
+                        if (timeA && !timeB) return -1;
+                        if (!timeA && timeB) return 1;
                         if (timeA && timeB && timeA !== timeB) {
                           return timeA.localeCompare(timeB);
                         }
                         const seqA = Number(a.sequenceOrder) || Number.MAX_SAFE_INTEGER;
                         const seqB = Number(b.sequenceOrder) || Number.MAX_SAFE_INTEGER;
-                        return seqA - seqB;
+                        if (seqA !== seqB) return seqA - seqB;
+                        return (a.name || '').localeCompare(b.name || '', 'vi');
                       }
                     );
 

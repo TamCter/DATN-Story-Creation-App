@@ -256,13 +256,30 @@ export function getCharacterFactions(
     }
   };
 
+  const charNodes = allNodes.filter((n) => n.type === 'character');
+  const charById = new Map<string, StoryNode>();
+  const charsByNameLower = new Map<string, StoryNode[]>();
+  charNodes.forEach((c) => {
+    charById.set(c.id, c);
+    const nameKey = (c.name || '').trim().toLowerCase();
+    if (nameKey) {
+      const list = charsByNameLower.get(nameKey) || [];
+      list.push(c);
+      charsByNameLower.set(nameKey, list);
+    }
+  });
+
   const matchesChar = (raw?: string): boolean => {
     const trimmed = String(raw || '').trim();
     if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return false;
-    return (
-      (Boolean(charNameLower) && trimmed.toLowerCase() === charNameLower) ||
-      (Boolean(charId) && trimmed === charId)
-    );
+    // 1. Ưu tiên khớp chính xác theo ID trước
+    if (charById.has(trimmed)) {
+      return Boolean(charId) && trimmed === charId;
+    }
+    // 2. Chỉ fallback sang khớp tên khi tên khớp duy nhất 1 nhân vật (tránh gán nhầm khi trùng tên)
+    if (!charNameLower || trimmed.toLowerCase() !== charNameLower) return false;
+    const sameNameChars = charsByNameLower.get(charNameLower) || [];
+    return sameNameChars.length <= 1;
   };
 
   // 1. Từ trường sect trên chính nhân vật

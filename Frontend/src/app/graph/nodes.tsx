@@ -649,7 +649,6 @@ export default function NodesDetailScreen() {
                         );
                       })()
                     : null}
-                  {node.ruler ? <Text style={styles.attrTag}>🏰 Cai quản: {node.ruler}</Text> : null}
                   {node.leader ? <Text style={styles.attrTag}>👑 Thủ lĩnh: {node.leader}</Text> : null}
                   {node.headquarters ? (
                     <Text style={styles.attrTag}>🏢 Trụ sở: {node.headquarters}</Text>
@@ -967,6 +966,24 @@ export default function NodesDetailScreen() {
                         </View>
                       );
                     })()}
+                    {formSect.trim() ? (
+                      <Pressable
+                        style={{
+                          marginTop: 8,
+                          alignSelf: 'flex-start',
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#7a3b32',
+                          backgroundColor: 'rgba(180, 68, 52, 0.14)',
+                        }}
+                        onPress={() => setFormSect('')}>
+                        <Text style={{ fontSize: 11, color: '#f0a69c' }}>
+                          ✕ Gỡ liên kết tổ chức cũ ({formSect.trim()})
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
 
                   {/* Owned Weapons / Items (Multi-select) */}

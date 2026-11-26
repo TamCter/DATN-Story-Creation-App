@@ -78,7 +78,7 @@ Hệ thống tự động sinh cạnh quan hệ trên đồ thị Neo4j theo đ�
 - Tổ chức (faction):
   + Thủ lĩnh (faction.leader -> LEADER_OF): tối đa 1 nhân vật (nếu tổ chức đã có thủ lĩnh thì không tạo/gán thêm thủ lĩnh thứ 2).
   + Trụ sở (faction.headquarters -> HEADQUARTERS): tối đa 1 địa điểm (nếu tổ chức đã có trụ sở thì KHÔNG tạo địa điểm mới làm trụ sở thứ 2 hay nối thêm cạnh trụ sở).
-  + Thành viên cấp cao (faction.seniorMembers -> SENIOR_MEMBER_OF), Thành viên (faction.members -> MEMBER_OF), Tổ chức trực thuộc (faction.subFactions -> SUB_FACTION_OF): có thể nhiều thực thể (phân tách bằng dấu phẩy).
+  + Thành viên cấp cao (faction.seniorMembers -> SENIOR_MEMBER_OF), Thành viên (faction.members -> MEMBER_OF), Tổ chức trực thuộc (faction.subFactions -> SUB_FACTION_OF, chiều liên kết từ tổ chức con làm source tới tổ chức cha làm target với nhãn "Trực thuộc"): có thể nhiều thực thể (phân tách bằng dấu phẩy). Khi tạo tổ chức hoặc nối quan hệ giữa các tổ chức có sẵn, dùng SUB_FACTION_OF (source = tổ chức con, target = tổ chức cha).
   + Biến cố trạng thái (faction.statusEvent -> STATUS_EVENT): tối đa 1 sự kiện và CHỈ điền khi status là "Tạm ngừng" hoặc "Suy tàn".
 - Sự kiện (event):
   + Địa điểm diễn ra (event.location -> EVENT_LOCATION): tối đa 1 địa điểm.
@@ -386,8 +386,19 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 : null;
 
             if (Array.isArray(rawLinks) && rawLinks.length > 0) {
+              const hasRealValue = (val) => {
+                const t = String(val ?? '').trim();
+                return Boolean(t) && !PLACEHOLDER_VALUE_PATTERN.test(t);
+              };
               const seenKeys = new Set();
+              const reservedHqFactions = new Set();
+              const reservedLeaderFactions = new Set();
+              const reservedRulerLocations = new Set();
+              const reservedBirthplaceChars = new Set();
+              const reservedOriginItems = new Set();
               const resolvedLinks = [];
+              let rejectedCount = 0;
+
               for (const rawLink of rawLinks.slice(0, 5)) {
                 if (!rawLink || typeof rawLink !== 'object' || Array.isArray(rawLink)) continue;
                 const srcNode = resolveNode(rawLink.source || rawLink.sourceName);
@@ -397,10 +408,6 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 const label = typeof rawLink.label === 'string' && rawLink.label.trim()
                   ? rawLink.label.trim()
                   : 'Liên kết';
-                const dedupKey = `${srcNode.id}::${tgtNode.id}::${label.toLocaleLowerCase('vi')}`;
-                if (seenKeys.has(dedupKey)) continue;
-                seenKeys.add(dedupKey);
-
                 const rawTone = typeof rawLink.tone === 'string' ? rawLink.tone.trim().toLowerCase() : '';
                 const categoryUpper = typeof rawLink.category === 'string'
                   ? rawLink.category.trim().toUpperCase()
@@ -408,26 +415,68 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
 
                 // Chặn các kiểu liên kết không tồn tại trên app hoặc vi phạm ràng buộc 1-1 của node hiện có
                 if (categoryUpper === 'INVOLVES_ITEM' || categoryUpper === 'INVOLVES_FACTION') {
+                  rejectedCount += 1;
                   continue;
                 }
+                let hqFacId = null;
                 if (categoryUpper === 'HEADQUARTERS') {
                   const facNode = srcNode.type === 'faction' ? srcNode : tgtNode.type === 'faction' ? tgtNode : null;
-                  if (facNode && String(facNode.headquarters || '').trim()) continue;
+                  if (facNode) {
+                    hqFacId = String(facNode.id);
+                    if (hasRealValue(facNode.headquarters) || reservedHqFactions.has(hqFacId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
                 }
+                let leaderFacId = null;
                 if (categoryUpper === 'LEADER_OF') {
                   const facNode = tgtNode.type === 'faction' ? tgtNode : srcNode.type === 'faction' ? srcNode : null;
-                  if (facNode && String(facNode.leader || '').trim()) continue;
+                  if (facNode) {
+                    leaderFacId = String(facNode.id);
+                    if (hasRealValue(facNode.leader) || reservedLeaderFactions.has(leaderFacId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
                 }
+                let rulerLocId = null;
                 if (categoryUpper === 'RULER_OF') {
                   const locNode = tgtNode.type === 'location' ? tgtNode : srcNode.type === 'location' ? srcNode : null;
-                  if (locNode && String(locNode.ruler || '').trim()) continue;
+                  if (locNode) {
+                    rulerLocId = String(locNode.id);
+                    if (hasRealValue(locNode.ruler) || reservedRulerLocations.has(rulerLocId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
                 }
-                if (categoryUpper === 'BIRTHPLACE' && srcNode.type === 'character' && String(srcNode.birthplace || '').trim()) {
-                  continue;
+                let bpCharId = null;
+                if (categoryUpper === 'BIRTHPLACE' && srcNode.type === 'character') {
+                  bpCharId = String(srcNode.id);
+                  if (hasRealValue(srcNode.birthplace) || reservedBirthplaceChars.has(bpCharId)) {
+                    rejectedCount += 1;
+                    continue;
+                  }
                 }
-                if (categoryUpper === 'ORIGIN' && srcNode.type === 'item' && String(srcNode.origin || '').trim()) {
-                  continue;
+                let originItemId = null;
+                if (categoryUpper === 'ORIGIN' && srcNode.type === 'item') {
+                  originItemId = String(srcNode.id);
+                  if (hasRealValue(srcNode.origin) || reservedOriginItems.has(originItemId)) {
+                    rejectedCount += 1;
+                    continue;
+                  }
                 }
+
+                const dedupKey = `${srcNode.id}::${tgtNode.id}::${label.toLocaleLowerCase('vi')}`;
+                if (seenKeys.has(dedupKey)) continue;
+                seenKeys.add(dedupKey);
+
+                if (hqFacId) reservedHqFactions.add(hqFacId);
+                if (leaderFacId) reservedLeaderFactions.add(leaderFacId);
+                if (rulerLocId) reservedRulerLocations.add(rulerLocId);
+                if (bpCharId) reservedBirthplaceChars.add(bpCharId);
+                if (originItemId) reservedOriginItems.add(originItemId);
 
                 resolvedLinks.push({
                   source: String(srcNode.id),
@@ -442,8 +491,8 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 });
               }
 
-              if (resolvedLinks.length > 0) {
-                return { linkDataList: resolvedLinks, start, end: end + 1 };
+              if (resolvedLinks.length > 0 || rejectedCount > 0) {
+                return { linkDataList: resolvedLinks, rejectedCount, start, end: end + 1 };
               }
             }
           } catch {
@@ -778,23 +827,35 @@ async function chatWithAI(req, res, next) {
 
     if (effectiveNodes.length > 0) {
       const MAX_CHAT_CTX_NODES = 120;
+      const cleanMetaVal = (val) => {
+        const t = String(val ?? '').trim();
+        return t && !PLACEHOLDER_VALUE_PATTERN.test(t) ? t : '';
+      };
       const nodesSummary = effectiveNodes
         .slice(0, MAX_CHAT_CTX_NODES)
         .map((n) => {
           const extras = [];
           if (n.type === 'faction') {
-            if (n.headquarters) extras.push(`đã có trụ sở: ${n.headquarters}`);
-            if (n.leader) extras.push(`đã có thủ lĩnh: ${n.leader}`);
+            const hq = cleanMetaVal(n.headquarters);
+            const leader = cleanMetaVal(n.leader);
+            if (hq) extras.push(`đã có trụ sở: ${hq}`);
+            if (leader) extras.push(`đã có thủ lĩnh: ${leader}`);
           } else if (n.type === 'location') {
-            if (n.ruler) extras.push(`đang do ${n.ruler} cai quản`);
+            const ruler = cleanMetaVal(n.ruler);
+            if (ruler) extras.push(`đang do ${ruler} cai quản`);
           } else if (n.type === 'item') {
-            if (n.holderOrLocation) extras.push(`đang do ${n.holderOrLocation} nắm giữ`);
-            if (n.origin) extras.push(`nguồn gốc: ${n.origin}`);
+            const holder = cleanMetaVal(n.holderOrLocation);
+            const origin = cleanMetaVal(n.origin);
+            if (holder) extras.push(`đang do ${holder} nắm giữ`);
+            if (origin) extras.push(`nguồn gốc: ${origin}`);
           } else if (n.type === 'character') {
-            if (n.birthplace) extras.push(`nơi sinh: ${n.birthplace}`);
+            const bp = cleanMetaVal(n.birthplace);
+            if (bp) extras.push(`nơi sinh: ${bp}`);
           } else if (n.type === 'event') {
-            if (n.location) extras.push(`địa điểm: ${n.location}`);
-            if (n.time) extras.push(`ngày: ${n.time}`);
+            const loc = cleanMetaVal(n.location);
+            const time = cleanMetaVal(n.time);
+            if (loc) extras.push(`địa điểm: ${loc}`);
+            if (time) extras.push(`ngày: ${time}`);
           }
           const extraStr = extras.length > 0 ? ` — ${extras.join('; ')}` : '';
           return `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}${extraStr}`;
@@ -967,8 +1028,16 @@ async function chatWithAI(req, res, next) {
         cleanMessage = sanitizeAIChatDisplayText(
           [beforeJson, afterJson].filter(Boolean).join('\n\n')
         );
-        if (!cleanMessage) {
-          cleanMessage = `🔗 Tôi đã thiết lập ${linkDataList.length > 1 ? `${linkDataList.length} mối quan hệ` : `mối quan hệ "${linkDataList[0].label}"`}. Bạn có thể xem trước và lưu vào đồ thị bên dưới!`;
+        if (linkDataList.length > 0) {
+          if (!cleanMessage) {
+            cleanMessage = `🔗 Tôi đã thiết lập ${linkDataList.length > 1 ? `${linkDataList.length} mối quan hệ` : `mối quan hệ "${linkDataList[0].label}"`}. Bạn có thể xem trước và lưu vào đồ thị bên dưới!`;
+          }
+        } else if (linkResponse.rejectedCount > 0) {
+          const unsupportedNote =
+            '⚠️ Mối quan hệ AI đề xuất không được ứng dụng hỗ trợ hoặc vi phạm ràng buộc 1-1 hiện có (ví dụ: tổ chức đã có trụ sở/thủ lĩnh, hoặc nối trực tiếp sự kiện với vật phẩm/tổ chức).';
+          cleanMessage = cleanMessage
+            ? `${cleanMessage}\n\n${unsupportedNote}`
+            : unsupportedNote;
         }
       }
     }
