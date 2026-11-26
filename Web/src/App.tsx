@@ -5,6 +5,7 @@ import {
   ChevronUp,
   Cloud,
   CloudOff,
+  FileText,
   Maximize2,
   Minimize2,
   Minus,
@@ -29,6 +30,7 @@ import type {
   EditorPreferences,
   EditorTheme,
   PageWidthMode,
+  PaperStyle,
   StoryChapter,
   StoryLink,
   StoryNode,
@@ -539,6 +541,12 @@ export default function App() {
     setPrefs((p) => ({ ...p, theme: next }));
   };
 
+  const cyclePaperStyle = () => {
+    const order: PaperStyle[] = ['auto', 'white', 'sepia'];
+    const next = order[(order.indexOf(prefs.paperStyle) + 1) % order.length];
+    setPrefs((p) => ({ ...p, paperStyle: next }));
+  };
+
   const cycleFont = () => {
     const order: EditorFont[] = ['serif', 'sans', 'mono'];
     const next = order[(order.indexOf(prefs.font) + 1) % order.length];
@@ -555,6 +563,12 @@ export default function App() {
     dark: 'Nền đen',
     sepia: 'Giấy vàng',
     light: 'Sáng',
+  };
+
+  const paperLabel: Record<PaperStyle, string> = {
+    auto: 'Giấy theo nền',
+    white: 'Giấy trắng',
+    sepia: 'Giấy vàng',
   };
 
   const fontLabel: Record<EditorFont, string> = {
@@ -616,7 +630,7 @@ export default function App() {
 
             <button
               className="icon-btn"
-              title="Đổi giao diện (Giấy vàng / Sáng / Tối)"
+              title="Đổi giao diện nền (Nền đen / Giấy vàng / Sáng)"
               onClick={cycleTheme}
             >
               {prefs.theme === 'dark' ? (
@@ -627,6 +641,15 @@ export default function App() {
                 <ScrollText size={15} />
               )}
               <span>{themeLabel[prefs.theme]}</span>
+            </button>
+
+            <button
+              className={`icon-btn ${prefs.paperStyle !== 'auto' ? 'active' : ''}`}
+              title="Đổi màu trang giấy viết (Giấy theo nền / Giấy trắng / Giấy vàng)"
+              onClick={cyclePaperStyle}
+            >
+              <FileText size={14} />
+              <span>{paperLabel[prefs.paperStyle]}</span>
             </button>
 
             <button className="icon-btn" title="Đổi kiểu chữ" onClick={cycleFont}>
@@ -754,7 +777,11 @@ export default function App() {
 
         <div className="editor-scroll-area">
           {activeChapter ? (
-            <article className={`paper-sheet width-${prefs.pageWidth}`}>
+            <article
+              className={`paper-sheet width-${prefs.pageWidth}${
+                prefs.paperStyle !== 'auto' ? ` paper-${prefs.paperStyle}` : ''
+              }`}
+            >
               <div className="chapter-eyebrow">
                 <span>
                   {activeProject?.title} · Chương {activeChapter.chapterNumber}

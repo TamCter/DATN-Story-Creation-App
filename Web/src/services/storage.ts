@@ -20,6 +20,7 @@ const KEYS = {
 
 export const DEFAULT_PREFS: EditorPreferences = {
   theme: 'dark',
+  paperStyle: 'auto',
   font: 'serif',
   fontSize: 18,
   lineHeight: 1.85,

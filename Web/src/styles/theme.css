@@ -499,6 +499,35 @@ button {
   max-width: 1040px;
 }
 
+/* Tùy chọn giữ trang giấy màu trắng hoặc giấy vàng ngay cả khi nền ngoài là màu đen */
+.paper-sheet.paper-white {
+  --bg-paper: #ffffff;
+  --bg-elevated: #f3f4f6;
+  --bg-hover: rgba(15, 23, 42, 0.06);
+  --border-subtle: #e5e7eb;
+  --text-primary: #141414;
+  --text-secondary: #4b5563;
+  --text-muted: #7c8594;
+  --accent: #b07a22;
+  background: var(--bg-paper);
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.paper-sheet.paper-sepia {
+  --bg-paper: #fbf8f1;
+  --bg-elevated: #f2eadb;
+  --bg-hover: rgba(120, 86, 46, 0.08);
+  --border-subtle: #e3d8c3;
+  --text-primary: #2a2118;
+  --text-secondary: #625343;
+  --text-muted: #8a7966;
+  --accent: #9c6a1f;
+  background: var(--bg-paper);
+  color: var(--text-primary);
+  border-color: rgba(235, 220, 195, 0.25);
+}
+
 .chapter-eyebrow {
   font-size: 12px;
   font-weight: 600;

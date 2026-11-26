@@ -103,11 +103,13 @@ export interface AIChatMessage {
 }
 
 export type EditorTheme = 'sepia' | 'light' | 'dark';
+export type PaperStyle = 'auto' | 'white' | 'sepia';
 export type EditorFont = 'serif' | 'sans' | 'mono';
 export type PageWidthMode = 'narrow' | 'medium' | 'wide';
 
 export interface EditorPreferences {
   theme: EditorTheme;
+  paperStyle: PaperStyle;
   font: EditorFont;
   fontSize: number;
   lineHeight: number;
