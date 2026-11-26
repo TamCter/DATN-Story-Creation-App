@@ -122,6 +122,39 @@ async function runQuery(cypherQuery, params = {}, mode = 'WRITE') {
 }
 
 /**
+ * Chạy nhiều câu lệnh Cypher trong cùng một WRITE transaction có retry tự động
+ * @param {(runTxQuery: (cypherQuery: string, params?: object) => Promise<Array<object>>) => Promise<any>} work
+ */
+async function runWriteTransaction(work) {
+  if (!driver) {
+    throw new Error('Neo4j Driver chưa được khởi tạo. Vui lòng kiểm tra cấu hình.');
+  }
+
+  const session = driver.session({
+    database: database || undefined,
+    defaultAccessMode: neo4j.session.WRITE,
+  });
+
+  try {
+    return await session.executeWrite(async (tx) => {
+      const runTxQuery = async (cypherQuery, params = {}) => {
+        const result = await tx.run(cypherQuery, params);
+        return result.records.map((record) => {
+          const obj = {};
+          record.keys.forEach((key) => {
+            obj[key] = toNative(record.get(key));
+          });
+          return obj;
+        });
+      };
+      return work(runTxQuery);
+    });
+  } finally {
+    await session.close();
+  }
+}
+
+/**
  * Kiểm tra kết nối và tạo các ràng buộc/chỉ mục cơ bản (Constraints / Indexes)
  */
 async function testConnection() {
@@ -176,6 +209,7 @@ module.exports = {
   driver,
   neo4j,
   runQuery,
+  runWriteTransaction,
   toNative,
   testConnection,
   closeDriver,
