@@ -16,6 +16,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   getFactionMembers,
+  getFactionRuledLocations,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -425,6 +426,23 @@ export default function FactionsScreen() {
                       <Text style={styles.metaValue}>{extra.headquarters}</Text>
                     </View>
                   )}
+
+                  {(() => {
+                    const ruledLocations = getFactionRuledLocations(
+                      faction,
+                      currentProject.nodes,
+                      currentProject.links
+                    );
+                    return ruledLocations.length > 0 ? (
+                      <View style={styles.metaItem}>
+                        <Text style={styles.metaIcon}>🏰</Text>
+                        <Text style={styles.metaLabel}>Cai quản:</Text>
+                        <Text style={[styles.metaValue, { flex: 1 }]}>
+                          {ruledLocations.join(', ')}
+                        </Text>
+                      </View>
+                    ) : null;
+                  })()}
 
                   {extra.motto && (
                     <View style={styles.metaItem}>

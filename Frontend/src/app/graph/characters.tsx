@@ -13,7 +13,9 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
   calculateAgeFromDob,
+  formatCharacterFactions,
   formatDateDDMMYYYY,
+  getCharacterFactions,
   getCharacterOwnedItems,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
@@ -303,7 +305,18 @@ export default function CharactersScreen() {
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>🏛 Tổ chức:</Text>
-                    <Text style={styles.metaValue}>{char.sect || extra.sect}</Text>
+                    <Text style={[styles.metaValue, { flex: 1 }]}>
+                      {(() => {
+                        const memberships = getCharacterFactions(
+                          char,
+                          currentProject.nodes,
+                          currentProject.links
+                        );
+                        return memberships.length > 0
+                          ? formatCharacterFactions(memberships)
+                          : extra.sect || 'Chưa có';
+                      })()}
+                    </Text>
                   </View>
                   <View style={styles.metaItem}>
                     <Text style={styles.metaLabel}>⚡ Trạng thái:</Text>

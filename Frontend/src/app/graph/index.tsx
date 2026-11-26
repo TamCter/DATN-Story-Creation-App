@@ -30,12 +30,17 @@ import {
   eventBelongsToChapter,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatCharacterFactions,
   formatDateDDMMYYYY,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterFactions,
   getCharacterOwnedItems,
   getDateSortKey,
   getFactionMembers,
+  getFactionRuledLocations,
+  getItemHolders,
+  getLocationFactions,
   getProjectChapters,
   INITIAL_PROJECTS,
   parseEventParticipants,
@@ -1401,9 +1406,24 @@ return (
                             ) : null;
                           })()
                         : null}
-                      {selectedNode.sect ? (
-                        <Text style={styles.previewTag}>🏛️ {selectedNode.sect}</Text>
-                      ) : null}
+                      {selectedNode.type === 'character'
+                        ? (() => {
+                            const memberships = getCharacterFactions(selectedNode, nodes, links);
+                            return memberships.length > 0 ? (
+                              <Text style={styles.previewTag}>
+                                🏛️ {formatCharacterFactions(memberships)}
+                              </Text>
+                            ) : null;
+                          })()
+                        : null}
+                      {selectedNode.type === 'item'
+                        ? (() => {
+                            const holders = getItemHolders(selectedNode, nodes, links);
+                            return holders.length > 0 ? (
+                              <Text style={styles.previewTag}>👤 {holders.join(', ')}</Text>
+                            ) : null;
+                          })()
+                        : null}
                       {selectedNode.rarity ? (
                         <Text style={styles.previewTag}>💎 {selectedNode.rarity}</Text>
                       ) : null}
@@ -1694,6 +1714,25 @@ return (
                                 allowCustom={true}
                                 customPlaceholder="Nhập tên tổ chức mới để tự tạo node..."
                               />
+                              {isEditingNode && editingNodeId
+                                ? (() => {
+                                    const editingChar = nodes.find((n) => n.id === editingNodeId);
+                                    if (!editingChar) return null;
+                                    const memberships = getCharacterFactions(editingChar, nodes, links);
+                                    if (memberships.length === 0) return null;
+                                    return (
+                                      <Text
+                                        style={{
+                                          color: '#b8a98a',
+                                          fontSize: 11,
+                                          marginTop: 5,
+                                          lineHeight: 16,
+                                        }}>
+                                        🏛️ Hiện thuộc: {formatCharacterFactions(memberships)}
+                                      </Text>
+                                    );
+                                  })()
+                                : null}
                             </View>
                           </View>
 
@@ -2700,12 +2739,18 @@ return (
                                     </View>
                                   );
                                 })()}
-                                {selectedNode.sect ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Tổ chức:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.sect}</Text>
-                                  </View>
-                                ) : null}
+                                {(() => {
+                                  const memberships = getCharacterFactions(selectedNode, nodes, links);
+                                  if (memberships.length === 0) return null;
+                                  return (
+                                    <View style={styles.detailRowItem}>
+                                      <Text style={styles.detailItemKey}>Tổ chức / Nhóm:</Text>
+                                      <Text style={styles.detailItemVal}>
+                                        🏛️ {formatCharacterFactions(memberships)}
+                                      </Text>
+                                    </View>
+                                  );
+                                })()}
                                 {selectedNode.personality ? (
                                   <View style={styles.detailRowItem}>
                                     <Text style={styles.detailItemKey}>Tính cách:</Text>
@@ -2743,12 +2788,16 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.power}</Text>
                                   </View>
                                 ) : null}
-                                {selectedNode.holderOrLocation ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Người nắm giữ:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.holderOrLocation}</Text>
-                                  </View>
-                                ) : null}
+                                {(() => {
+                                  const holders = getItemHolders(selectedNode, nodes, links);
+                                  if (holders.length === 0) return null;
+                                  return (
+                                    <View style={styles.detailRowItem}>
+                                      <Text style={styles.detailItemKey}>Người nắm giữ:</Text>
+                                      <Text style={styles.detailItemVal}>👤 {holders.join(', ')}</Text>
+                                    </View>
+                                  );
+                                })()}
                               </>
                             )}
 
@@ -2772,12 +2821,33 @@ return (
                                     <Text style={styles.detailItemVal}>{selectedNode.dangerLevel}</Text>
                                   </View>
                                 ) : null}
-                                {selectedNode.ruler ? (
-                                  <View style={styles.detailRowItem}>
-                                    <Text style={styles.detailItemKey}>Cai quản:</Text>
-                                    <Text style={styles.detailItemVal}>{selectedNode.ruler}</Text>
-                                  </View>
-                                ) : null}
+                                {(() => {
+                                  const { rulers, headquartersOf } = getLocationFactions(
+                                    selectedNode,
+                                    nodes,
+                                    links
+                                  );
+                                  return (
+                                    <>
+                                      {rulers.length > 0 ? (
+                                        <View style={styles.detailRowItem}>
+                                          <Text style={styles.detailItemKey}>Cai quản:</Text>
+                                          <Text style={styles.detailItemVal}>
+                                            👑 {rulers.join(', ')}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                      {headquartersOf.length > 0 ? (
+                                        <View style={styles.detailRowItem}>
+                                          <Text style={styles.detailItemKey}>Trụ sở của:</Text>
+                                          <Text style={styles.detailItemVal}>
+                                            🏛️ {headquartersOf.join(', ')}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                    </>
+                                  );
+                                })()}
                               </>
                             )}
 
@@ -2791,6 +2861,11 @@ return (
                                 ) : null}
                                 {(() => {
                                   const { seniorMembers, members } = getFactionMembers(
+                                    selectedNode,
+                                    nodes,
+                                    links
+                                  );
+                                  const ruledLocations = getFactionRuledLocations(
                                     selectedNode,
                                     nodes,
                                     links
@@ -2810,6 +2885,14 @@ return (
                                           <Text style={styles.detailItemKey}>Thành viên:</Text>
                                           <Text style={styles.detailItemVal}>
                                             👤 {members.join(', ')}
+                                          </Text>
+                                        </View>
+                                      ) : null}
+                                      {ruledLocations.length > 0 ? (
+                                        <View style={styles.detailRowItem}>
+                                          <Text style={styles.detailItemKey}>Cai quản:</Text>
+                                          <Text style={styles.detailItemVal}>
+                                            🏰 {ruledLocations.join(', ')}
                                           </Text>
                                         </View>
                                       ) : null}

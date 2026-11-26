@@ -216,6 +216,264 @@ export function getFactionMembers(
   return { seniorMembers, members };
 }
 
+export interface CharacterFactionMembership {
+  factionName: string;
+  role: 'Thủ lĩnh' | 'Thành viên cấp cao' | 'Thành viên';
+}
+
+const FACTION_ROLE_PRIORITY: Record<CharacterFactionMembership['role'], number> = {
+  'Thủ lĩnh': 3,
+  'Thành viên cấp cao': 2,
+  'Thành viên': 1,
+};
+
+export function getCharacterFactions(
+  character: Pick<StoryNode, 'id' | 'name' | 'sect'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): CharacterFactionMembership[] {
+  const charId = (character.id || '').trim();
+  const charNameLower = (character.name || '').trim().toLowerCase();
+  const factionNodes = allNodes.filter((n) => n.type === 'faction');
+  const facById = new Map<string, StoryNode>();
+  const facByNameLower = new Map<string, StoryNode>();
+  factionNodes.forEach((f) => {
+    facById.set(f.id, f);
+    facByNameLower.set((f.name || '').trim().toLowerCase(), f);
+  });
+
+  const bestByFactionKey = new Map<string, CharacterFactionMembership>();
+  const upsertMembership = (rawFactionName: string | undefined, role: CharacterFactionMembership['role']) => {
+    const trimmed = String(rawFactionName || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = facById.get(trimmed) || facByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    const existing = bestByFactionKey.get(key);
+    if (!existing || FACTION_ROLE_PRIORITY[role] > FACTION_ROLE_PRIORITY[existing.role]) {
+      bestByFactionKey.set(key, { factionName: displayName, role });
+    }
+  };
+
+  const matchesChar = (raw?: string): boolean => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return false;
+    return (
+      (Boolean(charNameLower) && trimmed.toLowerCase() === charNameLower) ||
+      (Boolean(charId) && trimmed === charId)
+    );
+  };
+
+  // 1. Từ trường sect trên chính nhân vật
+  if (character.sect) {
+    upsertMembership(character.sect, 'Thành viên');
+  }
+
+  // 2. Từ các node tổ chức (leader, seniorMembers, members)
+  factionNodes.forEach((fac) => {
+    if (matchesChar(fac.leader)) {
+      upsertMembership(fac.name, 'Thủ lĩnh');
+    }
+    if (parseEventParticipants(fac.seniorMembers).some(matchesChar)) {
+      upsertMembership(fac.name, 'Thành viên cấp cao');
+    }
+    if (parseEventParticipants(fac.members).some(matchesChar)) {
+      upsertMembership(fac.name, 'Thành viên');
+    }
+  });
+
+  // 3. Từ các liên kết đồ thị (LEADER_OF, SENIOR_MEMBER_OF, MEMBER_OF)
+  allLinks.forEach((link) => {
+    const cat = (link.category || '').toUpperCase();
+    if (cat !== 'LEADER_OF' && cat !== 'SENIOR_MEMBER_OF' && cat !== 'MEMBER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (charId && sourceId === charId && targetId) {
+      const fac = facById.get(targetId);
+      if (!fac) return;
+      const role: CharacterFactionMembership['role'] =
+        cat === 'LEADER_OF'
+          ? 'Thủ lĩnh'
+          : cat === 'SENIOR_MEMBER_OF'
+            ? 'Thành viên cấp cao'
+            : 'Thành viên';
+      upsertMembership(fac.name, role);
+    }
+  });
+
+  return Array.from(bestByFactionKey.values()).sort(
+    (a, b) => FACTION_ROLE_PRIORITY[b.role] - FACTION_ROLE_PRIORITY[a.role]
+  );
+}
+
+export function formatCharacterFactions(memberships: CharacterFactionMembership[]): string {
+  return memberships.map((m) => `${m.factionName} (${m.role})`).join(', ');
+}
+
+export function getItemHolders(
+  item: Pick<StoryNode, 'id' | 'name' | 'holderOrLocation'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): string[] {
+  const itemId = (item.id || '').trim();
+  const itemNameLower = (item.name || '').trim().toLowerCase();
+  const charNodes = allNodes.filter((n) => n.type === 'character');
+  const charById = new Map<string, StoryNode>();
+  const charByNameLower = new Map<string, StoryNode>();
+  charNodes.forEach((c) => {
+    charById.set(c.id, c);
+    charByNameLower.set((c.name || '').trim().toLowerCase(), c);
+  });
+
+  const seenLower = new Set<string>();
+  const result: string[] = [];
+  const addHolder = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = charById.get(trimmed) || charByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenLower.has(key)) {
+      seenLower.add(key);
+      result.push(displayName);
+    }
+  };
+
+  addHolder(item.holderOrLocation);
+
+  charNodes.forEach((ch) => {
+    const weapons = parseEventParticipants(ch.weapon);
+    const hasItem = weapons.some(
+      (w) =>
+        (Boolean(itemNameLower) && w.trim().toLowerCase() === itemNameLower) ||
+        (Boolean(itemId) && w.trim() === itemId)
+    );
+    if (hasItem) addHolder(ch.name);
+  });
+
+  allLinks.forEach((link) => {
+    const cat = (link.category || '').toUpperCase();
+    if (cat !== 'OWNS' && cat !== 'EQUIPPED') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (itemId && targetId === itemId && sourceId) {
+      const ch = charById.get(sourceId);
+      if (ch) addHolder(ch.name);
+    }
+  });
+
+  return result;
+}
+
+export function getLocationFactions(
+  location: Pick<StoryNode, 'id' | 'name' | 'ruler'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): { rulers: string[]; headquartersOf: string[] } {
+  const locId = (location.id || '').trim();
+  const locNameLower = (location.name || '').trim().toLowerCase();
+  const factionNodes = allNodes.filter((n) => n.type === 'faction');
+  const facById = new Map<string, StoryNode>();
+  const facByNameLower = new Map<string, StoryNode>();
+  factionNodes.forEach((f) => {
+    facById.set(f.id, f);
+    facByNameLower.set((f.name || '').trim().toLowerCase(), f);
+  });
+
+  const seenRulers = new Set<string>();
+  const rulers: string[] = [];
+  const addRuler = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = facById.get(trimmed) || facByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenRulers.has(key)) {
+      seenRulers.add(key);
+      rulers.push(displayName);
+    }
+  };
+
+  addRuler(location.ruler);
+
+  const seenHq = new Set<string>();
+  const headquartersOf: string[] = [];
+  const addHq = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = facById.get(trimmed) || facByNameLower.get(trimmed.toLowerCase());
+    const displayName = matched ? matched.name.trim() : trimmed;
+    const key = displayName.toLowerCase();
+    if (!seenHq.has(key)) {
+      seenHq.add(key);
+      headquartersOf.push(displayName);
+    }
+  };
+
+  factionNodes.forEach((fac) => {
+    const hq = (fac.headquarters || '').trim();
+    if (hq && ((locNameLower && hq.toLowerCase() === locNameLower) || (locId && hq === locId))) {
+      addHq(fac.name);
+    }
+  });
+
+  allLinks.forEach((link) => {
+    const cat = (link.category || '').toUpperCase();
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (!locId || targetId !== locId || !sourceId) return;
+    const fac = facById.get(sourceId);
+    if (!fac) return;
+    if (cat === 'RULER_OF') addRuler(fac.name);
+    if (cat === 'HEADQUARTERS') addHq(fac.name);
+  });
+
+  return { rulers, headquartersOf };
+}
+
+export function getFactionRuledLocations(
+  faction: Pick<StoryNode, 'id' | 'name'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): string[] {
+  const facId = (faction.id || '').trim();
+  const facNameLower = (faction.name || '').trim().toLowerCase();
+  const locNodes = allNodes.filter((n) => n.type === 'location');
+  const locById = new Map<string, StoryNode>();
+  locNodes.forEach((l) => locById.set(l.id, l));
+
+  const seen = new Set<string>();
+  const result: string[] = [];
+  const addLoc = (name?: string) => {
+    const trimmed = String(name || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const key = trimmed.toLowerCase();
+    if (!seen.has(key)) {
+      seen.add(key);
+      result.push(trimmed);
+    }
+  };
+
+  locNodes.forEach((loc) => {
+    const ruler = (loc.ruler || '').trim();
+    if (ruler && ((facNameLower && ruler.toLowerCase() === facNameLower) || (facId && ruler === facId))) {
+      addLoc(loc.name);
+    }
+  });
+
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'RULER_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (facId && sourceId === facId && targetId) {
+      const loc = locById.get(targetId);
+      if (loc) addLoc(loc.name);
+    }
+  });
+
+  return result;
+}
+
 export function formatDateDDMMYYYY(value?: string): string {
   const trimmed = String(value || '').trim();
   if (!trimmed) return '';

@@ -21,9 +21,13 @@ import {
   CHARACTER_STATUS_OPTIONS,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatCharacterFactions,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterFactions,
   getCharacterOwnedItems,
+  getItemHolders,
+  getLocationFactions,
   parseEventParticipants,
   getProjectChapters,
   INITIAL_PROJECTS,
@@ -570,7 +574,16 @@ export default function NodesDetailScreen() {
                         ) : null;
                       })()
                     : null}
-                  {node.sect ? <Text style={styles.attrTag}>🏛️ Tổ chức: {node.sect}</Text> : null}
+                  {node.type === 'character'
+                    ? (() => {
+                        const memberships = getCharacterFactions(node, nodes, currentProject.links);
+                        return memberships.length > 0 ? (
+                          <Text style={styles.attrTag}>
+                            🏛️ Tổ chức: {formatCharacterFactions(memberships)}
+                          </Text>
+                        ) : null;
+                      })()
+                    : null}
                   {node.personality ? (
                     <Text style={styles.attrTag}>🎭 Tính cách: {node.personality}</Text>
                   ) : null}
@@ -578,11 +591,37 @@ export default function NodesDetailScreen() {
                   {node.origin ? <Text style={styles.attrTag}>📜 Xuất xứ: {node.origin}</Text> : null}
                   {node.element ? <Text style={styles.attrTag}>⚡ Thuộc tính: {node.element}</Text> : null}
                   {node.power ? <Text style={styles.attrTag}>💥 Mức độ ảnh hưởng: {node.power}</Text> : null}
-                  {node.holderOrLocation ? (
-                    <Text style={styles.attrTag}>👤 Người giữ: {node.holderOrLocation}</Text>
-                  ) : null}
+                  {node.type === 'item'
+                    ? (() => {
+                        const holders = getItemHolders(node, nodes, currentProject.links);
+                        return holders.length > 0 ? (
+                          <Text style={styles.attrTag}>👤 Người giữ: {holders.join(', ')}</Text>
+                        ) : null;
+                      })()
+                    : null}
                   {node.region ? <Text style={styles.attrTag}>📍 Khu vực: {node.region}</Text> : null}
                   {node.terrain ? <Text style={styles.attrTag}>🏔️ Địa thế: {node.terrain}</Text> : null}
+                  {node.type === 'location'
+                    ? (() => {
+                        const { rulers, headquartersOf } = getLocationFactions(
+                          node,
+                          nodes,
+                          currentProject.links
+                        );
+                        return (
+                          <>
+                            {rulers.length > 0 ? (
+                              <Text style={styles.attrTag}>👑 Cai quản: {rulers.join(', ')}</Text>
+                            ) : null}
+                            {headquartersOf.length > 0 ? (
+                              <Text style={styles.attrTag}>
+                                🏛️ Trụ sở của: {headquartersOf.join(', ')}
+                              </Text>
+                            ) : null}
+                          </>
+                        );
+                      })()
+                    : null}
                   {node.dangerLevel ? (
                     <Text style={styles.attrTag}>⚠️ Nguy hiểm: {node.dangerLevel}</Text>
                   ) : null}
