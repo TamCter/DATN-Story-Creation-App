@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BookMarked,
@@ -12,6 +12,7 @@ import {
   Send,
   ShieldAlert,
   Sparkles,
+  X,
 } from 'lucide-react';
 import { webApi } from '../services/api';
 import type {
@@ -33,10 +34,11 @@ interface RightAssistantPanelProps {
   chapters: StoryChapter[];
   nodes: StoryNode[];
   links: StoryLink[];
-  onInsertText: (text: string) => void;
-  onReplaceQuote: (quote: string, replacement: string) => boolean;
+  onInsertText: (text: string, expectedChapterId?: string) => void;
+  onReplaceQuote: (quote: string, replacement: string, expectedChapterId?: string) => boolean;
   onOpenAuth: () => void;
   onNotify: (msg: string) => void;
+  onClose?: () => void;
 }
 
 const NODE_TYPE_LABELS: Record<StoryNodeType | 'all', string> = {
@@ -86,22 +88,43 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   onReplaceQuote,
   onOpenAuth,
   onNotify,
+  onClose,
 }) => {
   const [tab, setTab] = useState<'checker' | 'chat' | 'world'>('checker');
 
-  // Checker state
-  const [analyzing, setAnalyzing] = useState(false);
-  const [analysis, setAnalysis] = useState<ChapterAnalysisResult | null>(null);
-  const [analysisError, setAnalysisError] = useState('');
+  const projectKey = activeProject?.id || '__none__';
+  const activeChapterId = activeChapter?.id || null;
+  const activeChapterIdRef = useRef<string | null>(activeChapterId);
+  activeChapterIdRef.current = activeChapterId;
 
-  // Chat state
-  const [chatMessages, setChatMessages] = useState<AIChatMessage[]>([]);
+  // Checker state (scoped to active chapter)
+  const [analyzingChapterId, setAnalyzingChapterId] = useState<string | null>(null);
+  const [analysisState, setAnalysisState] = useState<{
+    chapterId: string;
+    result: ChapterAnalysisResult;
+  } | null>(null);
+  const [analysisError, setAnalysisError] = useState('');
+  const analysisReqRef = useRef(0);
+
+  // Chat state (scoped per project)
+  const [chatByProject, setChatByProject] = useState<Record<string, AIChatMessage[]>>({});
   const [chatInput, setChatInput] = useState('');
-  const [chatLoading, setChatLoading] = useState(false);
+  const [chatLoadingByProject, setChatLoadingByProject] = useState<Record<string, boolean>>({});
 
   // World lookup state
   const [worldQuery, setWorldQuery] = useState('');
   const [worldType, setWorldType] = useState<StoryNodeType | 'all'>('all');
+
+  // Clear visible chapter-specific error/loading state when switching chapters
+  useEffect(() => {
+    setAnalysisError('');
+  }, [activeChapterId]);
+
+  const analyzing = Boolean(activeChapterId && analyzingChapterId === activeChapterId);
+  const analysis =
+    analysisState && analysisState.chapterId === activeChapterId ? analysisState.result : null;
+  const chatMessages = chatByProject[projectKey] || [];
+  const chatLoading = Boolean(chatLoadingByProject[projectKey]);
 
   const filteredNodes = useMemo(() => {
     const q = worldQuery.trim().toLowerCase();
@@ -125,7 +148,9 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       setAnalysisError('Hãy viết ít nhất vài câu trước khi kiểm tra chương.');
       return;
     }
-    setAnalyzing(true);
+    const targetChapterId = activeChapter.id;
+    const reqId = ++analysisReqRef.current;
+    setAnalyzingChapterId(targetChapterId);
     setAnalysisError('');
     try {
       const res = await webApi.analyzeChapterText({
@@ -140,15 +165,23 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
           content: c.id === activeChapter.id ? activeChapter.content : (c.content || '').slice(0, 1200),
         })),
       });
+      if (analysisReqRef.current !== reqId || activeChapterIdRef.current !== targetChapterId) {
+        return;
+      }
       if (!res.success || !res.data) {
         setAnalysisError(res.message || 'Không thể phân tích chương lúc này.');
       } else {
-        setAnalysis(res.data);
+        setAnalysisState({ chapterId: targetChapterId, result: res.data });
       }
     } catch (err: unknown) {
+      if (analysisReqRef.current !== reqId || activeChapterIdRef.current !== targetChapterId) {
+        return;
+      }
       setAnalysisError(err instanceof Error ? err.message : 'Lỗi khi gọi AI phân tích chương.');
     } finally {
-      setAnalyzing(false);
+      if (analysisReqRef.current === reqId) {
+        setAnalyzingChapterId((curr) => (curr === targetChapterId ? null : curr));
+      }
     }
   };
 
@@ -157,19 +190,25 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       onOpenAuth();
       return;
     }
+    const originProjectKey = projectKey;
+    const originChapterId = activeChapter?.id;
     const text = (customPrompt ?? chatInput).trim();
-    if (!text || chatLoading) return;
+    if (!text || chatLoadingByProject[originProjectKey]) return;
 
     const userMsg: AIChatMessage = {
       id: `u-${Date.now()}`,
       role: 'user',
       content: text,
       createdAt: Date.now(),
+      chapterId: originChapterId,
     };
-    const nextHistory = [...chatMessages, userMsg];
-    setChatMessages(nextHistory);
+    const priorMessages = chatByProject[originProjectKey] || [];
+    setChatByProject((prev) => ({
+      ...prev,
+      [originProjectKey]: [...(prev[originProjectKey] || []), userMsg],
+    }));
     if (!customPrompt) setChatInput('');
-    setChatLoading(true);
+    setChatLoadingByProject((prev) => ({ ...prev, [originProjectKey]: true }));
 
     try {
       const chapterExcerpt = (activeChapter?.content || '').slice(-3500);
@@ -180,7 +219,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
         : text;
 
       const apiMessages = [
-        ...chatMessages.slice(-8).map((m) => ({ role: m.role, content: m.content })),
+        ...priorMessages.slice(-8).map((m) => ({ role: m.role, content: m.content })),
         { role: 'user' as const, content: contextualPrompt },
       ];
 
@@ -200,18 +239,39 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
         role: 'assistant',
         content: res.data?.message || 'AI chưa trả về nội dung.',
         createdAt: Date.now(),
+        chapterId: originChapterId,
       };
-      setChatMessages([...nextHistory, assistantMsg]);
+      setChatByProject((prev) => ({
+        ...prev,
+        [originProjectKey]: [...(prev[originProjectKey] || []), assistantMsg],
+      }));
     } catch (err: unknown) {
       const errMsg: AIChatMessage = {
         id: `e-${Date.now()}`,
         role: 'assistant',
         content: `⚠️ ${err instanceof Error ? err.message : 'Không thể kết nối AI.'}`,
         createdAt: Date.now(),
+        chapterId: originChapterId,
       };
-      setChatMessages([...nextHistory, errMsg]);
+      setChatByProject((prev) => ({
+        ...prev,
+        [originProjectKey]: [...(prev[originProjectKey] || []), errMsg],
+      }));
     } finally {
-      setChatLoading(false);
+      setChatLoadingByProject((prev) => ({ ...prev, [originProjectKey]: false }));
+    }
+  };
+
+  const handleCopyText = async (content: string) => {
+    if (!navigator.clipboard?.writeText) {
+      onNotify('Trình duyệt không hỗ trợ sao chép tự động.');
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(content);
+      onNotify('Đã sao chép vào khay nhớ tạm.');
+    } catch {
+      onNotify('Không thể sao chép vào khay nhớ tạm.');
     }
   };
 
@@ -225,23 +285,37 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
     <aside className="sidebar-right">
       <div className="tab-bar">
         <button
+          type="button"
           className={`tab-btn ${tab === 'checker' ? 'active' : ''}`}
           onClick={() => setTab('checker')}
         >
           <Sparkles size={13} /> Kiểm tra
         </button>
         <button
+          type="button"
           className={`tab-btn ${tab === 'chat' ? 'active' : ''}`}
           onClick={() => setTab('chat')}
         >
           <MessageSquare size={13} /> Trợ lý AI
         </button>
         <button
+          type="button"
           className={`tab-btn ${tab === 'world' ? 'active' : ''}`}
           onClick={() => setTab('world')}
         >
           <BookMarked size={13} /> Thế giới
         </button>
+        {onClose && (
+          <button
+            type="button"
+            className="icon-btn drawer-close-btn"
+            onClick={onClose}
+            aria-label="Đóng thanh trợ lý"
+            title="Đóng"
+          >
+            <X size={15} />
+          </button>
+        )}
       </div>
 
       {/* TAB 1: AI CHAPTER CHECKER */}
@@ -255,6 +329,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
               Đối chiếu bản thảo với nhân vật, sự kiện và các chương trước để phát hiện lỗi logic.
             </p>
             <button
+              type="button"
               className="primary-btn"
               style={{ width: '100%' }}
               disabled={analyzing}
@@ -275,7 +350,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             )}
           </div>
 
-          {analysis && (
+          {analysis && analysisState && (
             <>
               {analysis.summary && (
                 <div className="card">
@@ -292,7 +367,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 Cảnh báo & Gợi ý ({analysis.issues?.length || 0})
               </div>
 
-              {(!analysis.issues || analysis.issues.length === 0) ? (
+              {!analysis.issues || analysis.issues.length === 0 ? (
                 <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--success)', fontSize: 13 }}>
                   <CheckCircle2 size={16} /> Không phát hiện mâu thuẫn nào!
                 </div>
@@ -314,10 +389,15 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                     )}
                     {issue.suggestedRewrite && issue.quote && (
                       <button
+                        type="button"
                         className="icon-btn bordered"
                         style={{ marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 12 }}
                         onClick={() => {
-                          const ok = onReplaceQuote(issue.quote, issue.suggestedRewrite!);
+                          const ok = onReplaceQuote(
+                            issue.quote,
+                            issue.suggestedRewrite!,
+                            analysisState.chapterId
+                          );
                           onNotify(
                             ok
                               ? 'Đã áp dụng gợi ý sửa vào bản thảo.'
@@ -360,6 +440,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             {QUICK_PROMPTS.map((qp) => (
               <button
                 key={qp.label}
+                type="button"
                 className="chip-btn"
                 disabled={chatLoading}
                 onClick={() => void handleSendChat(qp.prompt)}
@@ -375,35 +456,40 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 Hỏi AI để gợi ý viết tiếp, chau chuốt câu chữ, hoặc kiểm tra ý tưởng cho chương hiện tại.
               </div>
             ) : (
-              chatMessages.map((msg) => (
-                <div key={msg.id} className={`chat-bubble ${msg.role}`}>
-                  <div>{msg.content}</div>
-                  {msg.role === 'assistant' && !msg.content.startsWith('⚠️') && (
-                    <div className="chat-actions">
-                      <button
-                        className="icon-btn"
-                        style={{ height: 26, fontSize: 11.5 }}
-                        onClick={() => {
-                          onInsertText(`\n\n${msg.content}`);
-                          onNotify('Đã chèn gợi ý vào cuối chương.');
-                        }}
-                      >
-                        <CornerDownLeft size={12} /> Chèn vào chương
-                      </button>
-                      <button
-                        className="icon-btn"
-                        style={{ height: 26, fontSize: 11.5 }}
-                        onClick={() => {
-                          void navigator.clipboard?.writeText(msg.content);
-                          onNotify('Đã sao chép vào khay nhớ tạm.');
-                        }}
-                      >
-                        <Copy size={12} /> Sao chép
-                      </button>
-                    </div>
-                  )}
-                </div>
-              ))
+              chatMessages.map((msg) => {
+                const belongsToActiveChapter =
+                  Boolean(activeChapterId) && (!msg.chapterId || msg.chapterId === activeChapterId);
+                return (
+                  <div key={msg.id} className={`chat-bubble ${msg.role}`}>
+                    <div>{msg.content}</div>
+                    {msg.role === 'assistant' && !msg.content.startsWith('⚠️') && (
+                      <div className="chat-actions">
+                        {belongsToActiveChapter && (
+                          <button
+                            type="button"
+                            className="icon-btn"
+                            style={{ height: 26, fontSize: 11.5 }}
+                            onClick={() => {
+                              onInsertText(`\n\n${msg.content}`, msg.chapterId || activeChapterId || undefined);
+                              onNotify('Đã chèn gợi ý vào chương.');
+                            }}
+                          >
+                            <CornerDownLeft size={12} /> Chèn vào chương
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          className="icon-btn"
+                          style={{ height: 26, fontSize: 11.5 }}
+                          onClick={() => void handleCopyText(msg.content)}
+                        >
+                          <Copy size={12} /> Sao chép
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
             )}
             {chatLoading && (
               <div className="chat-bubble assistant" style={{ color: 'var(--text-muted)' }}>
@@ -454,6 +540,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             {(['all', 'character', 'faction', 'location', 'item', 'event'] as const).map((t) => (
               <button
                 key={t}
+                type="button"
                 className="chip-btn"
                 style={
                   worldType === t
@@ -479,11 +566,12 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
                   <strong style={{ fontSize: 13.5 }}>{node.name}</strong>
                   <button
+                    type="button"
                     className="icon-btn"
                     style={{ height: 24, fontSize: 11.5 }}
                     title="Chèn tên vào vị trí con trỏ"
                     onClick={() => {
-                      onInsertText(node.name);
+                      onInsertText(node.name, activeChapterId || undefined);
                       onNotify(`Đã chèn "${node.name}"`);
                     }}
                   >

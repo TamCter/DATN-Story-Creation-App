@@ -100,6 +100,7 @@ export interface AIChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt: number;
+  chapterId?: string;
 }
 
 export type EditorTheme = 'sepia' | 'light' | 'dark';

@@ -8,6 +8,7 @@ import {
   Plus,
   Target,
   Trash2,
+  X,
 } from 'lucide-react';
 import type { AuthUser, DailyGoalState, StoryChapter, StoryProject } from '../types/story';
 import { getTodayKey } from '../services/storage';
@@ -28,6 +29,7 @@ interface LeftSidebarProps {
   onUpdateGoalTarget: (targetWords: number) => void;
   onOpenAuth: () => void;
   onLogout: () => void;
+  onClose?: () => void;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -45,8 +47,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onUpdateGoalTarget,
   onOpenAuth,
   onLogout,
+  onClose,
 }) => {
   const [creatingProject, setCreatingProject] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [newProjectTitle, setNewProjectTitle] = useState('');
   const [editingGoal, setEditingGoal] = useState(false);
   const [goalInput, setGoalInput] = useState(String(dailyGoal.targetWords));
@@ -60,10 +64,15 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   const handleAddProject = async (e: React.FormEvent) => {
     e.preventDefault();
     const trimmed = newProjectTitle.trim();
-    if (!trimmed) return;
-    await onCreateProject(trimmed);
-    setNewProjectTitle('');
-    setCreatingProject(false);
+    if (!trimmed || isCreatingProject) return;
+    setIsCreatingProject(true);
+    try {
+      await onCreateProject(trimmed);
+      setNewProjectTitle('');
+      setCreatingProject(false);
+    } finally {
+      setIsCreatingProject(false);
+    }
   };
 
   const handleSaveGoal = (e: React.FormEvent) => {
@@ -83,7 +92,20 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               Tơ Lòng
             </span>
           </div>
-          <span className="brand-badge">{user ? 'Đã đồng bộ App' : 'Ngoại tuyến'}</span>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span className="brand-badge">{user ? 'Đã đồng bộ App' : 'Ngoại tuyến'}</span>
+            {onClose && (
+              <button
+                type="button"
+                className="icon-btn drawer-close-btn"
+                onClick={onClose}
+                aria-label="Đóng danh sách chương"
+                title="Đóng"
+              >
+                <X size={15} />
+              </button>
+            )}
+          </div>
         </div>
 
         <div className="project-select-row">
@@ -118,8 +140,13 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               onChange={(e) => setNewProjectTitle(e.target.value)}
               autoFocus
             />
-            <button className="primary-btn" type="submit" style={{ height: 32, padding: '0 10px' }}>
-              Tạo
+            <button
+              className="primary-btn"
+              type="submit"
+              disabled={isCreatingProject || !newProjectTitle.trim()}
+              style={{ height: 32, padding: '0 10px' }}
+            >
+              {isCreatingProject ? '...' : 'Tạo'}
             </button>
           </form>
         )}
@@ -201,24 +228,26 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           const words = countWords(ch.content || '');
           const isActive = ch.id === activeChapterId;
           return (
-            <div
-              key={ch.id}
-              className={`chapter-item ${isActive ? 'active' : ''}`}
-              onClick={() => onSelectChapter(ch.id)}
-            >
-              <div className="chapter-item-main">
+            <div key={ch.id} className={`chapter-item ${isActive ? 'active' : ''}`}>
+              <button
+                type="button"
+                className="chapter-select-btn"
+                aria-current={isActive ? 'page' : undefined}
+                onClick={() => onSelectChapter(ch.id)}
+              >
                 <div className="chapter-item-title">{ch.title || `Chương ${ch.chapterNumber}`}</div>
                 <div className="chapter-item-meta">
                   <span>{words.toLocaleString('vi-VN')} từ</span>
                   {ch.dirty && <span className="dirty-dot" title="Có thay đổi chưa đồng bộ lên máy chủ" />}
                 </div>
-              </div>
+              </button>
               {chapters.length > 1 && (
                 <button
+                  type="button"
                   className="chapter-delete-btn"
                   title="Xóa chương"
-                  onClick={(e) => {
-                    e.stopPropagation();
+                  aria-label={`Xóa ${ch.title || `Chương ${ch.chapterNumber}`}`}
+                  onClick={() => {
                     if (window.confirm(`Xóa "${ch.title || `Chương ${ch.chapterNumber}`}"?`)) {
                       void onDeleteChapter(ch.id);
                     }

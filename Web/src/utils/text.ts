@@ -97,6 +97,9 @@ export function exportFullProject(
     sorted.forEach((ch, idx) => {
       const heading = ch.title || `Chương ${ch.chapterNumber}`;
       body += `${heading}\n${'-'.repeat(Math.min(50, heading.length))}\n\n`;
+      if (ch.desc?.trim()) {
+        body += `Tóm tắt: ${ch.desc.trim()}\n\n`;
+      }
       body += `${ch.content || ''}\n`;
       if (idx < sorted.length - 1) body += `\n\n`;
     });

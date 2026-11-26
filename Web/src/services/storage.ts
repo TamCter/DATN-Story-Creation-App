@@ -43,11 +43,28 @@ function safeRead<T>(key: string, fallback: T): T {
   }
 }
 
-function safeWrite(key: string, value: unknown): void {
+function safeReadRaw(key: string): string | null {
+  try {
+    return window.localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function safeWrite(key: string, value: unknown): boolean {
   try {
     window.localStorage.setItem(key, JSON.stringify(value));
+    return true;
   } catch {
-    // Ignore storage quota errors gracefully
+    return false;
+  }
+}
+
+function safeRemove(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    // Ignore blocked storage
   }
 }
 
@@ -61,39 +78,58 @@ export function getTodayKey(): string {
 
 export const webStorage = {
   getAuth(): { token: string | null; user: AuthUser | null } {
-    const token = window.localStorage.getItem(KEYS.AUTH_TOKEN);
+    const parsedToken = safeRead<string | null>(KEYS.AUTH_TOKEN, null);
+    const token =
+      typeof parsedToken === 'string' && parsedToken.length > 0
+        ? parsedToken
+        : safeReadRaw(KEYS.AUTH_TOKEN);
     const user = safeRead<AuthUser | null>(KEYS.AUTH_USER, null);
     return { token, user };
   },
 
-  setAuth(token: string | null, user: AuthUser | null) {
+  setAuth(token: string | null, user: AuthUser | null): boolean {
     if (token && user) {
-      window.localStorage.setItem(KEYS.AUTH_TOKEN, token);
-      safeWrite(KEYS.AUTH_USER, user);
-    } else {
-      window.localStorage.removeItem(KEYS.AUTH_TOKEN);
-      window.localStorage.removeItem(KEYS.AUTH_USER);
+      const okToken = safeWrite(KEYS.AUTH_TOKEN, token);
+      const okUser = safeWrite(KEYS.AUTH_USER, user);
+      return okToken && okUser;
     }
+    safeRemove(KEYS.AUTH_TOKEN);
+    safeRemove(KEYS.AUTH_USER);
+    return true;
   },
 
   getPrefs(): EditorPreferences {
-    return { ...DEFAULT_PREFS, ...safeRead<Partial<EditorPreferences>>(KEYS.PREFS, {}) };
+    const stored = safeRead<Partial<EditorPreferences> | null>(KEYS.PREFS, null);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return { ...DEFAULT_PREFS };
+    }
+    return { ...DEFAULT_PREFS, ...stored };
   },
 
-  savePrefs(prefs: EditorPreferences) {
-    safeWrite(KEYS.PREFS, prefs);
+  savePrefs(prefs: EditorPreferences): boolean {
+    return safeWrite(KEYS.PREFS, prefs);
   },
 
   getDailyGoal(): DailyGoalState {
-    const stored = safeRead<Partial<DailyGoalState>>(KEYS.GOAL, {});
-    return {
-      targetWords: stored.targetWords || DEFAULT_GOAL.targetWords,
-      history: stored.history || {},
-    };
+    const stored = safeRead<Partial<DailyGoalState> | null>(KEYS.GOAL, null);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return { targetWords: DEFAULT_GOAL.targetWords, history: {} };
+    }
+    const targetWords =
+      typeof stored.targetWords === 'number' &&
+      Number.isFinite(stored.targetWords) &&
+      stored.targetWords > 0
+        ? stored.targetWords
+        : DEFAULT_GOAL.targetWords;
+    const history =
+      stored.history && typeof stored.history === 'object' && !Array.isArray(stored.history)
+        ? (stored.history as Record<string, number>)
+        : {};
+    return { targetWords, history };
   },
 
-  saveDailyGoal(goal: DailyGoalState) {
-    safeWrite(KEYS.GOAL, goal);
+  saveDailyGoal(goal: DailyGoalState): boolean {
+    return safeWrite(KEYS.GOAL, goal);
   },
 
   addWordsWrittenToday(delta: number): DailyGoalState {
@@ -113,16 +149,20 @@ export const webStorage = {
 
   getLastSelection(): { projectId: string | null; chapterId: string | null } {
     return {
-      projectId: window.localStorage.getItem(KEYS.LAST_PROJECT_ID),
-      chapterId: window.localStorage.getItem(KEYS.LAST_CHAPTER_ID),
+      projectId: safeReadRaw(KEYS.LAST_PROJECT_ID),
+      chapterId: safeReadRaw(KEYS.LAST_CHAPTER_ID),
     };
   },
 
-  saveLastSelection(projectId: string | null, chapterId: string | null) {
-    if (projectId) window.localStorage.setItem(KEYS.LAST_PROJECT_ID, projectId);
-    else window.localStorage.removeItem(KEYS.LAST_PROJECT_ID);
-    if (chapterId) window.localStorage.setItem(KEYS.LAST_CHAPTER_ID, chapterId);
-    else window.localStorage.removeItem(KEYS.LAST_CHAPTER_ID);
+  saveLastSelection(projectId: string | null, chapterId: string | null): void {
+    try {
+      if (projectId) window.localStorage.setItem(KEYS.LAST_PROJECT_ID, projectId);
+      else window.localStorage.removeItem(KEYS.LAST_PROJECT_ID);
+      if (chapterId) window.localStorage.setItem(KEYS.LAST_CHAPTER_ID, chapterId);
+      else window.localStorage.removeItem(KEYS.LAST_CHAPTER_ID);
+    } catch {
+      // Ignore blocked storage
+    }
   },
 
   // Draft cache per chapter (works both when logged-in offline and in guest mode)
@@ -135,18 +175,18 @@ export const webStorage = {
   saveChapterDraft(
     chapterId: string,
     draft: { title: string; desc: string; content: string; updatedAt: number; dirty: boolean }
-  ) {
-    safeWrite(KEYS.DRAFTS_PREFIX + chapterId, draft);
+  ): boolean {
+    return safeWrite(KEYS.DRAFTS_PREFIX + chapterId, draft);
   },
 
-  clearChapterDraft(chapterId: string) {
-    window.localStorage.removeItem(KEYS.DRAFTS_PREFIX + chapterId);
+  clearChapterDraft(chapterId: string): void {
+    safeRemove(KEYS.DRAFTS_PREFIX + chapterId);
   },
 
   // Guest / Offline local projects & chapters
   getLocalProjects(): StoryProject[] {
-    const list = safeRead<StoryProject[]>(KEYS.LOCAL_PROJECTS, []);
-    if (list.length > 0) return list;
+    const list = safeRead<StoryProject[] | null>(KEYS.LOCAL_PROJECTS, null);
+    if (Array.isArray(list) && list.length > 0) return list;
     const starterProject: StoryProject = {
       id: 'local-proj-default',
       title: 'Bản thảo đầu tiên',
@@ -174,15 +214,16 @@ export const webStorage = {
     return [starterProject];
   },
 
-  saveLocalProjects(projects: StoryProject[]) {
-    safeWrite(KEYS.LOCAL_PROJECTS, projects);
+  saveLocalProjects(projects: StoryProject[]): boolean {
+    return safeWrite(KEYS.LOCAL_PROJECTS, projects);
   },
 
   getLocalChapters(projectId: string): StoryChapter[] {
-    return safeRead<StoryChapter[]>(KEYS.LOCAL_CHAPTERS_PREFIX + projectId, []);
+    const list = safeRead<StoryChapter[] | null>(KEYS.LOCAL_CHAPTERS_PREFIX + projectId, null);
+    return Array.isArray(list) ? list : [];
   },
 
-  saveLocalChapters(projectId: string, chapters: StoryChapter[]) {
-    safeWrite(KEYS.LOCAL_CHAPTERS_PREFIX + projectId, chapters);
+  saveLocalChapters(projectId: string, chapters: StoryChapter[]): boolean {
+    return safeWrite(KEYS.LOCAL_CHAPTERS_PREFIX + projectId, chapters);
   },
 };
