@@ -79,9 +79,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
         <div className="brand-row">
           <div className="brand-title">
             <Feather size={17} color="var(--accent)" />
-            <span>Story Studio</span>
+            <span style={{ fontFamily: "'Playfair Display', 'Lora', serif", fontSize: 16 }}>
+              Tơ Lòng
+            </span>
           </div>
-          <span className="brand-badge">{user ? 'Đồng bộ' : 'Cục bộ'}</span>
+          <span className="brand-badge">{user ? 'Đã đồng bộ App' : 'Ngoại tuyến'}</span>
         </div>
 
         <div className="project-select-row">
@@ -326,7 +328,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             onClick={onOpenAuth}
           >
             <LogIn size={14} />
-            <span>Đăng nhập để đồng bộ & AI</span>
+            <span>Đăng nhập / Đăng ký</span>
           </button>
         )}
       </div>

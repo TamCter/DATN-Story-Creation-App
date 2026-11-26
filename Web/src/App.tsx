@@ -40,7 +40,10 @@ type SaveStatus = 'saved' | 'saving' | 'local' | 'error';
 
 export default function App() {
   const [user, setUser] = useState<AuthUser | null>(null);
+  const [authChecked, setAuthChecked] = useState(false);
+  const [guestDismissedAuth, setGuestDismissedAuth] = useState(false);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [syncingFromApp, setSyncingFromApp] = useState(false);
 
   const [projects, setProjects] = useState<StoryProject[]>([]);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -215,9 +218,10 @@ export default function App() {
     if (token && cachedUser) {
       webApi.setToken(token);
       setUser(cachedUser);
-      void loadRemoteWorkspace(cachedUser);
+      void loadRemoteWorkspace(cachedUser).finally(() => setAuthChecked(true));
     } else {
       loadLocalWorkspace();
+      setAuthChecked(true);
     }
   }, [loadLocalWorkspace, loadRemoteWorkspace]);
 
@@ -464,7 +468,8 @@ export default function App() {
     webApi.setToken(token);
     webStorage.setAuth(token, authedUser);
     setUser(authedUser);
-    notify(`Chào mừng ${authedUser.penName}! Đang đồng bộ dữ liệu...`);
+    setGuestDismissedAuth(true);
+    notify(`Chào mừng ${authedUser.penName}! Đang đồng bộ dữ liệu từ App...`);
     void loadRemoteWorkspace(authedUser);
   };
 
@@ -472,8 +477,20 @@ export default function App() {
     webApi.setToken(null);
     webStorage.setAuth(null, null);
     setUser(null);
+    setGuestDismissedAuth(false);
     loadLocalWorkspace();
-    notify('Đã đăng xuất. Chuyển về chế độ lưu cục bộ.');
+    notify('Đã đăng xuất.');
+  };
+
+  const handleRefreshFromApp = async () => {
+    if (!user || syncingFromApp) return;
+    setSyncingFromApp(true);
+    try {
+      await loadRemoteWorkspace(user);
+      notify('Đã cập nhật dữ liệu mới nhất từ App.');
+    } finally {
+      setSyncingFromApp(false);
+    }
   };
 
   // Insert text at cursor position in manuscript textarea
@@ -517,7 +534,7 @@ export default function App() {
   const readMins = estimateReadingMinutes(words);
 
   const cycleTheme = () => {
-    const order: EditorTheme[] = ['sepia', 'light', 'dark'];
+    const order: EditorTheme[] = ['dark', 'sepia', 'light'];
     const next = order[(order.indexOf(prefs.theme) + 1) % order.length];
     setPrefs((p) => ({ ...p, theme: next }));
   };
@@ -535,9 +552,9 @@ export default function App() {
   };
 
   const themeLabel: Record<EditorTheme, string> = {
+    dark: 'Màu App',
     sepia: 'Giấy vàng',
     light: 'Sáng',
-    dark: 'Tối',
   };
 
   const fontLabel: Record<EditorFont, string> = {
@@ -545,6 +562,18 @@ export default function App() {
     sans: 'Sans',
     mono: 'Mono',
   };
+
+  if (authChecked && !user && !guestDismissedAuth) {
+    return (
+      <AuthModal
+        open
+        variant="page"
+        initialTab="login"
+        onClose={() => setGuestDismissedAuth(true)}
+        onAuthenticated={handleAuthenticated}
+      />
+    );
+  }
 
   return (
     <div className="studio-shell">
@@ -663,6 +692,26 @@ export default function App() {
                 </>
               )}
             </span>
+
+            {user ? (
+              <button
+                className="icon-btn bordered"
+                title="Tải dữ liệu mới nhất từ App"
+                disabled={syncingFromApp}
+                onClick={() => void handleRefreshFromApp()}
+              >
+                <RefreshCw size={13} className={syncingFromApp ? 'spin' : undefined} />
+                <span>Đồng bộ App</span>
+              </button>
+            ) : (
+              <button
+                className="primary-btn"
+                style={{ height: 30, fontSize: 12, padding: '0 10px' }}
+                onClick={() => setAuthModalOpen(true)}
+              >
+                Đăng nhập / Đăng ký
+              </button>
+            )}
 
             {activeChapter && (
               <button

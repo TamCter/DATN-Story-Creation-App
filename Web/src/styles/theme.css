@@ -1,71 +1,96 @@
 :root,
+[data-theme='dark'] {
+  /* Bảng màu chuẩn đồng bộ từ App (ThemeColors) */
+  --bg-app: #0e0d0b;
+  --bg-sidebar: #151310;
+  --bg-paper: #181612;
+  --bg-elevated: #1a1814;
+  --bg-hover: rgba(229, 169, 60, 0.08);
+  --bg-active: rgba(229, 169, 60, 0.16);
+  --border: #28251e;
+  --border-subtle: #211e18;
+  --border-light: #383329;
+  --border-gold: rgba(229, 169, 60, 0.35);
+  --text-primary: #f5eee6;
+  --text-secondary: #8f887b;
+  --text-muted: #5e584d;
+  --accent: #e5a93c;
+  --accent-hover: #f3c76f;
+  --accent-dim: #ba852d;
+  --accent-soft: rgba(229, 169, 60, 0.15);
+  --accent-text: #12100d;
+  --danger: #d95a38;
+  --warning: #e5a93c;
+  --success: #42b883;
+  --node-character: #e5a93c;
+  --node-item: #42b883;
+  --node-faction: #d95a38;
+  --node-event: #5b8ec2;
+  --node-location: #9f70cf;
+  --shadow-paper: 0 6px 32px rgba(0, 0, 0, 0.45);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.68);
+}
+
 [data-theme='sepia'] {
   --bg-app: #f3ede2;
   --bg-sidebar: #ece4d5;
   --bg-paper: #fbf8f1;
   --bg-elevated: #f5efe3;
-  --bg-hover: rgba(120, 86, 46, 0.08);
-  --bg-active: rgba(139, 90, 43, 0.14);
+  --bg-hover: rgba(186, 133, 45, 0.1);
+  --bg-active: rgba(186, 133, 45, 0.16);
   --border: #ddd2be;
   --border-subtle: #e7decb;
+  --border-light: #cbbda3;
+  --border-gold: rgba(186, 133, 45, 0.4);
   --text-primary: #2a2118;
   --text-secondary: #625343;
   --text-muted: #8a7966;
-  --accent: #8b5a2b;
-  --accent-hover: #734820;
-  --accent-soft: rgba(139, 90, 43, 0.12);
+  --accent: #b07a22;
+  --accent-hover: #966619;
+  --accent-dim: #8a5e18;
+  --accent-soft: rgba(176, 122, 34, 0.14);
   --accent-text: #ffffff;
-  --danger: #b43c2f;
+  --danger: #c04328;
   --warning: #b87314;
   --success: #2f7a4d;
+  --node-character: #b07a22;
+  --node-item: #2f8f63;
+  --node-faction: #c04328;
+  --node-event: #3c6ea3;
+  --node-location: #7d4fb0;
   --shadow-paper: 0 2px 24px rgba(58, 41, 20, 0.06);
   --shadow-modal: 0 20px 60px rgba(34, 24, 12, 0.22);
 }
 
 [data-theme='light'] {
-  --bg-app: #f4f5f7;
-  --bg-sidebar: #f8f9fb;
+  --bg-app: #f6f4ef;
+  --bg-sidebar: #fbfaf7;
   --bg-paper: #ffffff;
-  --bg-elevated: #f1f3f6;
-  --bg-hover: rgba(15, 23, 42, 0.05);
-  --bg-active: rgba(37, 99, 235, 0.1);
-  --border: #e2e6ee;
-  --border-subtle: #edf0f5;
-  --text-primary: #171923;
-  --text-secondary: #4a5568;
-  --text-muted: #718096;
-  --accent: #2563eb;
-  --accent-hover: #1d4ed8;
-  --accent-soft: rgba(37, 99, 235, 0.1);
+  --bg-elevated: #f3efe8;
+  --bg-hover: rgba(186, 133, 45, 0.08);
+  --bg-active: rgba(186, 133, 45, 0.14);
+  --border: #e5dfd4;
+  --border-subtle: #efebe3;
+  --border-light: #d5cdc0;
+  --border-gold: rgba(186, 133, 45, 0.35);
+  --text-primary: #1a1814;
+  --text-secondary: #5e584d;
+  --text-muted: #8f887b;
+  --accent: #ba852d;
+  --accent-hover: #9e6f22;
+  --accent-dim: #875e1c;
+  --accent-soft: rgba(186, 133, 45, 0.12);
   --accent-text: #ffffff;
-  --danger: #dc2626;
-  --warning: #d97706;
-  --success: #16a34a;
+  --danger: #d95a38;
+  --warning: #c8861e;
+  --success: #2d8f62;
+  --node-character: #ba852d;
+  --node-item: #2d8f62;
+  --node-faction: #d95a38;
+  --node-event: #4678ad;
+  --node-location: #8454b8;
   --shadow-paper: 0 2px 20px rgba(15, 23, 42, 0.05);
   --shadow-modal: 0 20px 60px rgba(15, 23, 42, 0.18);
-}
-
-[data-theme='dark'] {
-  --bg-app: #0f1116;
-  --bg-sidebar: #14171f;
-  --bg-paper: #181c26;
-  --bg-elevated: #202533;
-  --bg-hover: rgba(255, 255, 255, 0.06);
-  --bg-active: rgba(212, 163, 115, 0.16);
-  --border: #2a3040;
-  --border-subtle: #222736;
-  --text-primary: #ebe6dc;
-  --text-secondary: #a8a399;
-  --text-muted: #78746c;
-  --accent: #d4a373;
-  --accent-hover: #e0b589;
-  --accent-soft: rgba(212, 163, 115, 0.14);
-  --accent-text: #181410;
-  --danger: #f87171;
-  --warning: #fbbf24;
-  --success: #4ade80;
-  --shadow-paper: 0 4px 28px rgba(0, 0, 0, 0.35);
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.6);
 }
 
 * {
@@ -812,4 +837,198 @@ button {
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+/* Full-page & Modal Auth Screen (đồng bộ phong cách App Tơ Lòng) */
+.auth-page {
+  min-height: 100vh;
+  width: 100vw;
+  background: var(--bg-app);
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px 16px;
+  position: relative;
+  overflow-y: auto;
+}
+
+.auth-panel {
+  width: 100%;
+  max-width: 440px;
+  background: var(--bg-paper);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 32px 28px 26px;
+  box-shadow: var(--shadow-modal);
+  position: relative;
+  overflow: hidden;
+}
+
+.auth-constellation {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  pointer-events: none;
+  opacity: 0.9;
+}
+
+.auth-badge {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 10px;
+}
+
+.auth-heading {
+  font-family: 'Playfair Display', 'Lora', Georgia, serif;
+  font-size: 30px;
+  line-height: 1.22;
+  font-weight: 700;
+  margin: 0 0 10px;
+  color: var(--text-primary);
+}
+
+.auth-heading em {
+  font-style: italic;
+  color: var(--accent);
+}
+
+.auth-subtitle {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--text-secondary);
+  margin: 0 0 22px;
+}
+
+.auth-tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 18px;
+  gap: 8px;
+}
+
+.auth-tab-btn {
+  flex: 1;
+  background: transparent;
+  border: none;
+  padding: 10px 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  position: relative;
+  transition: color 0.15s;
+}
+
+.auth-tab-btn:hover {
+  color: var(--text-primary);
+}
+
+.auth-tab-btn.active {
+  color: var(--accent);
+}
+
+.auth-tab-btn.active::after {
+  content: '';
+  position: absolute;
+  left: 16%;
+  right: 16%;
+  bottom: -1px;
+  height: 2px;
+  background: var(--accent);
+  border-radius: 999px;
+}
+
+.auth-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.auth-input {
+  width: 100%;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 14px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.auth-input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.auth-input::placeholder {
+  color: var(--text-muted);
+}
+
+.auth-input.with-eye {
+  padding-right: 42px;
+}
+
+.auth-eye-btn {
+  position: absolute;
+  right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+}
+
+.auth-eye-btn:hover {
+  color: var(--accent);
+}
+
+.auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid rgba(217, 90, 56, 0.35);
+  background: rgba(217, 90, 56, 0.1);
+  color: var(--danger);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 14px;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 18px 0 12px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+
+.node-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
 }

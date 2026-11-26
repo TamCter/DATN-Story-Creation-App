@@ -48,6 +48,14 @@ const NODE_TYPE_LABELS: Record<StoryNodeType | 'all', string> = {
   event: 'Sự kiện',
 };
 
+const NODE_TYPE_COLORS: Record<StoryNodeType, string> = {
+  character: 'var(--node-character)',
+  faction: 'var(--node-faction)',
+  location: 'var(--node-location)',
+  item: 'var(--node-item)',
+  event: 'var(--node-event)',
+};
+
 const QUICK_PROMPTS = [
   {
     label: 'Gợi ý viết tiếp',
@@ -482,10 +490,16 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                     + Chèn tên
                   </button>
                 </div>
-                <div style={{ fontSize: 11.5, color: 'var(--accent)', marginTop: 2 }}>
-                  {NODE_TYPE_LABELS[node.type]}
-                  {node.role ? ` · ${node.role}` : ''}
-                  {node.status ? ` · ${node.status}` : ''}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 4, flexWrap: 'wrap' }}>
+                  <span className="node-pill" style={{ color: NODE_TYPE_COLORS[node.type] }}>
+                    {NODE_TYPE_LABELS[node.type]}
+                  </span>
+                  {node.role && (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-secondary)' }}>{node.role}</span>
+                  )}
+                  {node.status && (
+                    <span style={{ fontSize: 11.5, color: 'var(--text-muted)' }}>· {node.status}</span>
+                  )}
                 </div>
                 {node.desc && (
                   <div style={{ fontSize: 12.5, color: 'var(--text-secondary)', marginTop: 6, lineHeight: 1.5 }}>
