@@ -1303,18 +1303,41 @@ export default function AIChatPanel({
   }, []);
 
   const pendingInitialScrollRef = useRef(false);
+  const initialScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelInitialScroll = useCallback(() => {
+    pendingInitialScrollRef.current = false;
+    if (initialScrollTimerRef.current) {
+      clearTimeout(initialScrollTimerRef.current);
+      initialScrollTimerRef.current = null;
+    }
+  }, []);
 
   useEffect(() => {
     if (visible) {
       pendingInitialScrollRef.current = true;
-      if (isScopeLoaded) {
-        const timer = setTimeout(() => {
-          scrollRef.current?.scrollToEnd({ animated: false });
-        }, 60);
-        return () => clearTimeout(timer);
-      }
     } else {
-      pendingInitialScrollRef.current = false;
+      cancelInitialScroll();
+    }
+  }, [visible, storageKey, cancelInitialScroll]);
+
+  useEffect(() => {
+    if (visible && isScopeLoaded && pendingInitialScrollRef.current) {
+      if (initialScrollTimerRef.current) {
+        clearTimeout(initialScrollTimerRef.current);
+      }
+      initialScrollTimerRef.current = setTimeout(() => {
+        initialScrollTimerRef.current = null;
+        if (pendingInitialScrollRef.current) {
+          scrollRef.current?.scrollToEnd({ animated: false });
+        }
+      }, 60);
+      return () => {
+        if (initialScrollTimerRef.current) {
+          clearTimeout(initialScrollTimerRef.current);
+          initialScrollTimerRef.current = null;
+        }
+      };
     }
   }, [visible, isScopeLoaded, storageKey]);
 
@@ -1944,9 +1967,7 @@ export default function AIChatPanel({
       <ScrollView
         ref={scrollRef}
         style={styles.messageList}
-        onScrollBeginDrag={() => {
-          pendingInitialScrollRef.current = false;
-        }}
+        onScrollBeginDrag={cancelInitialScroll}
         onContentSizeChange={() => {
           if (visible && pendingInitialScrollRef.current && isScopeLoaded) {
             scrollRef.current?.scrollToEnd({ animated: false });

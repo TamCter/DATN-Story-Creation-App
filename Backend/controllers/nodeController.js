@@ -668,24 +668,74 @@ async function deleteNode(req, res, next) {
       MATCH (n:StoryNode { id: $id })
       OPTIONAL MATCH (n)-[:BELONGS_TO]->(p:Project)
       OPTIONAL MATCH (owner:User)-[:OWNS]->(p)
-      RETURN n, owner.id AS ownerId
+      RETURN n, p.id AS projectId, owner.id AS ownerId
     `;
     const checkResult = await runQuery(checkQuery, { id }, 'READ');
     if (!checkResult.length || !checkResult[0]?.n) {
       return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
     }
+    const deletedNode = checkResult[0].n;
+    const projectId = checkResult[0].projectId || null;
     const ownerId = checkResult[0].ownerId;
     if (ownerId && ownerId !== req.user?.id) {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa node của dự án này' });
     }
 
+    // Nếu xóa node tổ chức, dọn tham chiếu tổ chức trực thuộc trên các tổ chức cha trong cùng dự án
+    const parentUpdates = [];
+    if (deletedNode.type === 'faction' && projectId) {
+      const deletedNameLower = String(deletedNode.name || '').trim().toLowerCase();
+      const otherFactions = await runQuery(`
+        MATCH (f:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+        WHERE f.type = 'faction' AND f.id <> $id
+        RETURN f.id AS id, f.name AS name, f.subFactions AS subFactions
+      `, { projectId, id }, 'READ');
+      const survivingFactionIds = new Set(otherFactions.map((f) => f.id).filter(Boolean));
+      const survivingFactionNamesLower = new Set(
+        otherFactions.map((f) => String(f.name || '').trim().toLowerCase()).filter(Boolean)
+      );
+      for (const fac of otherFactions) {
+        if (!fac.subFactions) continue;
+        const currentSubs = parseParticipantNames(fac.subFactions);
+        const filteredSubs = currentSubs.filter((entry) => {
+          const t = String(entry || '').trim();
+          if (!t) return false;
+          if (t === id) return false;
+          if (survivingFactionIds.has(t)) return true;
+          if (
+            deletedNameLower &&
+            t.toLowerCase() === deletedNameLower &&
+            !survivingFactionNamesLower.has(deletedNameLower)
+          ) {
+            return false;
+          }
+          return true;
+        });
+        if (filteredSubs.length !== currentSubs.length) {
+          parentUpdates.push({
+            id: fac.id,
+            subFactions: filteredSubs.length > 0 ? JSON.stringify(filteredSubs) : '',
+          });
+        }
+      }
+    }
+
+    const parentUpdateIds = parentUpdates.map((u) => u.id);
     const query = `
       MATCH (n:StoryNode { id: $id })
+      WITH n
+      OPTIONAL MATCH (fac:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+      WHERE fac.id IN $parentUpdateIds
+      FOREACH (upd IN [u IN $parentUpdates WHERE u.id = fac.id] |
+        SET fac.subFactions = upd.subFactions,
+            fac.updatedAt = timestamp()
+      )
+      WITH DISTINCT n
       DETACH DELETE n
       RETURN count(n) AS deleted
     `;
 
-    const records = await runQuery(query, { id });
+    const records = await runQuery(query, { id, projectId, parentUpdates, parentUpdateIds });
     if (!records[0] || records[0].deleted === 0) {
       return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
     }
@@ -1015,10 +1065,11 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
     }
 
-    // Nếu node không còn là tổ chức (VD: đổi loại từ faction sang item), dọn sạch cạnh SUB_FACTION_OF hai chiều
+    // Nếu node hiện tại trong DB không còn là tổ chức (VD: đổi loại từ faction sang item), dọn sạch cạnh SUB_FACTION_OF hai chiều
     if (nodeType !== 'faction') {
       await runQuery(`
         MATCH (n:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'SUB_FACTION_OF' }]-(:StoryNode)
+        WHERE coalesce(n.type, '') <> 'faction'
         DELETE r
       `, { nodeId });
     }
@@ -1165,21 +1216,34 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
 
       // Tổ chức trực thuộc / dưới trướng -> Faction (sub --[SUB_FACTION_OF]--> parent)
-      // Giữ nguyên từng giá trị gốc (không case-fold ID) rồi khử trùng lặp sau khi phân giải ID đích
-      const rawSubEntries = [];
+      // Phân giải ID chính xác trước khi kiểm tra trùng tên tổ chức cha để không loại nhầm ID hợp lệ
+      const candidateSubRefs = [];
       const seenRawExact = new Set();
-      const selfNameLower = nodeName.toLowerCase();
       for (const rawSub of parseParticipantNames(nodeData.subFactions)) {
         const cleaned = cleanRelationalValue(rawSub);
-        if (!cleaned) continue;
-        if (cleaned === nodeId || cleaned.toLowerCase() === selfNameLower) continue;
+        if (!cleaned || cleaned === nodeId) continue;
         if (!seenRawExact.has(cleaned)) {
           seenRawExact.add(cleaned);
-          rawSubEntries.push(cleaned);
+          candidateSubRefs.push(cleaned);
         }
       }
+      let exactExistingFactionIds = new Set();
+      if (candidateSubRefs.length > 0) {
+        const exactMatches = await runQuery(`
+          MATCH (f:StoryNode)-[:BELONGS_TO]->(:Project { id: $projectId })
+          WHERE f.type = 'faction' AND f.id IN $candidateSubRefs
+          RETURN f.id AS id
+        `, { projectId, candidateSubRefs }, 'READ');
+        exactExistingFactionIds = new Set(exactMatches.map((r) => r.id).filter(Boolean));
+      }
+      const selfNameLower = nodeName.toLowerCase();
       const resolvedSubIdSet = new Set();
-      for (const subRef of rawSubEntries) {
+      for (const subRef of candidateSubRefs) {
+        if (exactExistingFactionIds.has(subRef)) {
+          if (subRef !== nodeId) resolvedSubIdSet.add(subRef);
+          continue;
+        }
+        if (subRef.toLowerCase() === selfNameLower) continue;
         const subId = await findOrCreateProjectEntity(projectId, subRef, 'faction', {
           role: 'TỔ CHỨC',
           subType: nodeData.subType || 'Trung lập',

@@ -33,11 +33,11 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
     type: StoryNode['type'],
     defaults: Partial<StoryNode>
   ): StoryNode => {
-    const existing = (project.nodes || []).find(
-      (n) =>
-        n.type === type &&
-        (n.name.trim().toLocaleLowerCase('vi') === name.toLocaleLowerCase('vi') || n.id === name)
-    );
+    const nodesOfType = (project.nodes || []).filter((n) => n.type === type);
+    const nameLower = name.toLocaleLowerCase('vi');
+    const existing =
+      nodesOfType.find((n) => n.id === name) ||
+      nodesOfType.find((n) => n.name.trim().toLocaleLowerCase('vi') === nameLower);
     if (existing) return existing;
 
     const prefix = type.slice(0, 4);
@@ -294,9 +294,16 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
     });
 
     removeObsoleteGeneratedLinks('incoming', node.id, 'SUB_FACTION_OF');
+    const factionById = new Map(
+      (project.nodes || []).filter((n) => n.type === 'faction').map((f) => [f.id, f])
+    );
     const rawSubEntries = parseEventParticipants(node.subFactions)
       .map((s) => cleanRelationalVal(s))
-      .filter((s) => Boolean(s) && s !== node.id && s.toLowerCase() !== facNameLower);
+      .filter((s) => {
+        if (!s || s === node.id) return false;
+        if (factionById.has(s)) return true;
+        return s.toLowerCase() !== facNameLower;
+      });
     const seenSubIds = new Set<string>();
     rawSubEntries.forEach((subRef) => {
       const subFac = findOrAddNode(subRef, 'faction', {
@@ -1428,17 +1435,29 @@ export class ProjectStore {
       'Tài khoản đã thay đổi trong lúc xóa node.'
     );
     const deletedNode = (project.nodes || []).find((n) => n.id === nodeId);
-    const deletedNameLower = (deletedNode?.name || '').trim().toLowerCase();
-    project.nodes = project.nodes
-      .filter((n) => n.id !== nodeId)
-      .map((n) => {
+    const remainingNodes = project.nodes.filter((n) => n.id !== nodeId);
+    if (deletedNode?.type === 'faction') {
+      const deletedNameLower = (deletedNode.name || '').trim().toLowerCase();
+      const survivingFactions = remainingNodes.filter((n) => n.type === 'faction');
+      const survivingFactionIds = new Set(survivingFactions.map((n) => n.id));
+      const survivingFactionNamesLower = new Set(
+        survivingFactions.map((n) => (n.name || '').trim().toLowerCase()).filter(Boolean)
+      );
+      project.nodes = remainingNodes.map((n) => {
         if (n.type !== 'faction' || !n.subFactions) return n;
         const currentSubs = parseEventParticipants(n.subFactions);
         const filteredSubs = currentSubs.filter((entry) => {
           const t = entry.trim();
           if (!t) return false;
           if (t === nodeId) return false;
-          if (deletedNameLower && t.toLowerCase() === deletedNameLower) return false;
+          if (survivingFactionIds.has(t)) return true;
+          if (
+            deletedNameLower &&
+            t.toLowerCase() === deletedNameLower &&
+            !survivingFactionNamesLower.has(deletedNameLower)
+          ) {
+            return false;
+          }
           return true;
         });
         if (filteredSubs.length === currentSubs.length) return n;
@@ -1447,6 +1466,9 @@ export class ProjectStore {
           subFactions: filteredSubs.length > 0 ? JSON.stringify(filteredSubs) : '',
         };
       });
+    } else {
+      project.nodes = remainingNodes;
+    }
     project.links = project.links.filter((l) => l.source !== nodeId && l.target !== nodeId);
     project.edges = project.links;
     project.nodeCount = project.nodes.length;

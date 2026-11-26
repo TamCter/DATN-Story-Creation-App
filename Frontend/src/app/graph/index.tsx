@@ -1135,15 +1135,18 @@ export default function GraphScreen() {
         ...formFactionMembers,
         ...parseEventParticipants(formCustomMemberInput),
       ]);
+      const existingFactionIds = new Set(
+        nodes.filter((n) => n.type === 'faction').map((n) => n.id)
+      );
       const selfNameLower = formName.trim().toLowerCase();
       const mergedSubFactions = dedupNames([
         ...formSubFactions,
         ...parseEventParticipants(formCustomSubFactionInput),
-      ]).filter(
-        (name) =>
-          name.toLowerCase() !== selfNameLower &&
-          (!editingNodeId || name !== editingNodeId)
-      );
+      ]).filter((entry) => {
+        if (editingNodeId && entry === editingNodeId) return false;
+        if (existingFactionIds.has(entry)) return true;
+        return entry.toLowerCase() !== selfNameLower;
+      });
       payload.seniorMembers =
         mergedSeniorMembers.length > 0 ? JSON.stringify(mergedSeniorMembers) : '';
       payload.members = mergedMembers.length > 0 ? JSON.stringify(mergedMembers) : '';
