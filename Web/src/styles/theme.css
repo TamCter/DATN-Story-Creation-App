@@ -1,25 +1,25 @@
 :root,
 [data-theme='dark'] {
-  /* Bảng màu chuẩn đồng bộ từ App (ThemeColors) */
-  --bg-app: #0e0d0b;
-  --bg-sidebar: #151310;
-  --bg-paper: #181612;
-  --bg-elevated: #1a1814;
-  --bg-hover: rgba(229, 169, 60, 0.08);
+  /* Tông đen chủ đạo dễ nhìn kết hợp nhấn vàng kim chuẩn App */
+  --bg-app: #080808;
+  --bg-sidebar: #0c0c0c;
+  --bg-paper: #111111;
+  --bg-elevated: #171717;
+  --bg-hover: rgba(255, 255, 255, 0.06);
   --bg-active: rgba(229, 169, 60, 0.16);
-  --border: #28251e;
-  --border-subtle: #211e18;
-  --border-light: #383329;
-  --border-gold: rgba(229, 169, 60, 0.35);
-  --text-primary: #f5eee6;
-  --text-secondary: #8f887b;
-  --text-muted: #5e584d;
+  --border: #242424;
+  --border-subtle: #1c1c1c;
+  --border-light: #333333;
+  --border-gold: rgba(229, 169, 60, 0.38);
+  --text-primary: #f5f2ec;
+  --text-secondary: #a39d93;
+  --text-muted: #6e6960;
   --accent: #e5a93c;
   --accent-hover: #f3c76f;
   --accent-dim: #ba852d;
   --accent-soft: rgba(229, 169, 60, 0.15);
-  --accent-text: #12100d;
-  --danger: #d95a38;
+  --accent-text: #0b0b0b;
+  --danger: #e05d44;
   --warning: #e5a93c;
   --success: #42b883;
   --node-character: #e5a93c;
@@ -27,8 +27,8 @@
   --node-faction: #d95a38;
   --node-event: #5b8ec2;
   --node-location: #9f70cf;
-  --shadow-paper: 0 6px 32px rgba(0, 0, 0, 0.45);
-  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.68);
+  --shadow-paper: 0 6px 32px rgba(0, 0, 0, 0.6);
+  --shadow-modal: 0 24px 64px rgba(0, 0, 0, 0.8);
 }
 
 [data-theme='sepia'] {

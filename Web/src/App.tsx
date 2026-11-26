@@ -552,7 +552,7 @@ export default function App() {
   };
 
   const themeLabel: Record<EditorTheme, string> = {
-    dark: 'Màu App',
+    dark: 'Nền đen',
     sepia: 'Giấy vàng',
     light: 'Sáng',
   };

@@ -9,7 +9,7 @@ import type {
 const KEYS = {
   AUTH_TOKEN: 'story_web_auth_token',
   AUTH_USER: 'story_web_auth_user',
-  PREFS: 'story_web_editor_prefs',
+  PREFS: 'story_web_editor_prefs_v2',
   GOAL: 'story_web_daily_goal',
   LOCAL_PROJECTS: 'story_web_local_projects',
   LOCAL_CHAPTERS_PREFIX: 'story_web_local_chapters_',
