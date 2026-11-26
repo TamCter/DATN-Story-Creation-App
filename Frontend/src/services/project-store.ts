@@ -69,6 +69,7 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
     BIRTHPLACE: ['birthplace'],
     MEMBER_OF: ['member_of', 'sect', 'member'],
     SENIOR_MEMBER_OF: ['senior_member_of', 'senior-member'],
+    SUB_FACTION_OF: ['sub_faction_of', 'sub-faction'],
     STATUS_EVENT: ['status_event', 'event'],
     OWNS: ['owns', 'holder'],
     ORIGIN: ['origin'],
@@ -289,6 +290,27 @@ function ensureLocalRelatedEntities(project: StoryProject, node: StoryNode): voi
       const srcChar = charById.get(l.source);
       const srcSect = cleanRelationalVal(srcChar?.sect);
       return Boolean(srcSect && (srcSect.toLowerCase() === facNameLower || srcSect === node.id));
+    });
+
+    removeObsoleteGeneratedLinks('incoming', node.id, 'SUB_FACTION_OF');
+    const subFactions = parseEventParticipants(node.subFactions)
+      .map((s) => cleanRelationalVal(s))
+      .filter((s) => Boolean(s) && s.toLowerCase() !== facNameLower && s !== node.id);
+    const seenSubLower = new Set<string>();
+    subFactions.forEach((subName) => {
+      const key = subName.toLowerCase();
+      if (seenSubLower.has(key)) return;
+      seenSubLower.add(key);
+      const subFac = findOrAddNode(subName, 'faction', {
+        role: 'TỔ CHỨC',
+        subType: node.subType || 'Trung lập',
+        alignment: node.alignment || 'TRUNG LẬP',
+        desc: `Tổ chức trực thuộc ${node.name}`,
+        status: 'Đang hoạt động',
+      });
+      if (subFac.id !== node.id) {
+        ensureLink(subFac.id, node.id, 'SUB_FACTION_OF', 'Trực thuộc', 'solid');
+      }
     });
 
     removeObsoleteGeneratedLinks('outgoing', node.id, 'HEADQUARTERS');
@@ -962,6 +984,7 @@ export class ProjectStore {
       leader: nodeData.leader?.trim() || '',
       members: nodeData.members?.trim() || '',
       seniorMembers: nodeData.seniorMembers?.trim() || '',
+      subFactions: nodeData.subFactions?.trim() || '',
       headquarters: nodeData.headquarters?.trim() || '',
       motto: nodeData.motto?.trim() || '',
       alignment: nodeData.alignment?.trim() || '',

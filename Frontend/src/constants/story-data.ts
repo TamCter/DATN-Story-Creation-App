@@ -32,6 +32,7 @@ export interface StoryNode {
   leader?: string;
   members?: string;
   seniorMembers?: string;
+  subFactions?: string;
   headquarters?: string;
   motto?: string;
   alignment?: string;
@@ -472,6 +473,92 @@ export function getFactionRuledLocations(
   });
 
   return result;
+}
+
+export function getFactionHierarchy(
+  faction: Pick<StoryNode, 'id' | 'name' | 'subFactions'>,
+  allNodes: StoryNode[] = [],
+  allLinks: StoryLink[] = []
+): { subFactions: string[]; parentFactions: string[] } {
+  const facId = (faction.id || '').trim();
+  const facNameLower = (faction.name || '').trim().toLowerCase();
+  const factionNodes = allNodes.filter((n) => n.type === 'faction');
+  const facById = new Map<string, StoryNode>();
+  const facByNameLower = new Map<string, StoryNode>();
+  factionNodes.forEach((f) => {
+    facById.set(f.id, f);
+    facByNameLower.set((f.name || '').trim().toLowerCase(), f);
+  });
+
+  const isSelf = (raw?: string): boolean => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed) return false;
+    return (
+      (Boolean(facNameLower) && trimmed.toLowerCase() === facNameLower) ||
+      (Boolean(facId) && trimmed === facId)
+    );
+  };
+
+  const seenSub = new Set<string>();
+  const subFactions: string[] = [];
+  const addSub = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = facById.get(trimmed) || facByNameLower.get(trimmed.toLowerCase());
+    if (matched && facId && matched.id === facId) return;
+    const displayName = matched ? matched.name.trim() : trimmed;
+    if (isSelf(displayName)) return;
+    const key = displayName.toLowerCase();
+    if (!seenSub.has(key)) {
+      seenSub.add(key);
+      subFactions.push(displayName);
+    }
+  };
+
+  const seenParent = new Set<string>();
+  const parentFactions: string[] = [];
+  const addParent = (raw?: string) => {
+    const trimmed = String(raw || '').trim();
+    if (!trimmed || OWNED_ITEM_PLACEHOLDER_PATTERN.test(trimmed)) return;
+    const matched = facById.get(trimmed) || facByNameLower.get(trimmed.toLowerCase());
+    if (matched && facId && matched.id === facId) return;
+    const displayName = matched ? matched.name.trim() : trimmed;
+    if (isSelf(displayName)) return;
+    const key = displayName.toLowerCase();
+    if (!seenParent.has(key)) {
+      seenParent.add(key);
+      parentFactions.push(displayName);
+    }
+  };
+
+  // 1. Các tổ chức trực thuộc khai báo trên chính tổ chức này
+  parseEventParticipants(faction.subFactions).forEach(addSub);
+
+  // 2. Các tổ chức cấp trên khai báo tổ chức này trong subFactions của họ
+  factionNodes.forEach((otherFac) => {
+    if (facId && otherFac.id === facId) return;
+    const otherSubs = parseEventParticipants(otherFac.subFactions);
+    if (otherSubs.some(isSelf)) {
+      addParent(otherFac.name);
+    }
+  });
+
+  // 3. Từ cạnh SUB_FACTION_OF (sub --[Trực thuộc]--> parent)
+  allLinks.forEach((link) => {
+    if ((link.category || '').toUpperCase() !== 'SUB_FACTION_OF') return;
+    const sourceId = typeof link.source === 'string' ? link.source : (link.source as any)?.id;
+    const targetId = typeof link.target === 'string' ? link.target : (link.target as any)?.id;
+    if (!facId || !sourceId || !targetId) return;
+    if (targetId === facId) {
+      const sub = facById.get(sourceId);
+      if (sub) addSub(sub.name);
+    } else if (sourceId === facId) {
+      const parent = facById.get(targetId);
+      if (parent) addParent(parent.name);
+    }
+  });
+
+  return { subFactions, parentFactions };
 }
 
 export function formatDateDDMMYYYY(value?: string): string {

@@ -26,6 +26,7 @@ import {
   generateUniqueNodeId,
   getCharacterFactions,
   getCharacterOwnedItems,
+  getFactionHierarchy,
   getItemHolders,
   getLocationFactions,
   parseEventParticipants,
@@ -625,6 +626,29 @@ export default function NodesDetailScreen() {
                   {node.dangerLevel ? (
                     <Text style={styles.attrTag}>⚠️ Nguy hiểm: {node.dangerLevel}</Text>
                   ) : null}
+                  {node.type === 'faction'
+                    ? (() => {
+                        const { subFactions, parentFactions } = getFactionHierarchy(
+                          node,
+                          nodes,
+                          currentProject.links
+                        );
+                        return (
+                          <>
+                            {parentFactions.length > 0 ? (
+                              <Text style={styles.attrTag}>
+                                🏛️ Trực thuộc: {parentFactions.join(', ')}
+                              </Text>
+                            ) : null}
+                            {subFactions.length > 0 ? (
+                              <Text style={styles.attrTag}>
+                                🏢 Tổ chức trực thuộc: {subFactions.join(', ')}
+                              </Text>
+                            ) : null}
+                          </>
+                        );
+                      })()
+                    : null}
                   {node.ruler ? <Text style={styles.attrTag}>🏰 Cai quản: {node.ruler}</Text> : null}
                   {node.leader ? <Text style={styles.attrTag}>👑 Thủ lĩnh: {node.leader}</Text> : null}
                   {node.headquarters ? (

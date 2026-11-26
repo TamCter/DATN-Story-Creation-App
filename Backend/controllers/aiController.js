@@ -27,6 +27,7 @@ const RELATIONAL_NODE_FIELDS = [
   'leader',
   'members',
   'seniorMembers',
+  'subFactions',
   'headquarters',
   'location',
   'chapter',
@@ -53,7 +54,7 @@ Có 5 loại node:
 1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob (Ngày/Tháng/Năm sinh định dạng DD/MM/YYYY, VD: 15/08/1998), age (số tuổi), birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
-4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, seniorMembers (danh sách tên thành viên cấp cao phân tách bằng dấu phẩy), members (danh sách tên thành viên phân tách bằng dấu phẩy), headquarters, motto, statusEvent
+4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, seniorMembers (danh sách tên thành viên cấp cao phân tách bằng dấu phẩy), members (danh sách tên thành viên phân tách bằng dấu phẩy), subFactions (danh sách tên các tổ chức trực thuộc / dưới trướng phân tách bằng dấu phẩy), headquarters, motto, statusEvent
 5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng DD/MM/YYYY, VD: 15/08/2024), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
 QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
@@ -2082,6 +2083,7 @@ async function analyzeChapterText(req, res, next) {
           n.leader && `thủ lĩnh=${n.leader}`,
           n.seniorMembers && `thành viên cấp cao=${n.seniorMembers}`,
           n.members && `thành viên=${n.members}`,
+          n.subFactions && `tổ chức trực thuộc=${n.subFactions}`,
           n.headquarters && `trụ sở=${n.headquarters}`,
           n.motto && `tôn chỉ=${n.motto}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,

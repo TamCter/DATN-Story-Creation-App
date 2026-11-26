@@ -37,6 +37,7 @@ import {
   getCharacterFactions,
   getCharacterOwnedItems,
   getDateSortKey,
+  getFactionHierarchy,
   getFactionMembers,
   getFactionRuledLocations,
   getItemHolders,
@@ -336,8 +337,10 @@ export default function GraphScreen() {
   const [formLeader, setFormLeader] = useState('');
   const [formFactionSeniorMembers, setFormFactionSeniorMembers] = useState<string[]>([]);
   const [formFactionMembers, setFormFactionMembers] = useState<string[]>([]);
+  const [formSubFactions, setFormSubFactions] = useState<string[]>([]);
   const [formCustomSeniorInput, setFormCustomSeniorInput] = useState('');
   const [formCustomMemberInput, setFormCustomMemberInput] = useState('');
+  const [formCustomSubFactionInput, setFormCustomSubFactionInput] = useState('');
   const [formHeadquarters, setFormHeadquarters] = useState('');
   const [formMotto, setFormMotto] = useState('');
   const [formAlignment, setFormAlignment] = useState<string>('ĐỒNG MINH');
@@ -525,8 +528,10 @@ export default function GraphScreen() {
     setFormLeader('');
     setFormFactionSeniorMembers([]);
     setFormFactionMembers([]);
+    setFormSubFactions([]);
     setFormCustomSeniorInput('');
     setFormCustomMemberInput('');
+    setFormCustomSubFactionInput('');
     setFormHeadquarters('');
     setFormMotto('');
     setFormAlignment('ĐỒNG MINH');
@@ -583,6 +588,9 @@ export default function GraphScreen() {
     }
     if (nodeData.members) {
       setFormFactionMembers(parseEventParticipants(nodeData.members));
+    }
+    if (nodeData.subFactions) {
+      setFormSubFactions(parseEventParticipants(nodeData.subFactions));
     }
     if (nodeData.headquarters) setFormHeadquarters(nodeData.headquarters);
     if (nodeData.motto) setFormMotto(nodeData.motto);
@@ -715,6 +723,7 @@ export default function GraphScreen() {
           cleaned.leader = keepIfAllowed(nodeData.leader, 'character');
           cleaned.members = filterAllowedList(nodeData.members, 'character');
           cleaned.seniorMembers = filterAllowedList(nodeData.seniorMembers, 'character');
+          cleaned.subFactions = filterAllowedList(nodeData.subFactions, 'faction');
           cleaned.headquarters = keepIfAllowed(nodeData.headquarters, 'location');
           cleaned.statusEvent = keepIfAllowed(nodeData.statusEvent, 'event');
         } else if (t === 'location') {
@@ -948,12 +957,15 @@ export default function GraphScreen() {
     if (node.type === 'faction') {
       setFormFactionSeniorMembers(parseEventParticipants(node.seniorMembers));
       setFormFactionMembers(parseEventParticipants(node.members));
+      setFormSubFactions(parseEventParticipants(node.subFactions));
     } else {
       setFormFactionSeniorMembers([]);
       setFormFactionMembers([]);
+      setFormSubFactions([]);
     }
     setFormCustomSeniorInput('');
     setFormCustomMemberInput('');
+    setFormCustomSubFactionInput('');
     setFormHeadquarters(node.headquarters || '');
     setFormMotto(node.motto || '');
     setFormAlignment(node.alignment || 'ĐỒNG MINH');
@@ -1079,9 +1091,20 @@ export default function GraphScreen() {
         ...formFactionMembers,
         ...parseEventParticipants(formCustomMemberInput),
       ]);
+      const selfNameLower = formName.trim().toLowerCase();
+      const mergedSubFactions = dedupNames([
+        ...formSubFactions,
+        ...parseEventParticipants(formCustomSubFactionInput),
+      ]).filter(
+        (name) =>
+          name.toLowerCase() !== selfNameLower &&
+          (!editingNodeId || name !== editingNodeId)
+      );
       payload.seniorMembers =
         mergedSeniorMembers.length > 0 ? JSON.stringify(mergedSeniorMembers) : '';
       payload.members = mergedMembers.length > 0 ? JSON.stringify(mergedMembers) : '';
+      payload.subFactions =
+        mergedSubFactions.length > 0 ? JSON.stringify(mergedSubFactions) : '';
       payload.headquarters = formHeadquarters.trim();
       payload.motto = formMotto.trim();
     } else if (formType === 'event') {
@@ -2312,6 +2335,158 @@ export default function GraphScreen() {
                     </View>
                   </View>
 
+                  {/* Tổ chức trực thuộc / Dưới trướng (chọn nhiều) */}
+                  <View style={styles.modalInputGroup}>
+                    <Text style={styles.modalInputLabel}>
+                      Tổ chức trực thuộc / Dưới trướng (chọn nhiều)
+                    </Text>
+                    {isEditingNode && editingNodeId
+                      ? (() => {
+                          const editingFac = nodes.find((n) => n.id === editingNodeId);
+                          if (!editingFac) return null;
+                          const { parentFactions } = getFactionHierarchy(
+                            editingFac,
+                            nodes,
+                            links
+                          );
+                          return parentFactions.length > 0 ? (
+                            <Text
+                              style={{
+                                color: '#b8a98a',
+                                fontSize: 11,
+                                marginBottom: 6,
+                              }}>
+                              🏛️ Tổ chức này đang trực thuộc: {parentFactions.join(', ')}
+                            </Text>
+                          ) : null;
+                        })()
+                      : null}
+                    {(() => {
+                      const selfLower = formName.trim().toLowerCase();
+                      const otherFactions = factionNodes.filter(
+                        (f) =>
+                          (!editingNodeId || f.id !== editingNodeId) &&
+                          (f.name || '').trim().toLowerCase() !== selfLower
+                      );
+                      const existingFacNamesLower = new Set(
+                        otherFactions.map((f) => (f.name || '').trim().toLowerCase())
+                      );
+                      const customSelected = formSubFactions.filter(
+                        (s) =>
+                          s.trim().toLowerCase() !== selfLower &&
+                          !existingFacNamesLower.has(s.trim().toLowerCase())
+                      );
+                      const allNames = [
+                        ...otherFactions.map((f) => f.name),
+                        ...customSelected,
+                      ];
+                      return allNames.length > 0 ? (
+                        <View style={styles.eventCharacterOptions}>
+                          {allNames.map((facName) => {
+                            const keyLower = facName.trim().toLowerCase();
+                            const isSelected = formSubFactions.some(
+                              (s) => s.trim().toLowerCase() === keyLower
+                            );
+                            return (
+                              <Pressable
+                                key={`fac-sub-${keyLower}`}
+                                style={[
+                                  styles.eventCharacterChip,
+                                  isSelected && styles.eventCharacterChipSelected,
+                                ]}
+                                onPress={() =>
+                                  setFormSubFactions((selected) =>
+                                    isSelected
+                                      ? selected.filter(
+                                          (s) => s.trim().toLowerCase() !== keyLower
+                                        )
+                                      : [...selected, facName]
+                                  )
+                                }
+                                accessibilityRole="checkbox"
+                                accessibilityState={{ checked: isSelected }}>
+                                <Text
+                                  style={[
+                                    styles.eventCharacterChipText,
+                                    isSelected && styles.eventCharacterChipTextSelected,
+                                  ]}>
+                                  {isSelected ? '✓ ' : ''}🏢 {facName}
+                                </Text>
+                              </Pressable>
+                            );
+                          })}
+                        </View>
+                      ) : (
+                        <Text style={styles.eventCharacterEmpty}>
+                          Chưa có tổ chức khác. Nhập tên tổ chức trực thuộc bên dưới để tự tạo.
+                        </Text>
+                      );
+                    })()}
+                    <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                      <TextInput
+                        style={[styles.modalInput, { flex: 1 }]}
+                        value={formCustomSubFactionInput}
+                        onChangeText={setFormCustomSubFactionInput}
+                        placeholder="VD: Đội Phản Ứng Nhanh, Phân hội Bắc..."
+                        placeholderTextColor="#665f52"
+                        onSubmitEditing={() => {
+                          const selfLower = formName.trim().toLowerCase();
+                          const additions = parseEventParticipants(
+                            formCustomSubFactionInput
+                          ).filter((n) => n.trim().toLowerCase() !== selfLower);
+                          if (additions.length === 0) return;
+                          setFormSubFactions((prev) => {
+                            const seen = new Set(prev.map((s) => s.trim().toLowerCase()));
+                            const next = [...prev];
+                            additions.forEach((name) => {
+                              const key = name.trim().toLowerCase();
+                              if (!seen.has(key)) {
+                                seen.add(key);
+                                next.push(name);
+                              }
+                            });
+                            return next;
+                          });
+                          setFormCustomSubFactionInput('');
+                        }}
+                      />
+                      <Pressable
+                        style={[
+                          styles.eventCharacterChip,
+                          styles.eventCharacterChipSelected,
+                          { justifyContent: 'center', paddingHorizontal: 14 },
+                        ]}
+                        onPress={() => {
+                          const selfLower = formName.trim().toLowerCase();
+                          const additions = parseEventParticipants(
+                            formCustomSubFactionInput
+                          ).filter((n) => n.trim().toLowerCase() !== selfLower);
+                          if (additions.length === 0) return;
+                          setFormSubFactions((prev) => {
+                            const seen = new Set(prev.map((s) => s.trim().toLowerCase()));
+                            const next = [...prev];
+                            additions.forEach((name) => {
+                              const key = name.trim().toLowerCase();
+                              if (!seen.has(key)) {
+                                seen.add(key);
+                                next.push(name);
+                              }
+                            });
+                            return next;
+                          });
+                          setFormCustomSubFactionInput('');
+                        }}>
+                        <Text
+                          style={[
+                            styles.eventCharacterChipText,
+                            styles.eventCharacterChipTextSelected,
+                          ]}>
+                          + Thêm
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </View>
+
                   <View style={styles.modalInputGroup}>
                     <Text style={styles.modalInputLabel}>Tôn chỉ</Text>
                     <TextInput
@@ -2889,8 +3064,29 @@ export default function GraphScreen() {
                             nodes,
                             links
                           );
+                          const { subFactions, parentFactions } = getFactionHierarchy(
+                            selectedNode,
+                            nodes,
+                            links
+                          );
                           return (
                             <>
+                              {parentFactions.length > 0 ? (
+                                <View style={styles.detailRowItem}>
+                                  <Text style={styles.detailItemKey}>Trực thuộc:</Text>
+                                  <Text style={[styles.detailItemVal, { color: '#e5a93c' }]}>
+                                    🏛️ {parentFactions.join(', ')}
+                                  </Text>
+                                </View>
+                              ) : null}
+                              {subFactions.length > 0 ? (
+                                <View style={styles.detailRowItem}>
+                                  <Text style={styles.detailItemKey}>Tổ chức trực thuộc:</Text>
+                                  <Text style={styles.detailItemVal}>
+                                    🏢 {subFactions.join(', ')}
+                                  </Text>
+                                </View>
+                              ) : null}
                               {seniorMembers.length > 0 ? (
                                 <View style={styles.detailRowItem}>
                                   <Text style={styles.detailItemKey}>Thành viên cấp cao:</Text>
