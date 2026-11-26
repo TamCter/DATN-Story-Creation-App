@@ -1298,9 +1298,48 @@ export default function AIChatPanel({
     }).start();
   }, [visible, slideAnim]);
 
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  const scrollToBottom = useCallback((animated = true) => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 100);
   }, []);
+
+  const pendingInitialScrollRef = useRef(false);
+  const initialScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const cancelInitialScroll = useCallback(() => {
+    pendingInitialScrollRef.current = false;
+    if (initialScrollTimerRef.current) {
+      clearTimeout(initialScrollTimerRef.current);
+      initialScrollTimerRef.current = null;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (visible) {
+      pendingInitialScrollRef.current = true;
+    } else {
+      cancelInitialScroll();
+    }
+  }, [visible, storageKey, cancelInitialScroll]);
+
+  useEffect(() => {
+    if (visible && isScopeLoaded && pendingInitialScrollRef.current) {
+      if (initialScrollTimerRef.current) {
+        clearTimeout(initialScrollTimerRef.current);
+      }
+      initialScrollTimerRef.current = setTimeout(() => {
+        initialScrollTimerRef.current = null;
+        if (pendingInitialScrollRef.current) {
+          scrollRef.current?.scrollToEnd({ animated: false });
+        }
+      }, 60);
+      return () => {
+        if (initialScrollTimerRef.current) {
+          clearTimeout(initialScrollTimerRef.current);
+          initialScrollTimerRef.current = null;
+        }
+      };
+    }
+  }, [visible, isScopeLoaded, storageKey]);
 
   const sendMessagesToAI = async (
     currentHistory: AIChatMessage[],
@@ -1928,6 +1967,12 @@ export default function AIChatPanel({
       <ScrollView
         ref={scrollRef}
         style={styles.messageList}
+        onScrollBeginDrag={cancelInitialScroll}
+        onContentSizeChange={() => {
+          if (visible && pendingInitialScrollRef.current && isScopeLoaded) {
+            scrollRef.current?.scrollToEnd({ animated: false });
+          }
+        }}
         contentContainerStyle={styles.messageListContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">

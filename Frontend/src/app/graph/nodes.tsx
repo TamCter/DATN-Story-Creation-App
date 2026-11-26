@@ -21,9 +21,14 @@ import {
   CHARACTER_STATUS_OPTIONS,
   FACTION_CLASSIFICATIONS,
   FACTION_STATUS_OPTIONS,
+  formatCharacterFactions,
   GENDER_OPTIONS,
   generateUniqueNodeId,
+  getCharacterFactions,
   getCharacterOwnedItems,
+  getFactionHierarchy,
+  getItemHolders,
+  getLocationFactions,
   parseEventParticipants,
   getProjectChapters,
   INITIAL_PROJECTS,
@@ -176,17 +181,17 @@ export default function NodesDetailScreen() {
       defaultType === 'character'
         ? 'Điều tra viên'
         : defaultType === 'faction'
-        ? 'Đồng minh'
-        : ''
+          ? 'Đồng minh'
+          : ''
     );
     setFormStatus(
       defaultType === 'character'
         ? 'Còn sống'
         : defaultType === 'faction'
-        ? 'Đang hoạt động'
-        : defaultType === 'event'
-        ? 'Đã diễn ra'
-        : 'Hoạt động'
+          ? 'Đang hoạt động'
+          : defaultType === 'event'
+            ? 'Đã diễn ra'
+            : 'Hoạt động'
     );
     setFormStatusEvent('');
     setFormDesc('');
@@ -560,17 +565,26 @@ export default function NodesDetailScreen() {
                   {node.gender ? <Text style={styles.attrTag}>⚧ Giới tính: {node.gender}</Text> : null}
                   {node.type === 'character'
                     ? (() => {
-                        const ownedItems = getCharacterOwnedItems(
-                          node,
-                          nodes,
-                          currentProject.links
-                        );
-                        return ownedItems.length > 0 ? (
-                          <Text style={styles.attrTag}>🎒 Vật phẩm: {ownedItems.join(', ')}</Text>
-                        ) : null;
-                      })()
+                      const ownedItems = getCharacterOwnedItems(
+                        node,
+                        nodes,
+                        currentProject.links
+                      );
+                      return ownedItems.length > 0 ? (
+                        <Text style={styles.attrTag}>🎒 Vật phẩm: {ownedItems.join(', ')}</Text>
+                      ) : null;
+                    })()
                     : null}
-                  {node.sect ? <Text style={styles.attrTag}>🏛️ Tổ chức: {node.sect}</Text> : null}
+                  {node.type === 'character'
+                    ? (() => {
+                      const memberships = getCharacterFactions(node, nodes, currentProject.links);
+                      return memberships.length > 0 ? (
+                        <Text style={styles.attrTag}>
+                          🏛️ Tổ chức: {formatCharacterFactions(memberships)}
+                        </Text>
+                      ) : null;
+                    })()
+                    : null}
                   {node.personality ? (
                     <Text style={styles.attrTag}>🎭 Tính cách: {node.personality}</Text>
                   ) : null}
@@ -578,15 +592,63 @@ export default function NodesDetailScreen() {
                   {node.origin ? <Text style={styles.attrTag}>📜 Xuất xứ: {node.origin}</Text> : null}
                   {node.element ? <Text style={styles.attrTag}>⚡ Thuộc tính: {node.element}</Text> : null}
                   {node.power ? <Text style={styles.attrTag}>💥 Mức độ ảnh hưởng: {node.power}</Text> : null}
-                  {node.holderOrLocation ? (
-                    <Text style={styles.attrTag}>👤 Người giữ: {node.holderOrLocation}</Text>
-                  ) : null}
+                  {node.type === 'item'
+                    ? (() => {
+                      const holders = getItemHolders(node, nodes, currentProject.links);
+                      return holders.length > 0 ? (
+                        <Text style={styles.attrTag}>👤 Người giữ: {holders.join(', ')}</Text>
+                      ) : null;
+                    })()
+                    : null}
                   {node.region ? <Text style={styles.attrTag}>📍 Khu vực: {node.region}</Text> : null}
                   {node.terrain ? <Text style={styles.attrTag}>🏔️ Địa thế: {node.terrain}</Text> : null}
+                  {node.type === 'location'
+                    ? (() => {
+                      const { rulers, headquartersOf } = getLocationFactions(
+                        node,
+                        nodes,
+                        currentProject.links
+                      );
+                      return (
+                        <>
+                          {rulers.length > 0 ? (
+                            <Text style={styles.attrTag}>👑 Cai quản: {rulers.join(', ')}</Text>
+                          ) : null}
+                          {headquartersOf.length > 0 ? (
+                            <Text style={styles.attrTag}>
+                              🏛️ Trụ sở của: {headquartersOf.join(', ')}
+                            </Text>
+                          ) : null}
+                        </>
+                      );
+                    })()
+                    : null}
                   {node.dangerLevel ? (
                     <Text style={styles.attrTag}>⚠️ Nguy hiểm: {node.dangerLevel}</Text>
                   ) : null}
-                  {node.ruler ? <Text style={styles.attrTag}>🏰 Cai quản: {node.ruler}</Text> : null}
+                  {node.type === 'faction'
+                    ? (() => {
+                        const { subFactions, parentFactions } = getFactionHierarchy(
+                          node,
+                          nodes,
+                          currentProject.links
+                        );
+                        return (
+                          <>
+                            {parentFactions.length > 0 ? (
+                              <Text style={styles.attrTag}>
+                                🏛️ Trực thuộc: {parentFactions.join(', ')}
+                              </Text>
+                            ) : null}
+                            {subFactions.length > 0 ? (
+                              <Text style={styles.attrTag}>
+                                🏢 Tổ chức trực thuộc: {subFactions.join(', ')}
+                              </Text>
+                            ) : null}
+                          </>
+                        );
+                      })()
+                    : null}
                   {node.leader ? <Text style={styles.attrTag}>👑 Thủ lĩnh: {node.leader}</Text> : null}
                   {node.headquarters ? (
                     <Text style={styles.attrTag}>🏢 Trụ sở: {node.headquarters}</Text>
@@ -712,12 +774,12 @@ export default function NodesDetailScreen() {
                             t === 'character'
                               ? 'Còn sống'
                               : t === 'item'
-                              ? 'Nguyên vẹn'
-                              : t === 'location'
-                              ? 'Hoạt động'
-                              : t === 'faction'
-                              ? 'Đang hoạt động'
-                              : 'Đã diễn ra'
+                                ? 'Nguyên vẹn'
+                                : t === 'location'
+                                  ? 'Hoạt động'
+                                  : t === 'faction'
+                                    ? 'Đang hoạt động'
+                                    : 'Đã diễn ra'
                           );
                         }
                       }}>
@@ -839,31 +901,89 @@ export default function NodesDetailScreen() {
                     </View>
                   </View>
 
-                  {/* Gender & Sect */}
-                  <View style={styles.formRow}>
-                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Giới tính</Text>
-                      <FormSelectField
-                        value={formGender}
-                        onChange={setFormGender}
-                        options={GENDER_OPTIONS}
-                        placeholder="-- Chọn giới tính --"
-                      />
-                    </View>
-                    <View style={[styles.modalInputGroup, { flex: 1 }]}>
-                      <Text style={styles.modalInputLabel}>Tổ chức / Nhóm</Text>
-                      <FormSelectField
-                        value={formSect}
-                        onChange={setFormSect}
-                        options={factionNodes.map((fac) => ({
-                          label: fac.name,
-                          value: fac.name,
-                          subtitle: fac.alignment || fac.role || 'Tổ chức',
-                          icon: '🏛️',
-                        }))}
-                        placeholder="-- Chọn tổ chức --"
-                      />
-                    </View>
+                  {/* Gender */}
+                  <View style={styles.modalInputGroup}>
+                    <Text style={styles.modalInputLabel}>Giới tính</Text>
+                    <FormSelectField
+                      value={formGender}
+                      onChange={setFormGender}
+                      options={GENDER_OPTIONS}
+                      placeholder="-- Chọn giới tính --"
+                    />
+                  </View>
+
+                  {/* Factions & Roles (Tự động đồng bộ từ node Tổ chức) */}
+                  <View style={styles.modalInputGroup}>
+                    <Text style={styles.modalInputLabel}>
+                      Tổ chức & Vai trò
+                    </Text>
+                    {(() => {
+                      const currentCharSnapshot = isEditing && editingNodeId
+                        ? nodes.find((n) => n.id === editingNodeId) || {
+                          id: editingNodeId,
+                          name: formName,
+                          sect: formSect,
+                        }
+                        : { id: formId, name: formName, sect: formSect };
+                      const memberships = getCharacterFactions(
+                        currentCharSnapshot,
+                        nodes,
+                        currentProject.links
+                      );
+                      if (memberships.length === 0) {
+                        return (
+                          <Text style={{ fontSize: 12, color: '#787064', fontStyle: 'italic' }}>
+                            Chưa thuộc tổ chức nào — hãy gán nhân vật tại node Tổ chức để tự động đồng bộ.
+                          </Text>
+                        );
+                      }
+                      return (
+                        <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 8 }}>
+                          {memberships.map((m) => {
+                            const roleIcon =
+                              m.role === 'Thủ lĩnh'
+                                ? '👑'
+                                : m.role === 'Thành viên cấp cao'
+                                  ? '⭐'
+                                  : '👤';
+                            return (
+                              <View
+                                key={`node-char-fac-${m.factionName.toLowerCase()}`}
+                                style={{
+                                  paddingHorizontal: 10,
+                                  paddingVertical: 6,
+                                  borderRadius: 6,
+                                  borderWidth: 1,
+                                  borderColor: '#e5a93c',
+                                  backgroundColor: 'rgba(229, 169, 60, 0.16)',
+                                }}>
+                                <Text style={{ fontSize: 12, color: '#f2c86b' }}>
+                                  {roleIcon} {m.factionName} · {m.role}
+                                </Text>
+                              </View>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()}
+                    {formSect.trim() ? (
+                      <Pressable
+                        style={{
+                          marginTop: 8,
+                          alignSelf: 'flex-start',
+                          paddingHorizontal: 10,
+                          paddingVertical: 5,
+                          borderRadius: 6,
+                          borderWidth: 1,
+                          borderColor: '#7a3b32',
+                          backgroundColor: 'rgba(180, 68, 52, 0.14)',
+                        }}
+                        onPress={() => setFormSect('')}>
+                        <Text style={{ fontSize: 11, color: '#f0a69c' }}>
+                          ✕ Gỡ liên kết tổ chức cũ ({formSect.trim()})
+                        </Text>
+                      </Pressable>
+                    ) : null}
                   </View>
 
                   {/* Owned Weapons / Items (Multi-select) */}
@@ -904,8 +1024,8 @@ export default function NodesDetailScreen() {
                                   setFormWeapons((selected) =>
                                     isSelected
                                       ? selected.filter(
-                                          (w) => w.trim().toLowerCase() !== itemLower
-                                        )
+                                        (w) => w.trim().toLowerCase() !== itemLower
+                                      )
                                       : [...selected, itemName]
                                   )
                                 }

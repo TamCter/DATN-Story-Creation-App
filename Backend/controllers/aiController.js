@@ -27,6 +27,7 @@ const RELATIONAL_NODE_FIELDS = [
   'leader',
   'members',
   'seniorMembers',
+  'subFactions',
   'headquarters',
   'location',
   'chapter',
@@ -53,7 +54,7 @@ Có 5 loại node:
 1. character (Nhân vật): name, type="character", role (NHÂN VẬT CHÍNH/ĐỐI LẬP/TRUNG LẬP), desc, gender (Nam/Nữ/Khác), dob (Ngày/Tháng/Năm sinh định dạng DD/MM/YYYY, VD: 15/08/1998), age (số tuổi), birthplace, weapon, sect, personality, status (Còn sống/Đã chết/Hồi sinh), statusEvent
 2. item (Vật phẩm): name, type="item", desc, rarity (Phổ thông/Hiếm/Quý hiếm/Rất hiếm/Độc bản/Đặc biệt), origin, element, holderOrLocation
 3. location (Địa điểm): name, type="location", desc, region, climate, terrain, dangerLevel (An toàn/Bình thường/Nguy hiểm/Khu vực hạn chế), ruler
-4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, seniorMembers (danh sách tên thành viên cấp cao phân tách bằng dấu phẩy), members (danh sách tên thành viên phân tách bằng dấu phẩy), headquarters, motto, statusEvent
+4. faction (Tổ chức / Nhóm): name, type="faction", desc, subType (Đồng minh/Đối lập/Trung lập), alignment (ĐỒNG MINH/ĐỐI LẬP/TRUNG LẬP), status (Đang hoạt động/Tạm ngừng), leader, seniorMembers (danh sách tên thành viên cấp cao phân tách bằng dấu phẩy), members (danh sách tên thành viên phân tách bằng dấu phẩy), subFactions (danh sách tên các tổ chức trực thuộc / dưới trướng phân tách bằng dấu phẩy), headquarters, motto, statusEvent
 5. event (Sự kiện): name, type="event", desc, chapter, time (Ngày/Tháng/Năm định dạng DD/MM/YYYY, VD: 15/08/2024), location, status (Đã diễn ra/Đang diễn ra/Chưa diễn ra), eventType (Chiến đấu/Đối thoại / Đàm phán/Tiết lộ bí mật/Du hành/Biến cố / Hy sinh/Giao dịch / Vật phẩm/Hồi tưởng/Khác), importance (Nút thắt chính/Bước ngoặt/Gieo mầm/Sự kiện phụ), arcName, sequenceOrder, cause, conflict, outcome, consequences, impact, charactersInvolved, characterRoles, itemsInvolved, factionsInvolved
 
 QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
@@ -61,21 +62,31 @@ QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
 - Khi tạo nhân vật: nếu người dùng cung cấp năm sinh/ngày sinh (dob) mà không nêu tuổi (age), hãy tính tuổi theo năm hiện tại (hoặc để trống để hệ thống tự tính).
 - BẮT LỖI TUỔI & NĂM: Nếu người dùng nhập cả năm sinh và tuổi nhưng không khớp nhau theo năm hiện tại (hoặc mốc năm của truyện), hoặc nhập ngày/năm sự kiện mâu thuẫn với năm sinh nhân vật tham gia (chưa ra đời) hay mâu thuẫn với niên biểu sự kiện đã có, hãy CHỈ RÕ MÂU THUẪN và gợi ý chỉnh lại trong lời trả lời!
 
-QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
-Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
-- Nhân vật sở hữu / sử dụng vật phẩm: điền tên vật phẩm vào character.weapon (EQUIPPED) và/hoặc tên nhân vật vào item.holderOrLocation (OWNS).
-- Nhân vật thuộc tổ chức / lãnh đạo tổ chức: điền tên tổ chức vào character.sect (MEMBER_OF) và tên thủ lĩnh vào faction.leader (LEADER_OF).
-- Nhân vật sinh ra tại địa điểm: điền tên địa điểm vào character.birthplace (BIRTHPLACE).
-- Vật phẩm có nguồn gốc từ địa điểm: điền tên địa điểm vào item.origin (ORIGIN).
-- Tổ chức có trụ sở tại / cai quản địa điểm: điền tên địa điểm vào faction.headquarters (HEADQUARTERS) và tên tổ chức vào location.ruler (RULER_OF).
-- Nhân vật tham gia sự kiện: điền danh sách tên nhân vật (phân tách bằng dấu phẩy trong chuỗi) vào event.charactersInvolved (PARTICIPATED_IN).
-- Sự kiện diễn ra tại địa điểm: điền tên địa điểm vào event.location (EVENT_LOCATION).
-- Vật phẩm & Tổ chức trong sự kiện (NỐI QUA NHÂN VẬT THAM GIA): KHÔNG nối trực tiếp tách rời từ Sự kiện sang Vật phẩm/Tổ chức; đồ thị sẽ tự hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện và Tổ chức <--Tổ chức/Lãnh đạo-- Nhân vật --Tham gia--> Sự kiện. Do đó:
-  + Trong event.itemsInvolved, CHỈ điền chính xác tên những vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó (VD: nhân vật A sở hữu Z và X nhưng trong sự kiện Y chỉ cầm Z thì chỉ ghi Z).
-  + Trong event.factionsInvolved, CHỈ điền chính xác tên những tổ chức mà nhân vật tham gia đại diện / liên quan trong sự kiện đó.
-  + Bảo đảm nhân vật tham gia đã có quan hệ Sở hữu vật phẩm (character.weapon / item.holderOrLocation) và Tổ chức (character.sect / faction.leader).
-- Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
-- Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
+QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ & GIỚI HẠN CHỨC NĂNG CỦA ỨNG DỤNG (BẮT BUỘC):
+AI CHỈ ĐƯỢC PHÉP thực hiện đúng các chức năng và quan hệ có thật trên giao diện ứng dụng — TUYỆT ĐỐI KHÔNG tự bịa tính năng, trường dữ liệu, hoặc kiểu liên kết không tồn tại trên app (ví dụ: không hứa tự sửa/xóa trực tiếp node cũ trong DB, không gắn 2 trụ sở cho cùng 1 tổ chức, không nối trực tiếp Sự kiện với Vật phẩm/Tổ chức tách rời khỏi nhân vật tham gia).
+Hệ thống tự động sinh cạnh quan hệ trên đồ thị Neo4j theo đúng quy tắc số lượng (1-1 vs 1-N) của ứng dụng:
+- Nhân vật (character):
+  + Nơi sinh (character.birthplace -> BIRTHPLACE): tối đa 1 địa điểm.
+  + Vật phẩm sở hữu (character.weapon -> EQUIPPED): có thể nhiều vật phẩm (phân tách bằng dấu phẩy).
+  + Tổ chức & vai trò của nhân vật: được quản lý từ phía node Tổ chức (leader, seniorMembers, members), KHÔNG gán tổ chức tùy tiện từ phía nhân vật; để character.sect = "" nếu đã gán từ node Tổ chức.
+  + Biến cố trạng thái (character.statusEvent -> STATUS_EVENT): tối đa 1 sự kiện và CHỈ điền khi status là "Đã chết" hoặc "Hồi sinh".
+- Vật phẩm (item):
+  + Người nắm giữ (item.holderOrLocation -> OWNS): tối đa 1 nhân vật.
+  + Nguồn gốc (item.origin -> ORIGIN): tối đa 1 địa điểm.
+- Địa điểm (location):
+  + Thế lực cai quản (location.ruler -> RULER_OF): tối đa 1 tổ chức. LƯU Ý QUAN TRỌNG: nếu một tổ chức trong danh sách đã có sẵn trụ sở/địa điểm gắn với nó, KHÔNG tự ý tạo thêm địa điểm mới rồi nối làm trụ sở thứ 2 hay gán trùng địa điểm cho tổ chức đó, trừ khi người dùng nêu rõ muốn tạo địa điểm khác thuộc phạm vi quản lý.
+- Tổ chức (faction):
+  + Thủ lĩnh (faction.leader -> LEADER_OF): tối đa 1 nhân vật (nếu tổ chức đã có thủ lĩnh thì không tạo/gán thêm thủ lĩnh thứ 2).
+  + Trụ sở (faction.headquarters -> HEADQUARTERS): tối đa 1 địa điểm (nếu tổ chức đã có trụ sở thì KHÔNG tạo địa điểm mới làm trụ sở thứ 2 hay nối thêm cạnh trụ sở).
+  + Thành viên cấp cao (faction.seniorMembers -> SENIOR_MEMBER_OF), Thành viên (faction.members -> MEMBER_OF), Tổ chức trực thuộc (faction.subFactions -> SUB_FACTION_OF, chiều liên kết từ tổ chức con làm source tới tổ chức cha làm target với nhãn "Trực thuộc"): có thể nhiều thực thể (phân tách bằng dấu phẩy). Khi tạo tổ chức hoặc nối quan hệ giữa các tổ chức có sẵn, dùng SUB_FACTION_OF (source = tổ chức con, target = tổ chức cha).
+  + Biến cố trạng thái (faction.statusEvent -> STATUS_EVENT): tối đa 1 sự kiện và CHỈ điền khi status là "Tạm ngừng" hoặc "Suy tàn".
+- Sự kiện (event):
+  + Địa điểm diễn ra (event.location -> EVENT_LOCATION): tối đa 1 địa điểm.
+  + Nguyên nhân (event.cause -> CAUSED_BY): tối đa 1 sự kiện trước đó.
+  + Nhân vật tham gia (event.charactersInvolved -> PARTICIPATED_IN): có thể nhiều nhân vật.
+  + Vật phẩm & Tổ chức trong sự kiện (NỐI QUA NHÂN VẬT THAM GIA): KHÔNG nối trực tiếp tách rời từ Sự kiện sang Vật phẩm/Tổ chức; đồ thị sẽ tự hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện và Tổ chức <--Tổ chức/Lãnh đạo-- Nhân vật --Tham gia--> Sự kiện.
+    * Trong event.itemsInvolved, CHỈ điền chính xác tên những vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó.
+    * Trong event.factionsInvolved, CHỈ điền chính xác tên những tổ chức mà nhân vật tham gia đại diện / liên quan trong sự kiện đó.
 
 Nguyên tắc điền trường liên kết (RẤT QUAN TRỌNG ĐỂ KHÔNG SINH THÊM NODE ẨN):
 - Chỉ được phép điền tên node ĐÃ CÓ SẴN trong danh sách thực thể hiện tại của dự án, HOẶC tên một node nằm TRONG CHÍNH DANH SÁCH "nodes" mà bạn đang tạo ở lượt trả lời này.
@@ -375,8 +386,19 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 : null;
 
             if (Array.isArray(rawLinks) && rawLinks.length > 0) {
+              const hasRealValue = (val) => {
+                const t = String(val ?? '').trim();
+                return Boolean(t) && !PLACEHOLDER_VALUE_PATTERN.test(t);
+              };
               const seenKeys = new Set();
+              const reservedHqFactions = new Set();
+              const reservedLeaderFactions = new Set();
+              const reservedRulerLocations = new Set();
+              const reservedBirthplaceChars = new Set();
+              const reservedOriginItems = new Set();
               const resolvedLinks = [];
+              let rejectedCount = 0;
+
               for (const rawLink of rawLinks.slice(0, 5)) {
                 if (!rawLink || typeof rawLink !== 'object' || Array.isArray(rawLink)) continue;
                 const srcNode = resolveNode(rawLink.source || rawLink.sourceName);
@@ -386,26 +408,91 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 const label = typeof rawLink.label === 'string' && rawLink.label.trim()
                   ? rawLink.label.trim()
                   : 'Liên kết';
+                const rawTone = typeof rawLink.tone === 'string' ? rawLink.tone.trim().toLowerCase() : '';
+                const categoryUpper = typeof rawLink.category === 'string'
+                  ? rawLink.category.trim().toUpperCase()
+                  : 'RELATED';
+
+                // Chặn các kiểu liên kết không tồn tại trên app hoặc vi phạm ràng buộc 1-1 của node hiện có
+                if (categoryUpper === 'INVOLVES_ITEM' || categoryUpper === 'INVOLVES_FACTION') {
+                  rejectedCount += 1;
+                  continue;
+                }
+                let hqFacId = null;
+                if (categoryUpper === 'HEADQUARTERS') {
+                  const facNode = srcNode.type === 'faction' ? srcNode : tgtNode.type === 'faction' ? tgtNode : null;
+                  if (facNode) {
+                    hqFacId = String(facNode.id);
+                    if (hasRealValue(facNode.headquarters) || reservedHqFactions.has(hqFacId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
+                }
+                let leaderFacId = null;
+                if (categoryUpper === 'LEADER_OF') {
+                  const facNode = tgtNode.type === 'faction' ? tgtNode : srcNode.type === 'faction' ? srcNode : null;
+                  if (facNode) {
+                    leaderFacId = String(facNode.id);
+                    if (hasRealValue(facNode.leader) || reservedLeaderFactions.has(leaderFacId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
+                }
+                let rulerLocId = null;
+                if (categoryUpper === 'RULER_OF') {
+                  const locNode = tgtNode.type === 'location' ? tgtNode : srcNode.type === 'location' ? srcNode : null;
+                  if (locNode) {
+                    rulerLocId = String(locNode.id);
+                    if (hasRealValue(locNode.ruler) || reservedRulerLocations.has(rulerLocId)) {
+                      rejectedCount += 1;
+                      continue;
+                    }
+                  }
+                }
+                let bpCharId = null;
+                if (categoryUpper === 'BIRTHPLACE' && srcNode.type === 'character') {
+                  bpCharId = String(srcNode.id);
+                  if (hasRealValue(srcNode.birthplace) || reservedBirthplaceChars.has(bpCharId)) {
+                    rejectedCount += 1;
+                    continue;
+                  }
+                }
+                let originItemId = null;
+                if (categoryUpper === 'ORIGIN' && srcNode.type === 'item') {
+                  originItemId = String(srcNode.id);
+                  if (hasRealValue(srcNode.origin) || reservedOriginItems.has(originItemId)) {
+                    rejectedCount += 1;
+                    continue;
+                  }
+                }
+
                 const dedupKey = `${srcNode.id}::${tgtNode.id}::${label.toLocaleLowerCase('vi')}`;
                 if (seenKeys.has(dedupKey)) continue;
                 seenKeys.add(dedupKey);
 
-                const rawTone = typeof rawLink.tone === 'string' ? rawLink.tone.trim().toLowerCase() : '';
+                if (hqFacId) reservedHqFactions.add(hqFacId);
+                if (leaderFacId) reservedLeaderFactions.add(leaderFacId);
+                if (rulerLocId) reservedRulerLocations.add(rulerLocId);
+                if (bpCharId) reservedBirthplaceChars.add(bpCharId);
+                if (originItemId) reservedOriginItems.add(originItemId);
+
                 resolvedLinks.push({
                   source: String(srcNode.id),
                   target: String(tgtNode.id),
                   sourceName: String(srcNode.name),
                   targetName: String(tgtNode.name),
                   label,
-                  category: typeof rawLink.category === 'string' ? rawLink.category.trim() : 'RELATED',
+                  category: categoryUpper || 'RELATED',
                   tone: VALID_TONES.has(rawTone) ? rawTone : 'loyalty',
                   type: rawLink.type === 'dashed' ? 'dashed' : 'solid',
                   contextNote: typeof rawLink.contextNote === 'string' ? rawLink.contextNote.trim() : '',
                 });
               }
 
-              if (resolvedLinks.length > 0) {
-                return { linkDataList: resolvedLinks, start, end: end + 1 };
+              if (resolvedLinks.length > 0 || rejectedCount > 0) {
+                return { linkDataList: resolvedLinks, rejectedCount, start, end: end + 1 };
               }
             }
           } catch {
@@ -740,11 +827,41 @@ async function chatWithAI(req, res, next) {
 
     if (effectiveNodes.length > 0) {
       const MAX_CHAT_CTX_NODES = 120;
+      const cleanMetaVal = (val) => {
+        const t = String(val ?? '').trim();
+        return t && !PLACEHOLDER_VALUE_PATTERN.test(t) ? t : '';
+      };
       const nodesSummary = effectiveNodes
         .slice(0, MAX_CHAT_CTX_NODES)
-        .map((n) => `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}`)
+        .map((n) => {
+          const extras = [];
+          if (n.type === 'faction') {
+            const hq = cleanMetaVal(n.headquarters);
+            const leader = cleanMetaVal(n.leader);
+            if (hq) extras.push(`đã có trụ sở: ${hq}`);
+            if (leader) extras.push(`đã có thủ lĩnh: ${leader}`);
+          } else if (n.type === 'location') {
+            const ruler = cleanMetaVal(n.ruler);
+            if (ruler) extras.push(`đang do ${ruler} cai quản`);
+          } else if (n.type === 'item') {
+            const holder = cleanMetaVal(n.holderOrLocation);
+            const origin = cleanMetaVal(n.origin);
+            if (holder) extras.push(`đang do ${holder} nắm giữ`);
+            if (origin) extras.push(`nguồn gốc: ${origin}`);
+          } else if (n.type === 'character') {
+            const bp = cleanMetaVal(n.birthplace);
+            if (bp) extras.push(`nơi sinh: ${bp}`);
+          } else if (n.type === 'event') {
+            const loc = cleanMetaVal(n.location);
+            const time = cleanMetaVal(n.time);
+            if (loc) extras.push(`địa điểm: ${loc}`);
+            if (time) extras.push(`ngày: ${time}`);
+          }
+          const extraStr = extras.length > 0 ? ` — ${extras.join('; ')}` : '';
+          return `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}${extraStr}`;
+        })
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; KHÔNG gán trùng các quan hệ 1-1 đã có sẵn như trụ sở/thủ lĩnh/người giữ/cai quản; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
       if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
         contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
@@ -911,8 +1028,16 @@ async function chatWithAI(req, res, next) {
         cleanMessage = sanitizeAIChatDisplayText(
           [beforeJson, afterJson].filter(Boolean).join('\n\n')
         );
-        if (!cleanMessage) {
-          cleanMessage = `🔗 Tôi đã thiết lập ${linkDataList.length > 1 ? `${linkDataList.length} mối quan hệ` : `mối quan hệ "${linkDataList[0].label}"`}. Bạn có thể xem trước và lưu vào đồ thị bên dưới!`;
+        if (linkDataList.length > 0) {
+          if (!cleanMessage) {
+            cleanMessage = `🔗 Tôi đã thiết lập ${linkDataList.length > 1 ? `${linkDataList.length} mối quan hệ` : `mối quan hệ "${linkDataList[0].label}"`}. Bạn có thể xem trước và lưu vào đồ thị bên dưới!`;
+          }
+        } else if (linkResponse.rejectedCount > 0) {
+          const unsupportedNote =
+            '⚠️ Mối quan hệ AI đề xuất không được ứng dụng hỗ trợ hoặc vi phạm ràng buộc 1-1 hiện có (ví dụ: tổ chức đã có trụ sở/thủ lĩnh, hoặc nối trực tiếp sự kiện với vật phẩm/tổ chức).';
+          cleanMessage = cleanMessage
+            ? `${cleanMessage}\n\n${unsupportedNote}`
+            : unsupportedNote;
         }
       }
     }
@@ -2082,6 +2207,7 @@ async function analyzeChapterText(req, res, next) {
           n.leader && `thủ lĩnh=${n.leader}`,
           n.seniorMembers && `thành viên cấp cao=${n.seniorMembers}`,
           n.members && `thành viên=${n.members}`,
+          n.subFactions && `tổ chức trực thuộc=${n.subFactions}`,
           n.headquarters && `trụ sở=${n.headquarters}`,
           n.motto && `tôn chỉ=${n.motto}`,
           n.desc && `mô tả=${String(n.desc).slice(0, 140)}`,

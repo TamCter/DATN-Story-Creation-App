@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { runQuery } = require('../config/neo4j');
+const { runQuery, runWriteTransaction } = require('../config/neo4j');
 
 // Bản đồ ánh xạ nhãn phụ theo type
 const TYPE_LABELS = {
@@ -150,6 +150,7 @@ const ALLOWED_NODE_SCALARS = new Set([
   'leader',
   'members',
   'seniorMembers',
+  'subFactions',
   'headquarters',
   'motto',
   'alignment',
@@ -550,7 +551,8 @@ async function updateNode(req, res, next) {
       body.character !== undefined ||
       body.itemsInvolved !== undefined ||
       body.factionsInvolved !== undefined;
-    const currentType = body.type?.toLowerCase() || checkResult[0].n.type;
+    const previousType = checkResult[0].n.type;
+    const currentType = body.type?.toLowerCase() || previousType;
     if (updates.dob) {
       updates.dob = formatDateDDMMYYYY(updates.dob);
     }
@@ -559,6 +561,12 @@ async function updateNode(req, res, next) {
     }
     if (participantFieldsChanged && currentType === 'event') {
       updates._participantSyncRevision = crypto.randomUUID();
+    }
+    if (
+      body.subFactions !== undefined ||
+      (body.type !== undefined && currentType !== previousType)
+    ) {
+      updates._subFactionSyncRevision = crypto.randomUUID();
     }
 
     if (onlyIfStub) {
@@ -675,14 +683,112 @@ async function deleteNode(req, res, next) {
       return res.status(403).json({ success: false, message: 'Bạn không có quyền xóa node của dự án này' });
     }
 
-    const query = `
-      MATCH (n:StoryNode { id: $id })
-      DETACH DELETE n
-      RETURN count(n) AS deleted
-    `;
+    // Xóa node và dọn + đối soát tham chiếu tổ chức trực thuộc trong cùng một write transaction
+    // Khóa ghi mọi tổ chức trong dự án (kể cả node đích) theo thứ tự id tăng dần trong một câu lệnh để tránh deadlock
+    const cleanupRev = crypto.randomUUID();
+    const deletedCount = await runWriteTransaction(async (runTxQuery) => {
+      const lockedTarget = await runTxQuery(`
+        MATCH (n:StoryNode { id: $id })
+        OPTIONAL MATCH (n)-[:BELONGS_TO]->(p:Project)
+        WITH n, p
+        OPTIONAL MATCH (pf:StoryNode)-[:BELONGS_TO]->(p)
+        WHERE pf.type = 'faction'
+        WITH n, p, [x IN collect(DISTINCT pf) + [n] WHERE x IS NOT NULL] AS rawLockTargets
+        UNWIND rawLockTargets AS lockNode
+        WITH DISTINCT n, p, lockNode
+        ORDER BY lockNode.id
+        SET lockNode._subFactionSyncLock = coalesce(lockNode._subFactionSyncLock, 0) + 1
+        REMOVE lockNode._subFactionSyncLock
+        WITH n, p, collect({
+          id: lockNode.id,
+          type: lockNode.type,
+          name: lockNode.name,
+          subFactions: lockNode.subFactions,
+          subType: lockNode.subType,
+          alignment: lockNode.alignment
+        }) AS lockedNodes
+        RETURN n, p.id AS projectId, lockedNodes
+      `, { id });
+      if (!lockedTarget.length || !lockedTarget[0]?.n) {
+        return 0;
+      }
 
-    const records = await runQuery(query, { id });
-    if (!records[0] || records[0].deleted === 0) {
+      const currentNode = lockedTarget[0].n;
+      const currentProjectId = lockedTarget[0].projectId || null;
+      const lockedNodes = lockedTarget[0].lockedNodes || [];
+      const parentUpdates = [];
+
+      if (currentNode.type === 'faction' && currentProjectId) {
+        const deletedNameLower = String(currentNode.name || '').trim().toLowerCase();
+        const otherFactions = lockedNodes.filter((f) => f.type === 'faction' && f.id !== id);
+        const survivingFactionIds = new Set(otherFactions.map((f) => f.id).filter(Boolean));
+        const survivingFactionByNameLower = new Map();
+        for (const f of otherFactions) {
+          const nameLower = String(f.name || '').trim().toLowerCase();
+          if (nameLower && !survivingFactionByNameLower.has(nameLower)) {
+            survivingFactionByNameLower.set(nameLower, f.id);
+          }
+        }
+        for (const fac of otherFactions) {
+          if (!fac.subFactions) continue;
+          const currentSubs = parseParticipantNames(fac.subFactions);
+          let retainedDeletedNameMatch = false;
+          const filteredSubs = currentSubs.filter((entry) => {
+            const t = String(entry || '').trim();
+            if (!t) return false;
+            if (t === id) return false;
+            if (survivingFactionIds.has(t)) return true;
+            if (deletedNameLower && t.toLowerCase() === deletedNameLower) {
+              if (!survivingFactionByNameLower.has(deletedNameLower)) {
+                return false;
+              }
+              retainedDeletedNameMatch = true;
+            }
+            return true;
+          });
+          if (filteredSubs.length !== currentSubs.length || retainedDeletedNameMatch) {
+            const childIds = await resolveSubFactionIdsInTx({
+              projectId: currentProjectId,
+              parentId: fac.id,
+              parentName: fac.name || '',
+              parentSubType: fac.subType,
+              parentAlignment: fac.alignment,
+              rawSubFactions: filteredSubs,
+              existingFactionIds: survivingFactionIds,
+              existingFactionByNameLower: survivingFactionByNameLower,
+              runTxQuery,
+            });
+            parentUpdates.push({
+              id: fac.id,
+              subFactions: filteredSubs.length > 0 ? JSON.stringify(filteredSubs) : '',
+              childIds,
+            });
+          }
+        }
+      }
+
+      for (const upd of parentUpdates) {
+        await reconcileSubFactionEdgesInTx({
+          runTxQuery,
+          facId: upd.id,
+          childIds: upd.childIds,
+          updateParentProps: {
+            subFactions: upd.subFactions,
+            cleanupRev,
+          },
+        });
+      }
+
+      const deleteRecords = await runTxQuery(`
+        MATCH (n:StoryNode { id: $id })
+        DETACH DELETE n
+        RETURN count(n) AS deleted
+      `, { id });
+
+      return deleteRecords[0]?.deleted || 0;
+    });
+
+    if (deletedCount === 0) {
       return res.status(404).json({ success: false, message: `Không tìm thấy node với ID: ${id}` });
     }
 
@@ -695,7 +801,144 @@ async function deleteNode(req, res, next) {
   }
 }
 
-async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
+async function resolveSubFactionIdsInTx({
+  projectId,
+  parentId,
+  parentName,
+  parentSubType,
+  parentAlignment,
+  rawSubFactions,
+  existingFactionIds,
+  existingFactionByNameLower,
+  runTxQuery,
+}) {
+  const candidateSubRefs = [];
+  const seenRawExact = new Set();
+  for (const rawSub of rawSubFactions) {
+    const trimmed = String(rawSub ?? '').trim();
+    if (!trimmed || trimmed === parentId) continue;
+    if (!seenRawExact.has(trimmed)) {
+      seenRawExact.add(trimmed);
+      candidateSubRefs.push(trimmed);
+    }
+  }
+
+  const parentNameLower = String(parentName || '').trim().toLowerCase();
+  const resolvedSubIdSet = new Set();
+  for (const subRef of candidateSubRefs) {
+    if (existingFactionIds.has(subRef)) {
+      if (subRef !== parentId) resolvedSubIdSet.add(subRef);
+      continue;
+    }
+    const cleanedName = cleanRelationalValue(subRef);
+    if (!cleanedName || cleanedName.toLowerCase() === parentNameLower) continue;
+    const cleanedLower = cleanedName.toLowerCase();
+    const existingByNameId = existingFactionByNameLower.get(cleanedLower);
+    if (existingByNameId && existingByNameId !== parentId) {
+      resolvedSubIdSet.add(existingByNameId);
+      continue;
+    }
+    const createdSubId = await findOrCreateProjectEntity(
+      projectId,
+      cleanedName,
+      'faction',
+      {
+        role: 'TỔ CHỨC',
+        subType: parentSubType || 'Trung lập',
+        alignment: parentAlignment || 'TRUNG LẬP',
+        motto: '',
+        desc: `Tổ chức trực thuộc ${parentName || ''}`,
+        status: 'Đang hoạt động',
+      },
+      runTxQuery
+    );
+    if (createdSubId && createdSubId !== parentId) {
+      resolvedSubIdSet.add(createdSubId);
+      existingFactionIds.add(createdSubId);
+      if (!existingFactionByNameLower.has(cleanedLower)) {
+        existingFactionByNameLower.set(cleanedLower, createdSubId);
+      }
+    }
+  }
+
+  return Array.from(resolvedSubIdSet);
+}
+
+async function reconcileSubFactionEdgesInTx({
+  runTxQuery,
+  facId,
+  childIds,
+  expectedSubFactionRev = null,
+  updateParentProps = null,
+}) {
+  const headerClause = updateParentProps
+    ? `
+      MATCH (fac:StoryNode { id: $facId })
+      SET fac.subFactions = $subFactions,
+          fac._subFactionSyncRevision = $cleanupRev,
+          fac.updatedAt = timestamp()
+      WITH fac
+    `
+    : `
+      MATCH (fac:StoryNode { id: $facId })
+      WHERE fac.type = 'faction'
+        AND coalesce(fac._subFactionSyncRevision, '') = coalesce($expectedSubFactionRev, '')
+    `;
+  const params = updateParentProps
+    ? {
+        facId,
+        subFactions: updateParentProps.subFactions,
+        cleanupRev: updateParentProps.cleanupRev,
+        childIds,
+      }
+    : {
+        facId,
+        expectedSubFactionRev,
+        childIds,
+      };
+
+  if (childIds.length > 0) {
+    await runTxQuery(`
+      ${headerClause}
+      OPTIONAL MATCH (oldSub:StoryNode)-[oldRel:RELATES_TO { category: 'SUB_FACTION_OF' }]->(fac)
+      WHERE NOT (oldSub.id IN $childIds)
+        AND (
+          oldRel.autoGenerated = true
+          OR (
+            oldRel.autoGenerated IS NULL
+            AND oldRel.id = 'link-' + oldSub.id + '-' + fac.id + '-sub-faction'
+          )
+        )
+      DELETE oldRel
+      WITH DISTINCT fac
+      UNWIND $childIds AS subId
+      MATCH (sub:StoryNode { id: subId })
+      WHERE sub.type = 'faction'
+      MERGE (sub)-[r:RELATES_TO { category: 'SUB_FACTION_OF' }]->(fac)
+      ON CREATE SET r.id = 'link-' + sub.id + '-' + fac.id + '-sub-faction',
+                    r.label = 'Trực thuộc',
+                    r.type = 'solid',
+                    r.tone = 'sect',
+                    r.autoGenerated = true,
+                    r.createdAt = timestamp()
+      ON MATCH SET r.label = 'Trực thuộc',
+                   r.updatedAt = timestamp()
+    `, params);
+  } else {
+    await runTxQuery(`
+      ${headerClause}
+      OPTIONAL MATCH (oldSub:StoryNode)-[oldRel:RELATES_TO { category: 'SUB_FACTION_OF' }]->(fac)
+      WHERE oldRel.autoGenerated = true
+        OR (
+          oldRel.autoGenerated IS NULL
+          AND oldRel.id = 'link-' + oldSub.id + '-' + fac.id + '-sub-faction'
+        )
+      DELETE oldRel
+    `, params);
+  }
+}
+
+async function findOrCreateProjectEntity(projectId, name, type, defaults = {}, queryRunner = runQuery) {
   const label = TYPE_LABELS[type];
   if (!label) throw new Error(`Loại thực thể không hỗ trợ: ${type}`);
 
@@ -731,7 +974,7 @@ async function findOrCreateProjectEntity(projectId, name, type, defaults = {}) {
     RETURN entity.id AS id
     LIMIT 1
   `;
-  const records = await runQuery(query, { projectId, name, type, properties });
+  const records = await queryRunner(query, { projectId, name, type, properties });
   if (!records.length || !records[0].id) {
     throw new Error(`Không thể tạo hoặc tìm thấy ${type}: ${name}`);
   }
@@ -1011,6 +1254,15 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
       }
     }
 
+    // Nếu node hiện tại trong DB không còn là tổ chức (VD: đổi loại từ faction sang item), dọn sạch cạnh SUB_FACTION_OF hai chiều
+    if (nodeType !== 'faction') {
+      await runQuery(`
+        MATCH (n:StoryNode { id: $nodeId })-[r:RELATES_TO { category: 'SUB_FACTION_OF' }]-(:StoryNode)
+        WHERE coalesce(n.type, '') <> 'faction'
+        DELETE r
+      `, { nodeId });
+    }
+
     // 3. TỔ CHỨC (Faction)
     if (nodeType === 'faction') {
       // Người đại diện / Thủ lĩnh -> Character
@@ -1151,6 +1403,67 @@ async function syncNodeRelationships(nodeId, projectId, nodeData) {
                        r.updatedAt = timestamp()
         `, { nodeId, charId });
       }
+
+      // Tổ chức trực thuộc / dưới trướng -> Faction (sub --[SUB_FACTION_OF]--> parent)
+      // Khóa toàn bộ tổ chức trong dự án theo thứ tự id trong cùng một write transaction:
+      // - Kiểm tra revision đồng bộ dưới write lock trước khi tạo stub hoặc ghi cạnh
+      // - Phân giải ID chính xác trước khi lọc placeholder để không loại nhầm ID thật (VD: 'none')
+      // - Đảm bảo node con vẫn là faction khi ghi cạnh SUB_FACTION_OF
+      const expectedSubFactionRev = nodeData._subFactionSyncRevision || null;
+      await runWriteTransaction(async (runTxQuery) => {
+        const lockResult = await runTxQuery(`
+          MATCH (fac:StoryNode { id: $nodeId })
+          MATCH (p:Project { id: $projectId })
+          OPTIONAL MATCH (pf:StoryNode)-[:BELONGS_TO]->(p)
+          WHERE pf.type = 'faction'
+          WITH fac, [x IN collect(DISTINCT pf) + [fac] WHERE x IS NOT NULL] AS rawLockTargets
+          UNWIND rawLockTargets AS lockNode
+          WITH DISTINCT fac, lockNode
+          ORDER BY lockNode.id
+          SET lockNode._subFactionSyncLock = coalesce(lockNode._subFactionSyncLock, 0) + 1
+          REMOVE lockNode._subFactionSyncLock
+          WITH fac, collect({ id: lockNode.id, type: lockNode.type, name: lockNode.name }) AS lockedNodes
+          RETURN fac.type = 'faction'
+            AND coalesce(fac._subFactionSyncRevision, '') = coalesce($expectedSubFactionRev, '') AS isCurrent,
+            lockedNodes
+        `, { nodeId, projectId, expectedSubFactionRev });
+
+        if (!lockResult.length || !lockResult[0].isCurrent) {
+          return;
+        }
+
+        const lockedFactions = (lockResult[0].lockedNodes || []).filter(
+          (n) => n.type === 'faction' && n.id
+        );
+        const exactExistingFactionIds = new Set(lockedFactions.map((n) => n.id));
+        const existingFactionByNameLower = new Map();
+        for (const f of lockedFactions) {
+          if (f.id === nodeId) continue;
+          const nameLower = String(f.name || '').trim().toLowerCase();
+          if (nameLower && !existingFactionByNameLower.has(nameLower)) {
+            existingFactionByNameLower.set(nameLower, f.id);
+          }
+        }
+
+        const subFactionIds = await resolveSubFactionIdsInTx({
+          projectId,
+          parentId: nodeId,
+          parentName: nodeName,
+          parentSubType: nodeData.subType,
+          parentAlignment: nodeData.alignment,
+          rawSubFactions: parseParticipantNames(nodeData.subFactions),
+          existingFactionIds: exactExistingFactionIds,
+          existingFactionByNameLower,
+          runTxQuery,
+        });
+
+        await reconcileSubFactionEdgesInTx({
+          runTxQuery,
+          facId: nodeId,
+          childIds: subFactionIds,
+          expectedSubFactionRev,
+        });
+      });
 
       // Căn cứ -> Location
       const headquarters = cleanRelationalValue(nodeData.headquarters);

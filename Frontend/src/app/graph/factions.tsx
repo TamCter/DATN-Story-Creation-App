@@ -15,7 +15,9 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import {
+  getFactionHierarchy,
   getFactionMembers,
+  getFactionRuledLocations,
   INITIAL_PROJECTS,
   NODE_TYPE_CONFIG,
   StoryNode,
@@ -425,6 +427,50 @@ export default function FactionsScreen() {
                       <Text style={styles.metaValue}>{extra.headquarters}</Text>
                     </View>
                   )}
+
+                  {(() => {
+                    const ruledLocations = getFactionRuledLocations(
+                      faction,
+                      currentProject.nodes,
+                      currentProject.links
+                    );
+                    const { subFactions, parentFactions } = getFactionHierarchy(
+                      faction,
+                      currentProject.nodes,
+                      currentProject.links
+                    );
+                    return (
+                      <>
+                        {parentFactions.length > 0 && (
+                          <View style={styles.metaItem}>
+                            <Text style={styles.metaIcon}>🏛️</Text>
+                            <Text style={styles.metaLabel}>Trực thuộc:</Text>
+                            <Text style={[styles.metaValueHighlight, { flex: 1 }]}>
+                              {parentFactions.join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                        {subFactions.length > 0 && (
+                          <View style={styles.metaItem}>
+                            <Text style={styles.metaIcon}>🏢</Text>
+                            <Text style={styles.metaLabel}>Tổ chức trực thuộc:</Text>
+                            <Text style={[styles.metaValue, { flex: 1 }]}>
+                              {subFactions.join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                        {ruledLocations.length > 0 && (
+                          <View style={styles.metaItem}>
+                            <Text style={styles.metaIcon}>🏰</Text>
+                            <Text style={styles.metaLabel}>Cai quản:</Text>
+                            <Text style={[styles.metaValue, { flex: 1 }]}>
+                              {ruledLocations.join(', ')}
+                            </Text>
+                          </View>
+                        )}
+                      </>
+                    );
+                  })()}
 
                   {extra.motto && (
                     <View style={styles.metaItem}>
