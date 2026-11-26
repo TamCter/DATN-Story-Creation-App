@@ -438,10 +438,39 @@ export default function GraphScreen() {
   const filteredLinks = useMemo(() => {
     if (!showRelationships) return [];
     const visibleNodeIds = new Set(filteredNodes.map((node) => node.id));
-    return visibleLinks.filter(
-      (link) => visibleNodeIds.has(link.source) && visibleNodeIds.has(link.target)
-    );
-  }, [visibleLinks, filteredNodes, showRelationships]);
+    const CHAPTER_HIDDEN_CATEGORIES = new Set([
+      'ORIGIN',
+      'BIRTHPLACE',
+      'LEADER_OF',
+      'HEADQUARTERS',
+      'RULER_OF',
+      'SUB_FACTION_OF',
+    ]);
+    const CHAPTER_HIDDEN_LABELS = new Set([
+      'nguồn gốc',
+      'nơi sinh',
+      'thủ lĩnh',
+      'người đại diện / thủ lĩnh',
+      'căn cứ địa',
+      'trụ sở',
+      'cai quản',
+      'trực thuộc',
+    ]);
+
+    return visibleLinks.filter((link) => {
+      if (!visibleNodeIds.has(link.source) || !visibleNodeIds.has(link.target)) {
+        return false;
+      }
+      if (activeChapterFilter) {
+        const cat = (link.category || '').trim().toUpperCase();
+        const lbl = (link.label || '').trim().toLowerCase();
+        if (CHAPTER_HIDDEN_CATEGORIES.has(cat) || CHAPTER_HIDDEN_LABELS.has(lbl)) {
+          return false;
+        }
+      }
+      return true;
+    });
+  }, [visibleLinks, filteredNodes, showRelationships, activeChapterFilter]);
 
   const graphRef = useRef<GraphWebViewRef>(null);
 
