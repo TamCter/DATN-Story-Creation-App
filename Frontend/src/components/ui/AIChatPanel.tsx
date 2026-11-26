@@ -1298,9 +1298,25 @@ export default function AIChatPanel({
     }).start();
   }, [visible, slideAnim]);
 
-  const scrollToBottom = useCallback(() => {
-    setTimeout(() => scrollRef.current?.scrollToEnd({ animated: true }), 100);
+  const scrollToBottom = useCallback((animated = true) => {
+    setTimeout(() => scrollRef.current?.scrollToEnd({ animated }), 100);
   }, []);
+
+  const pendingInitialScrollRef = useRef(false);
+
+  useEffect(() => {
+    if (visible) {
+      pendingInitialScrollRef.current = true;
+      if (isScopeLoaded) {
+        const timer = setTimeout(() => {
+          scrollRef.current?.scrollToEnd({ animated: false });
+        }, 60);
+        return () => clearTimeout(timer);
+      }
+    } else {
+      pendingInitialScrollRef.current = false;
+    }
+  }, [visible, isScopeLoaded, storageKey]);
 
   const sendMessagesToAI = async (
     currentHistory: AIChatMessage[],
@@ -1928,6 +1944,12 @@ export default function AIChatPanel({
       <ScrollView
         ref={scrollRef}
         style={styles.messageList}
+        onContentSizeChange={() => {
+          if (visible && pendingInitialScrollRef.current && isScopeLoaded) {
+            pendingInitialScrollRef.current = false;
+            scrollRef.current?.scrollToEnd({ animated: false });
+          }
+        }}
         contentContainerStyle={styles.messageListContent}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled">

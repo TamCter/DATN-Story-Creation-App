@@ -62,21 +62,31 @@ QUY TẮC THỜI GIAN, TUỔI & NĂM SINH (BẮT BUỘC):
 - Khi tạo nhân vật: nếu người dùng cung cấp năm sinh/ngày sinh (dob) mà không nêu tuổi (age), hãy tính tuổi theo năm hiện tại (hoặc để trống để hệ thống tự tính).
 - BẮT LỖI TUỔI & NĂM: Nếu người dùng nhập cả năm sinh và tuổi nhưng không khớp nhau theo năm hiện tại (hoặc mốc năm của truyện), hoặc nhập ngày/năm sự kiện mâu thuẫn với năm sinh nhân vật tham gia (chưa ra đời) hay mâu thuẫn với niên biểu sự kiện đã có, hãy CHỈ RÕ MÂU THUẪN và gợi ý chỉnh lại trong lời trả lời!
 
-QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ (BẮT BUỘC):
-Hệ thống sẽ tự động sinh cạnh quan hệ trên đồ thị Neo4j từ đúng các trường liên kết sau:
-- Nhân vật sở hữu / sử dụng vật phẩm: điền tên vật phẩm vào character.weapon (EQUIPPED) và/hoặc tên nhân vật vào item.holderOrLocation (OWNS).
-- Nhân vật thuộc tổ chức / lãnh đạo tổ chức: điền tên tổ chức vào character.sect (MEMBER_OF) và tên thủ lĩnh vào faction.leader (LEADER_OF).
-- Nhân vật sinh ra tại địa điểm: điền tên địa điểm vào character.birthplace (BIRTHPLACE).
-- Vật phẩm có nguồn gốc từ địa điểm: điền tên địa điểm vào item.origin (ORIGIN).
-- Tổ chức có trụ sở tại / cai quản địa điểm: điền tên địa điểm vào faction.headquarters (HEADQUARTERS) và tên tổ chức vào location.ruler (RULER_OF).
-- Nhân vật tham gia sự kiện: điền danh sách tên nhân vật (phân tách bằng dấu phẩy trong chuỗi) vào event.charactersInvolved (PARTICIPATED_IN).
-- Sự kiện diễn ra tại địa điểm: điền tên địa điểm vào event.location (EVENT_LOCATION).
-- Vật phẩm & Tổ chức trong sự kiện (NỐI QUA NHÂN VẬT THAM GIA): KHÔNG nối trực tiếp tách rời từ Sự kiện sang Vật phẩm/Tổ chức; đồ thị sẽ tự hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện và Tổ chức <--Tổ chức/Lãnh đạo-- Nhân vật --Tham gia--> Sự kiện. Do đó:
-  + Trong event.itemsInvolved, CHỈ điền chính xác tên những vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó (VD: nhân vật A sở hữu Z và X nhưng trong sự kiện Y chỉ cầm Z thì chỉ ghi Z).
-  + Trong event.factionsInvolved, CHỈ điền chính xác tên những tổ chức mà nhân vật tham gia đại diện / liên quan trong sự kiện đó.
-  + Bảo đảm nhân vật tham gia đã có quan hệ Sở hữu vật phẩm (character.weapon / item.holderOrLocation) và Tổ chức (character.sect / faction.leader).
-- Sự kiện bắt nguồn từ sự kiện trước: nếu nguyên nhân là một sự kiện đã có, điền chính xác tên sự kiện đó vào event.cause (CAUSED_BY).
-- Biến cố tử nạn / hồi sinh / suy tàn: điền tên sự kiện vào character.statusEvent hoặc faction.statusEvent (STATUS_EVENT).
+QUY TẮC THỐNG NHẤT TẠO QUAN HỆ ĐỒ THỊ & GIỚI HẠN CHỨC NĂNG CỦA ỨNG DỤNG (BẮT BUỘC):
+AI CHỈ ĐƯỢC PHÉP thực hiện đúng các chức năng và quan hệ có thật trên giao diện ứng dụng — TUYỆT ĐỐI KHÔNG tự bịa tính năng, trường dữ liệu, hoặc kiểu liên kết không tồn tại trên app (ví dụ: không hứa tự sửa/xóa trực tiếp node cũ trong DB, không gắn 2 trụ sở cho cùng 1 tổ chức, không nối trực tiếp Sự kiện với Vật phẩm/Tổ chức tách rời khỏi nhân vật tham gia).
+Hệ thống tự động sinh cạnh quan hệ trên đồ thị Neo4j theo đúng quy tắc số lượng (1-1 vs 1-N) của ứng dụng:
+- Nhân vật (character):
+  + Nơi sinh (character.birthplace -> BIRTHPLACE): tối đa 1 địa điểm.
+  + Vật phẩm sở hữu (character.weapon -> EQUIPPED): có thể nhiều vật phẩm (phân tách bằng dấu phẩy).
+  + Tổ chức & vai trò của nhân vật: được quản lý từ phía node Tổ chức (leader, seniorMembers, members), KHÔNG gán tổ chức tùy tiện từ phía nhân vật; để character.sect = "" nếu đã gán từ node Tổ chức.
+  + Biến cố trạng thái (character.statusEvent -> STATUS_EVENT): tối đa 1 sự kiện và CHỈ điền khi status là "Đã chết" hoặc "Hồi sinh".
+- Vật phẩm (item):
+  + Người nắm giữ (item.holderOrLocation -> OWNS): tối đa 1 nhân vật.
+  + Nguồn gốc (item.origin -> ORIGIN): tối đa 1 địa điểm.
+- Địa điểm (location):
+  + Thế lực cai quản (location.ruler -> RULER_OF): tối đa 1 tổ chức. LƯU Ý QUAN TRỌNG: nếu một tổ chức trong danh sách đã có sẵn trụ sở/địa điểm gắn với nó, KHÔNG tự ý tạo thêm địa điểm mới rồi nối làm trụ sở thứ 2 hay gán trùng địa điểm cho tổ chức đó, trừ khi người dùng nêu rõ muốn tạo địa điểm khác thuộc phạm vi quản lý.
+- Tổ chức (faction):
+  + Thủ lĩnh (faction.leader -> LEADER_OF): tối đa 1 nhân vật (nếu tổ chức đã có thủ lĩnh thì không tạo/gán thêm thủ lĩnh thứ 2).
+  + Trụ sở (faction.headquarters -> HEADQUARTERS): tối đa 1 địa điểm (nếu tổ chức đã có trụ sở thì KHÔNG tạo địa điểm mới làm trụ sở thứ 2 hay nối thêm cạnh trụ sở).
+  + Thành viên cấp cao (faction.seniorMembers -> SENIOR_MEMBER_OF), Thành viên (faction.members -> MEMBER_OF), Tổ chức trực thuộc (faction.subFactions -> SUB_FACTION_OF): có thể nhiều thực thể (phân tách bằng dấu phẩy).
+  + Biến cố trạng thái (faction.statusEvent -> STATUS_EVENT): tối đa 1 sự kiện và CHỈ điền khi status là "Tạm ngừng" hoặc "Suy tàn".
+- Sự kiện (event):
+  + Địa điểm diễn ra (event.location -> EVENT_LOCATION): tối đa 1 địa điểm.
+  + Nguyên nhân (event.cause -> CAUSED_BY): tối đa 1 sự kiện trước đó.
+  + Nhân vật tham gia (event.charactersInvolved -> PARTICIPATED_IN): có thể nhiều nhân vật.
+  + Vật phẩm & Tổ chức trong sự kiện (NỐI QUA NHÂN VẬT THAM GIA): KHÔNG nối trực tiếp tách rời từ Sự kiện sang Vật phẩm/Tổ chức; đồ thị sẽ tự hiển thị chuỗi Vật phẩm <--Sở hữu-- Nhân vật --Tham gia--> Sự kiện và Tổ chức <--Tổ chức/Lãnh đạo-- Nhân vật --Tham gia--> Sự kiện.
+    * Trong event.itemsInvolved, CHỈ điền chính xác tên những vật phẩm mà nhân vật tham gia thực sự mang theo / sử dụng trong sự kiện đó.
+    * Trong event.factionsInvolved, CHỈ điền chính xác tên những tổ chức mà nhân vật tham gia đại diện / liên quan trong sự kiện đó.
 
 Nguyên tắc điền trường liên kết (RẤT QUAN TRỌNG ĐỂ KHÔNG SINH THÊM NODE ẨN):
 - Chỉ được phép điền tên node ĐÃ CÓ SẴN trong danh sách thực thể hiện tại của dự án, HOẶC tên một node nằm TRONG CHÍNH DANH SÁCH "nodes" mà bạn đang tạo ở lượt trả lời này.
@@ -392,13 +402,40 @@ function extractCreateLinkResponse(responseText, existingNodes = []) {
                 seenKeys.add(dedupKey);
 
                 const rawTone = typeof rawLink.tone === 'string' ? rawLink.tone.trim().toLowerCase() : '';
+                const categoryUpper = typeof rawLink.category === 'string'
+                  ? rawLink.category.trim().toUpperCase()
+                  : 'RELATED';
+
+                // Chặn các kiểu liên kết không tồn tại trên app hoặc vi phạm ràng buộc 1-1 của node hiện có
+                if (categoryUpper === 'INVOLVES_ITEM' || categoryUpper === 'INVOLVES_FACTION') {
+                  continue;
+                }
+                if (categoryUpper === 'HEADQUARTERS') {
+                  const facNode = srcNode.type === 'faction' ? srcNode : tgtNode.type === 'faction' ? tgtNode : null;
+                  if (facNode && String(facNode.headquarters || '').trim()) continue;
+                }
+                if (categoryUpper === 'LEADER_OF') {
+                  const facNode = tgtNode.type === 'faction' ? tgtNode : srcNode.type === 'faction' ? srcNode : null;
+                  if (facNode && String(facNode.leader || '').trim()) continue;
+                }
+                if (categoryUpper === 'RULER_OF') {
+                  const locNode = tgtNode.type === 'location' ? tgtNode : srcNode.type === 'location' ? srcNode : null;
+                  if (locNode && String(locNode.ruler || '').trim()) continue;
+                }
+                if (categoryUpper === 'BIRTHPLACE' && srcNode.type === 'character' && String(srcNode.birthplace || '').trim()) {
+                  continue;
+                }
+                if (categoryUpper === 'ORIGIN' && srcNode.type === 'item' && String(srcNode.origin || '').trim()) {
+                  continue;
+                }
+
                 resolvedLinks.push({
                   source: String(srcNode.id),
                   target: String(tgtNode.id),
                   sourceName: String(srcNode.name),
                   targetName: String(tgtNode.name),
                   label,
-                  category: typeof rawLink.category === 'string' ? rawLink.category.trim() : 'RELATED',
+                  category: categoryUpper || 'RELATED',
                   tone: VALID_TONES.has(rawTone) ? rawTone : 'loyalty',
                   type: rawLink.type === 'dashed' ? 'dashed' : 'solid',
                   contextNote: typeof rawLink.contextNote === 'string' ? rawLink.contextNote.trim() : '',
@@ -743,9 +780,27 @@ async function chatWithAI(req, res, next) {
       const MAX_CHAT_CTX_NODES = 120;
       const nodesSummary = effectiveNodes
         .slice(0, MAX_CHAT_CTX_NODES)
-        .map((n) => `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}`)
+        .map((n) => {
+          const extras = [];
+          if (n.type === 'faction') {
+            if (n.headquarters) extras.push(`đã có trụ sở: ${n.headquarters}`);
+            if (n.leader) extras.push(`đã có thủ lĩnh: ${n.leader}`);
+          } else if (n.type === 'location') {
+            if (n.ruler) extras.push(`đang do ${n.ruler} cai quản`);
+          } else if (n.type === 'item') {
+            if (n.holderOrLocation) extras.push(`đang do ${n.holderOrLocation} nắm giữ`);
+            if (n.origin) extras.push(`nguồn gốc: ${n.origin}`);
+          } else if (n.type === 'character') {
+            if (n.birthplace) extras.push(`nơi sinh: ${n.birthplace}`);
+          } else if (n.type === 'event') {
+            if (n.location) extras.push(`địa điểm: ${n.location}`);
+            if (n.time) extras.push(`ngày: ${n.time}`);
+          }
+          const extraStr = extras.length > 0 ? ` — ${extras.join('; ')}` : '';
+          return `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}${extraStr}`;
+        })
         .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
+      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; KHÔNG gán trùng các quan hệ 1-1 đã có sẵn như trụ sở/thủ lĩnh/người giữ/cai quản; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
       if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
         contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
       }
