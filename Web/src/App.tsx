@@ -864,9 +864,9 @@ export default function App() {
     }
   }, [activeProject, user]);
 
-  // Insert text at cursor position in manuscript textarea (guarded by chapter ID)
+  // Insert text at cursor position in manuscript textarea (guarded by chapter ID & analysis lock)
   const handleInsertText = (textToInsert: string, expectedChapterId?: string) => {
-    if (!activeChapter) return;
+    if (!activeChapter || isAnalyzingChapter) return;
     if (expectedChapterId && activeChapter.id !== expectedChapterId) return;
     const el = textareaRef.current;
     const current = activeChapter.content || '';
@@ -890,7 +890,7 @@ export default function App() {
     replacement: string,
     expectedChapterId?: string
   ): boolean => {
-    if (!activeChapter) return false;
+    if (!activeChapter || isAnalyzingChapter) return false;
     if (expectedChapterId && activeChapter.id !== expectedChapterId) return false;
     const current = activeChapter.content || '';
     if (!current.includes(quote)) return false;

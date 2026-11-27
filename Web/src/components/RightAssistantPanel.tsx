@@ -88,9 +88,12 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   // Checker state (scoped to active chapter)
   const [analyzingChapterId, setAnalyzingChapterId] = useState<string | null>(null);
   const [analysisState, setAnalysisState] = useState<{
+    analysisId: number;
     chapterId: string;
     result: ChapterAnalysisResult;
   } | null>(null);
+  const analysisStateRef = useRef(analysisState);
+  analysisStateRef.current = analysisState;
   const [appliedIssueIds, setAppliedIssueIds] = useState<Set<string>>(() => new Set());
   const [selectedNodeIdxs, setSelectedNodeIdxs] = useState<Set<number>>(() => new Set());
   const [selectedEventIdxs, setSelectedEventIdxs] = useState<Set<number>>(() => new Set());
@@ -182,7 +185,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       if (!res.success || !res.data) {
         setAnalysisError(res.message || 'Không thể phân tích chương lúc này.');
       } else {
-        setAnalysisState({ chapterId: targetChapterId, result: res.data });
+        setAnalysisState({ analysisId: reqId, chapterId: targetChapterId, result: res.data });
         setAppliedIssueIds(new Set());
         setSelectedNodeIdxs(new Set((res.data.suggestedNodes || []).map((_, i) => i)));
         setSelectedEventIdxs(new Set((res.data.suggestedEvents || []).map((_, i) => i)));
@@ -308,6 +311,9 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       selectedNodeIdxs.size + selectedEventIdxs.size + selectedStatusIdxs.size;
     if (totalSelected === 0 || savingExtracted) return;
 
+    const originAnalysisId = analysisState.analysisId;
+    const originChapterId = analysisState.chapterId;
+
     setSavingExtracted(true);
     let createdCount = 0;
     let updatedCount = 0;
@@ -317,6 +323,28 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       const existingKeys = new Set(
         nodes.map((n) => `${n.type.toLowerCase()}::${n.name.trim().toLowerCase()}`)
       );
+
+      // Các thực thể bị người dùng bỏ chọn và chưa tồn tại trong dự án không được tự tạo ngầm qua trường quan hệ
+      const deselectedNewByType = new Map<string, Set<string>>();
+      (analysis.suggestedNodes || []).forEach((sn, idx) => {
+        if (selectedNodeIdxs.has(idx) || !sn?.name?.trim()) return;
+        const typeKey = sn.type.toLowerCase();
+        const nameLower = sn.name.trim().toLowerCase();
+        if (existingKeys.has(`${typeKey}::${nameLower}`)) return;
+        const bucket = deselectedNewByType.get(typeKey) || new Set<string>();
+        bucket.add(nameLower);
+        deselectedNewByType.set(typeKey, bucket);
+      });
+
+      const allowRelVal = (targetType: string, rawVal?: string): string => {
+        const trimmed = (rawVal || '').trim();
+        if (!trimmed) return '';
+        const blocked = deselectedNewByType.get(targetType);
+        if (blocked && blocked.has(trimmed.toLowerCase())) return '';
+        return trimmed;
+      };
+
+      const createdNodes: StoryNode[] = [];
 
       for (const idx of Array.from(selectedNodeIdxs)) {
         const sn = analysis.suggestedNodes?.[idx];
@@ -333,29 +361,32 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             gender: sn.gender || '',
             dob: sn.dob || '',
             age: sn.age || '',
-            birthplace: sn.birthplace || '',
-            weapon: sn.weapon || '',
-            sect: sn.sect || '',
+            birthplace: allowRelVal('location', sn.birthplace),
+            weapon: allowRelVal('item', sn.weapon),
+            sect: allowRelVal('faction', sn.sect),
             personality: sn.personality || '',
             rarity: sn.rarity || '',
-            origin: sn.origin || '',
+            origin: allowRelVal('location', sn.origin),
             element: sn.element || '',
-            holderOrLocation: sn.holderOrLocation || '',
+            holderOrLocation: allowRelVal('character', sn.holderOrLocation),
             region: sn.region || '',
             climate: sn.climate || '',
             terrain: sn.terrain || '',
             dangerLevel: sn.dangerLevel || '',
-            ruler: sn.ruler || '',
+            ruler: allowRelVal('faction', sn.ruler),
             subType: sn.subType || '',
             alignment: sn.alignment || '',
-            leader: sn.leader || '',
-            headquarters: sn.headquarters || '',
+            leader: allowRelVal('character', sn.leader),
+            headquarters: allowRelVal('location', sn.headquarters),
             motto: sn.motto || '',
           };
           Object.keys(payload).forEach((k) => {
             if (payload[k] === '') delete payload[k];
           });
-          await webApi.createNode(activeProject.id, payload);
+          const createdRes = await webApi.createNode(activeProject.id, payload);
+          if (createdRes?.data?.id) {
+            createdNodes.push(createdRes.data);
+          }
           existingKeys.add(key);
           createdCount += 1;
         } catch {
@@ -374,12 +405,12 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             type: 'event',
             role: 'BIẾN CỐ',
             desc: ev.desc || '',
-            chapter: analysisState.chapterId,
+            chapter: originChapterId,
             eventType: ev.eventType || '',
             importance: ev.importance || '',
             arcName: ev.arcName || '',
             sequenceOrder: ev.sequenceOrder || '',
-            location: ev.location || '',
+            location: allowRelVal('location', ev.location),
             time: ev.time || '',
             timelineType: ev.timelineType || '',
             duration: ev.duration || '',
@@ -390,19 +421,28 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             impact: ev.impact || '',
             characterRoles: ev.characterRoles || '',
             charactersInvolved: Array.isArray(ev.charactersInvolved)
-              ? JSON.stringify(ev.charactersInvolved)
+              ? JSON.stringify(
+                  ev.charactersInvolved.filter((name) => Boolean(allowRelVal('character', name)))
+                )
               : '',
             itemsInvolved: Array.isArray(ev.itemsInvolved)
-              ? JSON.stringify(ev.itemsInvolved)
+              ? JSON.stringify(
+                  ev.itemsInvolved.filter((name) => Boolean(allowRelVal('item', name)))
+                )
               : '',
             factionsInvolved: Array.isArray(ev.factionsInvolved)
-              ? JSON.stringify(ev.factionsInvolved)
+              ? JSON.stringify(
+                  ev.factionsInvolved.filter((name) => Boolean(allowRelVal('faction', name)))
+                )
               : '',
           };
           Object.keys(payload).forEach((k) => {
-            if (payload[k] === '') delete payload[k];
+            if (payload[k] === '' || payload[k] === '[]') delete payload[k];
           });
-          await webApi.createNode(activeProject.id, payload);
+          const createdRes = await webApi.createNode(activeProject.id, payload);
+          if (createdRes?.data?.id) {
+            createdNodes.push(createdRes.data);
+          }
           existingKeys.add(key);
           createdCount += 1;
         } catch {
@@ -410,15 +450,19 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
         }
       }
 
+      const allCandidateNodes = [...nodes, ...createdNodes];
       for (const idx of Array.from(selectedStatusIdxs)) {
         const sc = analysis.characterStatusChanges?.[idx];
         if (!sc || !sc.characterName?.trim()) continue;
-        const match = nodes.find(
+        const match = allCandidateNodes.find(
           (n) =>
             n.type === 'character' &&
             n.name.trim().toLowerCase() === sc.characterName.trim().toLowerCase()
         );
-        if (!match) continue;
+        if (!match) {
+          failedCount += 1;
+          continue;
+        }
         try {
           await webApi.updateNode(match.id, {
             status: sc.status,
@@ -432,8 +476,14 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
 
       await onRefreshGraph();
 
+      const isSameAnalysis =
+        analysisStateRef.current?.analysisId === originAnalysisId &&
+        activeChapterIdRef.current === originChapterId;
+
       if (failedCount === 0) {
-        setSavedExtractedDone(true);
+        if (isSameAnalysis) {
+          setSavedExtractedDone(true);
+        }
         onNotify(
           `Đã lưu ${createdCount} node mới${updatedCount > 0 ? ` và cập nhật ${updatedCount} trạng thái` : ''} vào dự án.`
         );
@@ -565,10 +615,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                         <button
                           type="button"
                           className="icon-btn bordered"
-                          disabled={isApplied}
+                          disabled={isApplied || analyzing}
                           style={{ marginTop: 8, width: '100%', justifyContent: 'center', fontSize: 12 }}
                           onClick={() => {
-                            if (isApplied) return;
+                            if (isApplied || analyzing) return;
                             const ok = onReplaceQuote(
                               issue.quote,
                               issue.suggestedRewrite!,
