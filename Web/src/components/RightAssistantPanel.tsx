@@ -58,25 +58,6 @@ const NODE_TYPE_COLORS: Record<StoryNodeType, string> = {
   event: 'var(--node-event)',
 };
 
-const QUICK_PROMPTS = [
-  {
-    label: 'Gợi ý viết tiếp',
-    prompt: 'Dựa trên nội dung chương hiện tại, hãy gợi ý 1-2 đoạn văn viết tiếp tự nhiên, giữ đúng giọng văn.',
-  },
-  {
-    label: 'Chau chuốt đoạn cuối',
-    prompt: 'Hãy chau chuốt lại đoạn cuối của chương hiện tại cho giàu hình ảnh và mượt mà hơn.',
-  },
-  {
-    label: 'Kiểm tra nhịp độ',
-    prompt: 'Nhận xét ngắn gọn về nhịp độ, cảm xúc và điểm nhấn của chương hiện tại.',
-  },
-  {
-    label: 'Ý tưởng nút thắt',
-    prompt: 'Đề xuất 3 hướng tạo nút thắt (plot twist) hoặc xung đột hợp lý cho phần tiếp theo.',
-  },
-];
-
 export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   user,
   activeProject,
@@ -224,11 +205,15 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       ];
 
       const res = await webApi.chatWithAI({
+        mode: 'web_writing',
         messages: apiMessages,
         projectContext: activeProject
           ? {
               projectId: activeProject.isLocalOnly ? undefined : activeProject.id,
               projectTitle: activeProject.title,
+              chapterNumber: activeChapter?.chapterNumber,
+              chapterTitle: activeChapter?.title,
+              chapterDesc: activeChapter?.desc,
               nodes: nodes.slice(0, 60),
             }
           : undefined,
@@ -436,20 +421,6 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       {/* TAB 2: AI WRITING CHAT */}
       {tab === 'chat' && (
         <div className="panel-body" style={{ overflow: 'hidden' }}>
-          <div className="chip-row">
-            {QUICK_PROMPTS.map((qp) => (
-              <button
-                key={qp.label}
-                type="button"
-                className="chip-btn"
-                disabled={chatLoading}
-                onClick={() => void handleSendChat(qp.prompt)}
-              >
-                {qp.label}
-              </button>
-            ))}
-          </div>
-
           <div className="chat-messages">
             {chatMessages.length === 0 ? (
               <div style={{ textAlign: 'center', padding: '28px 12px', color: 'var(--text-muted)', fontSize: 13 }}>
