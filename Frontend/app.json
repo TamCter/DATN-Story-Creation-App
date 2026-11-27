@@ -46,10 +46,15 @@
       "reactCompiler": true
     },
     "extra": {
-      "router": {},
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
       "eas": {
-        "projectId": "277b5a99-e510-417f-9f1f-6c2b9838c05f"
+        "projectId": "fe655ce5-87af-4750-aa6f-671b11f6bc44"
       }
-    }
+    },
+    "owner": "zen1311"
   }
 }
