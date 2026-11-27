@@ -144,6 +144,27 @@ class WebApiClient {
     }>(`/projects/${encodeURIComponent(projectId)}/graph`, { method: 'GET' });
   }
 
+  // Nodes
+  async createNode(projectId: string, payload: Record<string, unknown>) {
+    return this.request<{ success: boolean; data: StoryNode; message?: string }>(
+      `/projects/${encodeURIComponent(projectId)}/nodes`,
+      {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
+  async updateNode(nodeId: string, payload: Record<string, unknown>) {
+    return this.request<{ success: boolean; data: StoryNode; message?: string }>(
+      `/nodes/${encodeURIComponent(nodeId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify(payload),
+      }
+    );
+  }
+
   // Chapters
   async getChapters(projectId: string) {
     return this.request<{ success: boolean; data: StoryChapter[] }>(
@@ -211,10 +232,14 @@ class WebApiClient {
   }
 
   async chatWithAI(payload: {
+    mode?: 'web_writing';
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     projectContext?: {
       projectId?: string;
       projectTitle?: string;
+      chapterNumber?: number;
+      chapterTitle?: string;
+      chapterDesc?: string;
       nodes?: StoryNode[];
     };
   }) {

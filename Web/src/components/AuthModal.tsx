@@ -118,7 +118,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </button>
       )}
 
-      <div className="auth-badge">TƠ LÒNG · KHÔNG GIAN VIẾT WEB</div>
+      <div className="auth-badge">Creator Story · KHÔNG GIAN VIẾT WEB</div>
       <h1 className="auth-heading">
         Mỗi câu chuyện
         <br />

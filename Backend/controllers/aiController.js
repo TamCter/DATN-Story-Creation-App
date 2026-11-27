@@ -47,6 +47,21 @@ const {
   calculateAgeFromDob,
 } = require('../utils/dateUtils');
 
+const WEB_WRITING_SYSTEM_PROMPT = `Bạn là biên tập viên văn học và trợ lý đồng sáng tác truyện tiếng Việt, đồng hành trực tiếp cùng tác giả trong lúc viết tay.
+
+NHIỆM VỤ CHÍNH:
+1. Viết tiếp & mở rộng cảnh: Khi tác giả nhờ viết tiếp, hãy bắt đúng ngôi kể, thì, nhịp điệu, giọng văn và không khí cảm xúc của đoạn bản thảo hiện tại. Ưu tiên miêu tả sống động qua hành động, giác quan và nội tâm ("tả thay vì kể"), tránh sáo rỗng hoặc tóm tắt khô khan.
+2. Biên tập & chau chuốt văn phong: Khi tác giả nhờ sửa hoặc viết lại câu/đoạn, giữ nguyên ý đồ và chi tiết cốt lõi nhưng làm câu văn mượt mà, giàu hình ảnh, tiết tấu tự nhiên hơn.
+3. Đối thoại & tâm lý nhân vật: Xây dựng lời thoại có cá tính riêng, phản ánh đúng tính cách, vai trò, mối quan hệ và tình trạng hiện tại của nhân vật trong hồ sơ thế giới truyện.
+4. Gỡ bí & phát triển cốt truyện: Khi tác giả hỏi ý tưởng, hãy đề xuất 2-3 hướng đi cụ thể, giàu xung đột và hợp logic (tình tiết mới, bước ngoặt, cách chuyển cảnh, gieo chi tiết ẩn) bám sát thế giới và mạch chương đang viết.
+5. Giữ tính nhất quán thế giới truyện: Luôn đối chiếu hồ sơ nhân vật, tổ chức, địa điểm, vật phẩm và sự kiện đã có của dự án. Không tự ý viết sai trạng thái nhân vật (VD: nhân vật đã chết), sai vai trò/phe phái hay sai chi tiết đã thiết lập.
+
+QUY TẮC TRÌNH BÀY:
+- Trả lời bằng tiếng Việt tự nhiên, văn bản thuần (KHÔNG dùng ký tự markdown như **in đậm**, *in nghiêng*, ### tiêu đề, dấu backtick hay khung code).
+- Nếu tác giả yêu cầu viết tiếp hoặc viết lại một đoạn truyện, hãy trả thẳng đoạn văn hoàn chỉnh để tác giả có thể chèn ngay vào bản thảo, không rào đón mở đầu hay bình luận thừa ở cuối.
+- TUYỆT ĐỐI KHÔNG xuất JSON, KHÔNG tạo cấu trúc create_node/create_link, và KHÔNG nhắc đến thuật ngữ kỹ thuật như node, đồ thị hay cơ sở dữ liệu.
+- Tôn trọng quyền làm chủ sáng tác của tác giả: hỗ trợ đúng trọng tâm yêu cầu, không tự ý viết lan man sang kết cục của cả chương nếu tác giả không yêu cầu.`;
+
 const SYSTEM_PROMPT = `Bạn là trợ lý AI hỗ trợ phát triển câu chuyện và xây dựng hồ sơ nhân vật, bối cảnh, tổ chức, vật phẩm và sự kiện.
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
@@ -750,7 +765,8 @@ async function generateAIResponse({ provider, apiKey, contextText, messages }) {
  */
 async function chatWithAI(req, res, next) {
   try {
-    const { messages = [], projectContext = {} } = req.body;
+    const { messages = [], projectContext = {}, mode = 'default' } = req.body;
+    const isWebWritingMode = mode === 'web_writing';
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: 'Thiếu danh sách tin nhắn' });
     }
@@ -779,9 +795,18 @@ async function chatWithAI(req, res, next) {
       });
     }
 
-    let contextText = SYSTEM_PROMPT;
+    let contextText = isWebWritingMode ? WEB_WRITING_SYSTEM_PROMPT : SYSTEM_PROMPT;
     if (projectContext.projectTitle) {
       contextText += `\n\nDự án hiện tại: "${projectContext.projectTitle}"`;
+    }
+    if (isWebWritingMode && (projectContext.chapterTitle || projectContext.chapterNumber)) {
+      const chLabel = projectContext.chapterTitle
+        ? `${projectContext.chapterTitle}${projectContext.chapterNumber ? ` (Chương ${projectContext.chapterNumber})` : ''}`
+        : `Chương ${projectContext.chapterNumber}`;
+      contextText += `\nChương đang viết: ${chLabel}`;
+      if (typeof projectContext.chapterDesc === 'string' && projectContext.chapterDesc.trim()) {
+        contextText += `\nGhi chú / Tóm tắt chương: ${projectContext.chapterDesc.trim().slice(0, 800)}`;
+      }
     }
 
     // Lấy danh sách thực thể THỰC TẾ của đúng projectId từ Neo4j (nếu dự án tồn tại trên DB)
@@ -831,41 +856,67 @@ async function chatWithAI(req, res, next) {
         const t = String(val ?? '').trim();
         return t && !PLACEHOLDER_VALUE_PATTERN.test(t) ? t : '';
       };
-      const nodesSummary = effectiveNodes
-        .slice(0, MAX_CHAT_CTX_NODES)
-        .map((n) => {
-          const extras = [];
-          if (n.type === 'faction') {
-            const hq = cleanMetaVal(n.headquarters);
-            const leader = cleanMetaVal(n.leader);
-            if (hq) extras.push(`đã có trụ sở: ${hq}`);
-            if (leader) extras.push(`đã có thủ lĩnh: ${leader}`);
-          } else if (n.type === 'location') {
-            const ruler = cleanMetaVal(n.ruler);
-            if (ruler) extras.push(`đang do ${ruler} cai quản`);
-          } else if (n.type === 'item') {
-            const holder = cleanMetaVal(n.holderOrLocation);
-            const origin = cleanMetaVal(n.origin);
-            if (holder) extras.push(`đang do ${holder} nắm giữ`);
-            if (origin) extras.push(`nguồn gốc: ${origin}`);
-          } else if (n.type === 'character') {
-            const bp = cleanMetaVal(n.birthplace);
-            if (bp) extras.push(`nơi sinh: ${bp}`);
-          } else if (n.type === 'event') {
-            const loc = cleanMetaVal(n.location);
-            const time = cleanMetaVal(n.time);
-            if (loc) extras.push(`địa điểm: ${loc}`);
-            if (time) extras.push(`ngày: ${time}`);
-          }
-          const extraStr = extras.length > 0 ? ` — ${extras.join('; ')}` : '';
-          return `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}${extraStr}`;
-        })
-        .join('\n');
-      contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; KHÔNG gán trùng các quan hệ 1-1 đã có sẵn như trụ sở/thủ lĩnh/người giữ/cai quản; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
-      if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
-        contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
+      if (isWebWritingMode) {
+        const typeLabelMap = {
+          character: 'Nhân vật',
+          faction: 'Tổ chức',
+          location: 'Địa điểm',
+          item: 'Vật phẩm',
+          event: 'Sự kiện',
+        };
+        const worldNotes = effectiveNodes
+          .slice(0, 80)
+          .map((n) => {
+            const parts = [];
+            const role = cleanMetaVal(n.role);
+            const status = cleanMetaVal(n.status);
+            const personality = cleanMetaVal(n.personality);
+            const desc = cleanMetaVal(n.desc);
+            if (role) parts.push(`vai trò: ${role}`);
+            if (status) parts.push(`trạng thái: ${status}`);
+            if (personality) parts.push(`tính cách: ${personality}`);
+            if (desc) parts.push(desc.slice(0, 180));
+            return `- ${n.name} (${typeLabelMap[n.type] || n.type})${parts.length ? `: ${parts.join('; ')}` : ''}`;
+          })
+          .join('\n');
+        contextText += `\n\nHồ sơ thế giới truyện hiện có (tham chiếu để giữ đúng tính nhất quán khi viết):\n${worldNotes}`;
+      } else {
+        const nodesSummary = effectiveNodes
+          .slice(0, MAX_CHAT_CTX_NODES)
+          .map((n) => {
+            const extras = [];
+            if (n.type === 'faction') {
+              const hq = cleanMetaVal(n.headquarters);
+              const leader = cleanMetaVal(n.leader);
+              if (hq) extras.push(`đã có trụ sở: ${hq}`);
+              if (leader) extras.push(`đã có thủ lĩnh: ${leader}`);
+            } else if (n.type === 'location') {
+              const ruler = cleanMetaVal(n.ruler);
+              if (ruler) extras.push(`đang do ${ruler} cai quản`);
+            } else if (n.type === 'item') {
+              const holder = cleanMetaVal(n.holderOrLocation);
+              const origin = cleanMetaVal(n.origin);
+              if (holder) extras.push(`đang do ${holder} nắm giữ`);
+              if (origin) extras.push(`nguồn gốc: ${origin}`);
+            } else if (n.type === 'character') {
+              const bp = cleanMetaVal(n.birthplace);
+              if (bp) extras.push(`nơi sinh: ${bp}`);
+            } else if (n.type === 'event') {
+              const loc = cleanMetaVal(n.location);
+              const time = cleanMetaVal(n.time);
+              if (loc) extras.push(`địa điểm: ${loc}`);
+              if (time) extras.push(`ngày: ${time}`);
+            }
+            const extraStr = extras.length > 0 ? ` — ${extras.join('; ')}` : '';
+            return `- ${n.name} (${n.type})${n.id ? ` [id: ${n.id}]` : ''}${extraStr}`;
+          })
+          .join('\n');
+        contextText += `\n\nCác thực thể đã có trong đồ thị hiện tại (CHỈ các thực thể liệt kê dưới đây mới tồn tại trong dự án này; KHÔNG tạo trùng tên các thực thể này; KHÔNG gán trùng các quan hệ 1-1 đã có sẵn như trụ sở/thủ lĩnh/người giữ/cai quản; khi nối quan hệ nếu nhiều node trùng tên hãy điền đúng [id] vào source/target): \n${nodesSummary}`;
+        if (effectiveNodes.length > MAX_CHAT_CTX_NODES) {
+          contextText += `\n... và ${effectiveNodes.length - MAX_CHAT_CTX_NODES} thực thể khác`;
+        }
       }
-    } else {
+    } else if (!isWebWritingMode) {
       contextText +=
         '\n\nCác thực thể đã có trong đồ thị hiện tại: (TRỐNG — hiện có 0 thực thể. Dự án này chưa có bất kỳ nhân vật, địa điểm, vật phẩm, tổ chức hay sự kiện nào. Mọi thực thể người dùng yêu cầu đều là THỰC THỂ MỚI; TUYỆT ĐỐI KHÔNG được nói là đã tồn tại trong đồ thị.)';
     }
@@ -884,6 +935,27 @@ async function chatWithAI(req, res, next) {
         message: provider === 'aimlapi'
           ? 'Thiếu AIMLAPI_API_KEY. Hãy cấu hình khóa AIMLAPI trong file .env của Backend.'
           : 'AI chưa được cấu hình. Hãy thêm GEMINI_API_KEY hoặc AIMLAPI_API_KEY vào file .env',
+      });
+    }
+
+    if (isWebWritingMode) {
+      const generated = await generateAIResponse({
+        provider,
+        apiKey,
+        contextText,
+        messages: normalizedMessages,
+      });
+      return res.status(200).json({
+        success: true,
+        data: {
+          message: sanitizeAIChatDisplayText(generated.text),
+          nodeData: null,
+          nodeDataList: [],
+          linkDataList: [],
+          suggestedPrompt: null,
+          raw: generated.text,
+          model: generated.model,
+        },
       });
     }
 
