@@ -867,9 +867,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 String(c.chapterNumber) === trimmed
             );
             if (found) {
-              return found.title
-                ? `Chương ${found.chapterNumber}: ${found.title}`
-                : `Chương ${found.chapterNumber}`;
+              const title = (found.title || '').trim();
+              if (!title) return `Chương ${found.chapterNumber}`;
+              if (/^chương\s*\d+/i.test(title)) return title;
+              return `Chương ${found.chapterNumber}: ${title}`;
             }
             return trimmed;
           };
