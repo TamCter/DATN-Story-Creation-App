@@ -30,6 +30,7 @@ interface LeftSidebarProps {
   onOpenAuth: () => void;
   onLogout: () => void;
   onClose?: () => void;
+  locked?: boolean;
 }
 
 export const LeftSidebar: React.FC<LeftSidebarProps> = ({
@@ -48,6 +49,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
   onOpenAuth,
   onLogout,
   onClose,
+  locked = false,
 }) => {
   const [creatingProject, setCreatingProject] = useState(false);
   const [isCreatingProject, setIsCreatingProject] = useState(false);
@@ -112,6 +114,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           <select
             className="select-input"
             value={activeProject?.id || ''}
+            disabled={locked}
             onChange={(e) => onSelectProject(e.target.value)}
             aria-label="Chọn dự án truyện"
           >
@@ -122,8 +125,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
             ))}
           </select>
           <button
+            type="button"
             className="icon-btn bordered"
             title="Tạo dự án mới"
+            disabled={locked}
             onClick={() => setCreatingProject((v) => !v)}
           >
             <Plus size={15} />
@@ -214,8 +219,10 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
           Chương ({chapters.length}) · {totalProjectWords.toLocaleString('vi-VN')} từ
         </span>
         <button
+          type="button"
           className="icon-btn"
           style={{ height: 24, padding: '0 6px', fontSize: 12 }}
+          disabled={locked}
           onClick={onCreateChapter}
           title="Thêm chương mới"
         >
@@ -232,8 +239,12 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
               <button
                 type="button"
                 className="chapter-select-btn"
+                disabled={locked && !isActive}
+                style={locked && !isActive ? { opacity: 0.45, cursor: 'not-allowed' } : undefined}
                 aria-current={isActive ? 'page' : undefined}
-                onClick={() => onSelectChapter(ch.id)}
+                onClick={() => {
+                  if (!locked) onSelectChapter(ch.id);
+                }}
               >
                 <div className="chapter-item-title">{ch.title || `Chương ${ch.chapterNumber}`}</div>
                 <div className="chapter-item-meta">
@@ -245,9 +256,11 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 <button
                   type="button"
                   className="chapter-delete-btn"
+                  disabled={locked}
                   title="Xóa chương"
                   aria-label={`Xóa ${ch.title || `Chương ${ch.chapterNumber}`}`}
                   onClick={() => {
+                    if (locked) return;
                     if (window.confirm(`Xóa "${ch.title || `Chương ${ch.chapterNumber}`}"?`)) {
                       void onDeleteChapter(ch.id);
                     }
@@ -346,7 +359,7 @@ export const LeftSidebar: React.FC<LeftSidebarProps> = ({
                 {user.email}
               </div>
             </div>
-            <button className="icon-btn" title="Đăng xuất" onClick={onLogout}>
+            <button type="button" className="icon-btn" disabled={locked} title="Đăng xuất" onClick={onLogout}>
               <LogOut size={14} />
             </button>
           </div>

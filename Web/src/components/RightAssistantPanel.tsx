@@ -40,6 +40,7 @@ interface RightAssistantPanelProps {
   onInsertText: (text: string, expectedChapterId?: string) => void;
   onReplaceQuote: (quote: string, replacement: string, expectedChapterId?: string) => boolean;
   onRefreshGraph: () => Promise<void>;
+  onAnalyzingChange?: (analyzing: boolean) => void;
   onOpenAuth: () => void;
   onNotify: (msg: string) => void;
   onClose?: () => void;
@@ -72,6 +73,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   onInsertText,
   onReplaceQuote,
   onRefreshGraph,
+  onAnalyzingChange,
   onOpenAuth,
   onNotify,
   onClose,
@@ -123,6 +125,13 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   }, [projectKey]);
 
   const analyzing = Boolean(activeChapterId && analyzingChapterId === activeChapterId);
+
+  useEffect(() => {
+    onAnalyzingChange?.(Boolean(analyzingChapterId));
+    return () => {
+      onAnalyzingChange?.(false);
+    };
+  }, [analyzingChapterId, onAnalyzingChange]);
   const analysis =
     analysisState && analysisState.chapterId === activeChapterId ? analysisState.result : null;
   const chatMessages = chatByProject[projectKey] || [];

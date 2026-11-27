@@ -148,6 +148,7 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [toast, setToast] = useState<string | null>(null);
   const [baselineSyncVersion, setBaselineSyncVersion] = useState(0);
+  const [isAnalyzingChapter, setIsAnalyzingChapter] = useState(false);
   const [mentionState, setMentionState] = useState<MentionPopupState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
 
@@ -495,10 +496,16 @@ export default function App() {
     [user]
   );
 
+  useEffect(() => {
+    if (isAnalyzingChapter) {
+      setMentionState(null);
+    }
+  }, [isAnalyzingChapter]);
+
   // Edit chapter fields (immediate local persistence + per-chapter debounced server sync)
   const updateActiveChapter = useCallback(
     (patch: Partial<Pick<StoryChapter, 'title' | 'desc' | 'content'>>) => {
-      if (!activeChapter || !activeProject) return;
+      if (!activeChapter || !activeProject || isAnalyzingChapter) return;
 
       const nextRev = (chapterEditRevRef.current[activeChapter.id] || 0) + 1;
       chapterEditRevRef.current[activeChapter.id] = nextRev;
@@ -555,7 +562,7 @@ export default function App() {
       }, 1100);
       saveTimersRef.current.set(nextChapter.id, timerId);
     },
-    [activeChapter, activeProject, syncChapterToServer, user]
+    [activeChapter, activeProject, isAnalyzingChapter, syncChapterToServer, user]
   );
 
   const handleManualSave = useCallback(async () => {
@@ -608,12 +615,20 @@ export default function App() {
 
   // Project & Chapter actions
   const handleSelectProject = async (projectId: string) => {
+    if (isAnalyzingChapter) {
+      notify('Đang phân tích chương, vui lòng chờ hoàn tất trước khi chuyển dự án.');
+      return;
+    }
     const proj = projects.find((p) => p.id === projectId);
     if (!proj || proj.id === activeProjectId) return;
     await loadProjectData(proj, Boolean(user), sessionGenRef.current);
   };
 
   const handleCreateProject = async (title: string) => {
+    if (isAnalyzingChapter) {
+      notify('Đang phân tích chương, vui lòng chờ hoàn tất.');
+      return;
+    }
     const originSessionGen = sessionGenRef.current;
     if (user) {
       try {
@@ -670,6 +685,10 @@ export default function App() {
   };
 
   const handleCreateChapter = async () => {
+    if (isAnalyzingChapter) {
+      notify('Đang phân tích chương, vui lòng chờ hoàn tất.');
+      return;
+    }
     if (!activeProject) return;
     const originProjectId = activeProject.id;
     const originIsLocal = Boolean(activeProject.isLocalOnly);
@@ -735,6 +754,10 @@ export default function App() {
   };
 
   const handleDeleteChapter = async (chapterId: string) => {
+    if (isAnalyzingChapter) {
+      notify('Đang phân tích chương, vui lòng chờ hoàn tất.');
+      return;
+    }
     if (!activeProject) return;
     const originProjectId = activeProject.id;
     const originIsLocal = Boolean(activeProject.isLocalOnly);
@@ -793,6 +816,10 @@ export default function App() {
   };
 
   const handleLogout = () => {
+    if (isAnalyzingChapter) {
+      notify('Đang phân tích chương, vui lòng chờ hoàn tất.');
+      return;
+    }
     clearAllSaveTimers();
     sessionGenRef.current += 1;
     projectLoadGenRef.current += 1;
@@ -805,7 +832,7 @@ export default function App() {
   };
 
   const handleRefreshFromApp = async () => {
-    if (!user || syncingFromApp) return;
+    if (!user || syncingFromApp || isAnalyzingChapter) return;
     const capturedSessionGen = sessionGenRef.current;
     setSyncingFromApp(true);
     try {
@@ -1072,6 +1099,10 @@ export default function App() {
           onSelectProject={(id) => void handleSelectProject(id)}
           onCreateProject={handleCreateProject}
           onSelectChapter={(id) => {
+            if (isAnalyzingChapter) {
+              notify('Đang phân tích chương, vui lòng chờ hoàn tất trước khi chuyển chương.');
+              return;
+            }
             setActiveChapterId(id);
             if (isNarrowViewport()) setShowLeft(false);
           }}
@@ -1085,6 +1116,7 @@ export default function App() {
           onOpenAuth={() => setAuthModalOpen(true)}
           onLogout={handleLogout}
           onClose={() => setShowLeft(false)}
+          locked={isAnalyzingChapter}
         />
       )}
 
@@ -1201,7 +1233,7 @@ export default function App() {
                 type="button"
                 className="icon-btn bordered"
                 title="Tải dữ liệu mới nhất từ App"
-                disabled={syncingFromApp}
+                disabled={syncingFromApp || isAnalyzingChapter}
                 onClick={() => void handleRefreshFromApp()}
               >
                 <RefreshCw size={13} className={syncingFromApp ? 'spin' : undefined} />
@@ -1274,9 +1306,27 @@ export default function App() {
                 </button>
               </div>
 
+              {isAnalyzingChapter && (
+                <div
+                  style={{
+                    marginBottom: 12,
+                    padding: '8px 12px',
+                    borderRadius: 8,
+                    background: 'var(--accent-soft)',
+                    border: '1px solid var(--border-gold)',
+                    color: 'var(--accent)',
+                    fontSize: 12.5,
+                    fontWeight: 500,
+                  }}
+                >
+                  Đang phân tích chương — tạm khóa chỉnh sửa và chuyển chương cho đến khi hoàn tất.
+                </div>
+              )}
+
               <input
                 className={`chapter-title-input font-${prefs.font}`}
                 value={activeChapter.title}
+                readOnly={isAnalyzingChapter}
                 onChange={(e) => updateActiveChapter({ title: e.target.value })}
                 placeholder="Nhập tiêu đề chương..."
               />
@@ -1286,6 +1336,7 @@ export default function App() {
                   <textarea
                     className="chapter-desc-input"
                     rows={2}
+                    readOnly={isAnalyzingChapter}
                     value={activeChapter.desc || ''}
                     onChange={(e) => updateActiveChapter({ desc: e.target.value })}
                     placeholder="Ghi chú nhanh dàn ý, mục tiêu hoặc tóm tắt chương này..."
@@ -1300,7 +1351,9 @@ export default function App() {
                   style={{
                     fontSize: `${prefs.fontSize}px`,
                     lineHeight: prefs.lineHeight,
+                    opacity: isAnalyzingChapter ? 0.72 : 1,
                   }}
+                  readOnly={isAnalyzingChapter}
                   value={activeChapter.content || ''}
                   onChange={(e) => {
                     const val = e.target.value;
@@ -1367,6 +1420,7 @@ export default function App() {
           onInsertText={handleInsertText}
           onReplaceQuote={handleReplaceQuote}
           onRefreshGraph={handleRefreshGraphOnly}
+          onAnalyzingChange={setIsAnalyzingChapter}
           onOpenAuth={() => setAuthModalOpen(true)}
           onNotify={notify}
           onClose={() => setShowRight(false)}
