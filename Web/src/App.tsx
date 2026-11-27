@@ -34,11 +34,92 @@ import type {
   StoryChapter,
   StoryLink,
   StoryNode,
+  StoryNodeType,
   StoryProject,
 } from './types/story';
 import { countParagraphs, countWords, estimateReadingMinutes } from './utils/text';
 
 type SaveStatus = 'saved' | 'saving' | 'local' | 'error';
+
+interface MentionPopupState {
+  start: number;
+  end: number;
+  query: string;
+  top: number;
+  left: number;
+}
+
+const MENTION_TYPE_LABELS: Record<StoryNodeType, string> = {
+  character: 'Nhân vật',
+  faction: 'Tổ chức',
+  location: 'Địa điểm',
+  item: 'Vật phẩm',
+  event: 'Sự kiện',
+};
+
+const MENTION_TYPE_COLORS: Record<StoryNodeType, string> = {
+  character: 'var(--node-character)',
+  faction: 'var(--node-faction)',
+  location: 'var(--node-location)',
+  item: 'var(--node-item)',
+  event: 'var(--node-event)',
+};
+
+function stripDiacritics(input: string): string {
+  return input
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/Đ/g, 'D')
+    .toLowerCase();
+}
+
+function getCaretViewportCoords(
+  textarea: HTMLTextAreaElement,
+  position: number
+): { top: number; left: number } {
+  const rect = textarea.getBoundingClientRect();
+  const style = window.getComputedStyle(textarea);
+  const mirror = document.createElement('div');
+  mirror.style.position = 'fixed';
+  mirror.style.visibility = 'hidden';
+  mirror.style.whiteSpace = 'pre-wrap';
+  mirror.style.wordWrap = 'break-word';
+  mirror.style.top = '0';
+  mirror.style.left = '-9999px';
+  mirror.style.width = `${textarea.clientWidth}px`;
+  mirror.style.fontFamily = style.fontFamily;
+  mirror.style.fontSize = style.fontSize;
+  mirror.style.fontWeight = style.fontWeight;
+  mirror.style.lineHeight = style.lineHeight;
+  mirror.style.letterSpacing = style.letterSpacing;
+  mirror.style.padding = style.padding;
+  mirror.style.boxSizing = style.boxSizing;
+
+  mirror.textContent = textarea.value.slice(0, position);
+  const marker = document.createElement('span');
+  marker.textContent = '\u200b';
+  mirror.appendChild(marker);
+  document.body.appendChild(mirror);
+
+  const markerTop = marker.offsetTop;
+  const markerLeft = marker.offsetLeft;
+  const lineHeightPx = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.6 || 28;
+  document.body.removeChild(mirror);
+
+  const rawTop = rect.top + markerTop - textarea.scrollTop + lineHeightPx + 6;
+  const rawLeft = rect.left + markerLeft - textarea.scrollLeft;
+  const popoverWidth = Math.min(320, window.innerWidth - 32);
+  const popoverHeight = 260;
+
+  const left = Math.max(16, Math.min(rawLeft, window.innerWidth - popoverWidth - 16));
+  const top =
+    rawTop + popoverHeight > window.innerHeight - 16
+      ? Math.max(16, rect.top + markerTop - textarea.scrollTop - popoverHeight - 8)
+      : Math.max(16, rawTop);
+
+  return { top, left };
+}
 
 const isNarrowViewport = () =>
   typeof window !== 'undefined' && window.innerWidth <= 820;
@@ -67,6 +148,8 @@ export default function App() {
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved');
   const [toast, setToast] = useState<string | null>(null);
   const [baselineSyncVersion, setBaselineSyncVersion] = useState(0);
+  const [mentionState, setMentionState] = useState<MentionPopupState | null>(null);
+  const [mentionIndex, setMentionIndex] = useState(0);
 
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const saveTimersRef = useRef<Map<string, number>>(new Map());
@@ -515,13 +598,13 @@ export default function App() {
       } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'f') {
         e.preventDefault();
         setFocusMode((v) => !v);
-      } else if (e.key === 'Escape' && focusMode) {
+      } else if (e.key === 'Escape' && focusMode && !mentionState) {
         setFocusMode(false);
       }
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [focusMode, handleManualSave]);
+  }, [focusMode, handleManualSave, mentionState]);
 
   // Project & Chapter actions
   const handleSelectProject = async (projectId: string) => {
@@ -769,8 +852,113 @@ export default function App() {
     return true;
   };
 
-  // Preserve native Tab / Shift+Tab focus navigation; use Ctrl+] to indent paragraphs
+  const mentionMatches = useMemo(() => {
+    if (!mentionState) return [];
+    const q = mentionState.query.trim();
+    const qLower = q.toLowerCase();
+    const qNorm = stripDiacritics(q);
+    const list = nodes.filter((node) => {
+      if (!q) return true;
+      const nameLower = node.name.trim().toLowerCase();
+      if (nameLower.startsWith(qLower)) return true;
+      return stripDiacritics(node.name.trim()).startsWith(qNorm);
+    });
+    return list.sort((a, b) => a.name.localeCompare(b.name, 'vi'));
+  }, [mentionState, nodes]);
+
+  useEffect(() => {
+    setMentionIndex(0);
+  }, [mentionState?.query, mentionState?.start]);
+
+  useEffect(() => {
+    setMentionState(null);
+  }, [activeChapterId, activeProjectId]);
+
+  const updateMentionFromCaret = useCallback(
+    (el: HTMLTextAreaElement, value: string) => {
+      if (nodes.length === 0) {
+        setMentionState(null);
+        return;
+      }
+      const caret = el.selectionStart ?? value.length;
+      const before = value.slice(0, caret);
+      const atIdx = before.lastIndexOf('@');
+      if (atIdx < 0) {
+        setMentionState(null);
+        return;
+      }
+      if (atIdx > 0 && !/[\s([{“"'\-–—]/.test(before[atIdx - 1])) {
+        setMentionState(null);
+        return;
+      }
+      const query = before.slice(atIdx + 1);
+      if (query.includes('\n') || query.includes('@') || query.length > 40) {
+        setMentionState(null);
+        return;
+      }
+      const coords = getCaretViewportCoords(el, caret);
+      setMentionState({
+        start: atIdx,
+        end: caret,
+        query,
+        top: coords.top,
+        left: coords.left,
+      });
+    },
+    [nodes.length]
+  );
+
+  const selectMentionNode = useCallback(
+    (node: StoryNode) => {
+      if (!activeChapter || !mentionState) return;
+      const current = activeChapter.content || '';
+      const before = current.slice(0, mentionState.start);
+      const after = current.slice(mentionState.end);
+      const needsTrailingSpace = after.length === 0 || !/^[\s.,!?;:)\]”"']/.test(after);
+      const inserted = needsTrailingSpace ? `${node.name} ` : node.name;
+      const nextContent = `${before}${inserted}${after}`;
+      const nextCaret = mentionState.start + inserted.length;
+      setMentionState(null);
+      updateActiveChapter({ content: nextContent });
+      window.requestAnimationFrame(() => {
+        const el = textareaRef.current;
+        if (el) {
+          el.focus();
+          el.setSelectionRange(nextCaret, nextCaret);
+        }
+      });
+    },
+    [activeChapter, mentionState, updateActiveChapter]
+  );
+
+  // Preserve native Tab / Shift+Tab focus navigation; handle @mention navigation and Ctrl+] indent
   const handleTextareaKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (mentionState) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        setMentionState(null);
+        return;
+      }
+      if (mentionMatches.length > 0) {
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          setMentionIndex((i) => (i + 1) % mentionMatches.length);
+          return;
+        }
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          setMentionIndex((i) => (i - 1 + mentionMatches.length) % mentionMatches.length);
+          return;
+        }
+        if (e.key === 'Enter' || e.key === 'Tab') {
+          e.preventDefault();
+          const chosen = mentionMatches[Math.min(mentionIndex, mentionMatches.length - 1)];
+          if (chosen) selectMentionNode(chosen);
+          return;
+        }
+      }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key === ']' && prefs.tabIndent) {
       e.preventDefault();
       handleInsertText('    ', activeChapter?.id);
@@ -1086,19 +1274,84 @@ export default function App() {
                 </div>
               )}
 
-              <textarea
-                ref={textareaRef}
-                className={`manuscript-textarea font-${prefs.font}`}
-                style={{
-                  fontSize: `${prefs.fontSize}px`,
-                  lineHeight: prefs.lineHeight,
-                }}
-                value={activeChapter.content || ''}
-                onChange={(e) => updateActiveChapter({ content: e.target.value })}
-                onKeyDown={handleTextareaKeyDown}
-                placeholder="Bắt đầu viết câu chuyện của bạn tại đây... (Ctrl+] thụt đầu dòng, Ctrl+S để lưu, Ctrl+Shift+F để bật chế độ tập trung)"
-                spellCheck
-              />
+              <div className="manuscript-wrap">
+                <textarea
+                  ref={textareaRef}
+                  className={`manuscript-textarea font-${prefs.font}`}
+                  style={{
+                    fontSize: `${prefs.fontSize}px`,
+                    lineHeight: prefs.lineHeight,
+                  }}
+                  value={activeChapter.content || ''}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    updateActiveChapter({ content: val });
+                    updateMentionFromCaret(e.currentTarget, val);
+                  }}
+                  onClick={(e) => updateMentionFromCaret(e.currentTarget, e.currentTarget.value)}
+                  onKeyUp={(e) => {
+                    if (
+                      e.key === 'ArrowLeft' ||
+                      e.key === 'ArrowRight' ||
+                      e.key === 'Home' ||
+                      e.key === 'End'
+                    ) {
+                      updateMentionFromCaret(e.currentTarget, e.currentTarget.value);
+                    }
+                  }}
+                  onBlur={() => {
+                    window.setTimeout(() => setMentionState(null), 120);
+                  }}
+                  onKeyDown={handleTextareaKeyDown}
+                  placeholder="Bắt đầu viết câu chuyện của bạn tại đây... (Gõ @ để ping nhân vật/địa điểm, Ctrl+] thụt đầu dòng, Ctrl+S lưu)"
+                  spellCheck
+                />
+
+                {mentionState && (
+                  <div
+                    className="mention-popover"
+                    style={{ top: mentionState.top, left: mentionState.left }}
+                    role="listbox"
+                    aria-label="Gợi ý thực thể để chèn"
+                  >
+                    <div className="mention-header">
+                      <span>
+                        Ping thực thể{mentionState.query ? `: @${mentionState.query}` : ''}
+                      </span>
+                      <span>↑↓ · Enter</span>
+                    </div>
+                    {mentionMatches.length === 0 ? (
+                      <div style={{ padding: '8px 10px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+                        Không có thực thể bắt đầu bằng “{mentionState.query}”
+                      </div>
+                    ) : (
+                      mentionMatches.map((node, idx) => (
+                        <button
+                          key={node.id}
+                          type="button"
+                          role="option"
+                          aria-selected={idx === mentionIndex}
+                          className={`mention-item ${idx === mentionIndex ? 'active' : ''}`}
+                          onMouseDown={(e) => e.preventDefault()}
+                          onMouseEnter={() => setMentionIndex(idx)}
+                          onClick={() => selectMentionNode(node)}
+                        >
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div className="mention-item-name">{node.name}</div>
+                            {node.role && <div className="mention-item-role">{node.role}</div>}
+                          </div>
+                          <span
+                            className="node-pill"
+                            style={{ color: MENTION_TYPE_COLORS[node.type], flexShrink: 0 }}
+                          >
+                            {MENTION_TYPE_LABELS[node.type]}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </article>
           ) : (
             <div style={{ margin: 'auto', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -1124,7 +1377,7 @@ export default function App() {
             <span>~{readMins} phút đọc</span>
           </div>
           <div>
-            <span>Ctrl+] thụt dòng · Ctrl+S lưu · Ctrl+Shift+F tập trung</span>
+            <span>@tên ping thực thể · Ctrl+] thụt dòng · Ctrl+S lưu · Ctrl+Shift+F tập trung</span>
           </div>
         </footer>
       </main>

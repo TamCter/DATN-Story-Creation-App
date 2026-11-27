@@ -41,14 +41,45 @@ export interface StoryNode {
   role?: string;
   desc?: string;
   status?: string;
+  gender?: string;
+  dob?: string;
+  age?: string;
+  birthplace?: string;
+  weapon?: string;
   sect?: string;
+  personality?: string;
+  statusEvent?: string;
+  rarity?: string;
+  origin?: string;
+  element?: string;
+  holderOrLocation?: string;
   region?: string;
+  climate?: string;
+  terrain?: string;
+  dangerLevel?: string;
+  ruler?: string;
+  subType?: string;
   alignment?: string;
   leader?: string;
+  seniorMembers?: string;
+  members?: string;
+  subFactions?: string;
   headquarters?: string;
-  holderOrLocation?: string;
+  motto?: string;
   chapter?: string;
   time?: string;
+  location?: string;
+  eventType?: string;
+  importance?: string;
+  arcName?: string;
+  cause?: string;
+  conflict?: string;
+  outcome?: string;
+  consequences?: string;
+  impact?: string;
+  charactersInvolved?: string;
+  itemsInvolved?: string;
+  factionsInvolved?: string;
 }
 
 export interface StoryLink {
