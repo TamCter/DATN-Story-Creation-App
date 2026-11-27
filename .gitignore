@@ -22,3 +22,6 @@ Thumbs.db
 .specify/
 .agents/skills/speckit-*/
 specs/
+
+# Generated docs
+ARCHITECTURE.md

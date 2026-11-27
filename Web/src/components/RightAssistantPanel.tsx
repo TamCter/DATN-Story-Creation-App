@@ -37,7 +37,8 @@ interface RightAssistantPanelProps {
   chapters: StoryChapter[];
   nodes: StoryNode[];
   links: StoryLink[];
-  onInsertText: (text: string, expectedChapterId?: string) => void;
+  hidden?: boolean;
+  onInsertText: (text: string, expectedChapterId?: string) => boolean;
   onReplaceQuote: (quote: string, replacement: string, expectedChapterId?: string) => boolean;
   onRefreshGraph: () => Promise<void>;
   onAnalyzingChange?: (analyzing: boolean) => void;
@@ -70,6 +71,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   chapters,
   nodes,
   links,
+  hidden = false,
   onInsertText,
   onReplaceQuote,
   onRefreshGraph,
@@ -102,6 +104,8 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   const [savedExtractedDone, setSavedExtractedDone] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const analysisReqRef = useRef(0);
+  const savedKeysByAnalysisRef = useRef<Map<number, Set<string>>>(new Map());
+  const savedNodesByAnalysisRef = useRef<Map<number, StoryNode[]>>(new Map());
 
   // Chat state (scoped per project)
   const [chatByProject, setChatByProject] = useState<Record<string, AIChatMessage[]>>({});
@@ -320,9 +324,17 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
     let failedCount = 0;
 
     try {
-      const existingKeys = new Set(
-        nodes.map((n) => `${n.type.toLowerCase()}::${n.name.trim().toLowerCase()}`)
-      );
+      const priorSavedKeys =
+        savedKeysByAnalysisRef.current.get(originAnalysisId) || new Set<string>();
+      savedKeysByAnalysisRef.current.set(originAnalysisId, priorSavedKeys);
+      const priorSavedNodes =
+        savedNodesByAnalysisRef.current.get(originAnalysisId) || [];
+      savedNodesByAnalysisRef.current.set(originAnalysisId, priorSavedNodes);
+
+      const existingKeys = new Set<string>([
+        ...nodes.map((n) => `${n.type.toLowerCase()}::${n.name.trim().toLowerCase()}`),
+        ...Array.from(priorSavedKeys),
+      ]);
 
       // Các thực thể bị người dùng bỏ chọn và chưa tồn tại trong dự án không được tự tạo ngầm qua trường quan hệ
       const deselectedNewByType = new Map<string, Set<string>>();
@@ -344,7 +356,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
         return trimmed;
       };
 
-      const createdNodes: StoryNode[] = [];
+      const createdNodes: StoryNode[] = [...priorSavedNodes];
 
       for (const idx of Array.from(selectedNodeIdxs)) {
         const sn = analysis.suggestedNodes?.[idx];
@@ -386,8 +398,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
           const createdRes = await webApi.createNode(activeProject.id, payload);
           if (createdRes?.data?.id) {
             createdNodes.push(createdRes.data);
+            priorSavedNodes.push(createdRes.data);
           }
           existingKeys.add(key);
+          priorSavedKeys.add(key);
           createdCount += 1;
         } catch {
           failedCount += 1;
@@ -442,8 +456,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
           const createdRes = await webApi.createNode(activeProject.id, payload);
           if (createdRes?.data?.id) {
             createdNodes.push(createdRes.data);
+            priorSavedNodes.push(createdRes.data);
           }
           existingKeys.add(key);
+          priorSavedKeys.add(key);
           createdCount += 1;
         } catch {
           failedCount += 1;
@@ -504,7 +520,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   };
 
   return (
-    <aside className="sidebar-right">
+    <aside className="sidebar-right" style={hidden ? { display: 'none' } : undefined}>
       <div className="tab-bar">
         <button
           type="button"
@@ -829,10 +845,16 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                           <button
                             type="button"
                             className="icon-btn"
+                            disabled={analyzing}
                             style={{ height: 26, fontSize: 11.5 }}
                             onClick={() => {
-                              onInsertText(`\n\n${msg.content}`, msg.chapterId || activeChapterId || undefined);
-                              onNotify('Đã chèn gợi ý vào chương.');
+                              const inserted = onInsertText(
+                                `\n\n${msg.content}`,
+                                msg.chapterId || activeChapterId || undefined
+                              );
+                              if (inserted) {
+                                onNotify('Đã chèn gợi ý vào chương.');
+                              }
                             }}
                           >
                             <CornerDownLeft size={12} /> Chèn vào chương
@@ -993,10 +1015,13 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 <button
                   type="button"
                   className="icon-btn bordered"
+                  disabled={analyzing}
                   title="Chèn tên vào vị trí con trỏ (hoặc gõ @tên trong khung viết)"
                   onClick={() => {
-                    onInsertText(selectedNode.name, activeChapterId || undefined);
-                    onNotify(`Đã chèn "${selectedNode.name}"`);
+                    const inserted = onInsertText(selectedNode.name, activeChapterId || undefined);
+                    if (inserted) {
+                      onNotify(`Đã chèn "${selectedNode.name}"`);
+                    }
                   }}
                 >
                   + Chèn tên

@@ -865,14 +865,14 @@ export default function App() {
   }, [activeProject, user]);
 
   // Insert text at cursor position in manuscript textarea (guarded by chapter ID & analysis lock)
-  const handleInsertText = (textToInsert: string, expectedChapterId?: string) => {
-    if (!activeChapter || isAnalyzingChapter) return;
-    if (expectedChapterId && activeChapter.id !== expectedChapterId) return;
+  const handleInsertText = (textToInsert: string, expectedChapterId?: string): boolean => {
+    if (!activeChapter || isAnalyzingChapter) return false;
+    if (expectedChapterId && activeChapter.id !== expectedChapterId) return false;
     const el = textareaRef.current;
     const current = activeChapter.content || '';
     if (!el) {
       updateActiveChapter({ content: current + textToInsert });
-      return;
+      return true;
     }
     const start = el.selectionStart ?? current.length;
     const end = el.selectionEnd ?? current.length;
@@ -883,6 +883,7 @@ export default function App() {
       const pos = start + textToInsert.length;
       el.setSelectionRange(pos, pos);
     });
+    return true;
   };
 
   const handleReplaceQuote = (
@@ -1409,23 +1410,22 @@ export default function App() {
         </footer>
       </main>
 
-      {!focusMode && showRight && (
-        <RightAssistantPanel
-          user={user}
-          activeProject={activeProject}
-          activeChapter={activeChapter}
-          chapters={chapters}
-          nodes={nodes}
-          links={links}
-          onInsertText={handleInsertText}
-          onReplaceQuote={handleReplaceQuote}
-          onRefreshGraph={handleRefreshGraphOnly}
-          onAnalyzingChange={setIsAnalyzingChapter}
-          onOpenAuth={() => setAuthModalOpen(true)}
-          onNotify={notify}
-          onClose={() => setShowRight(false)}
-        />
-      )}
+      <RightAssistantPanel
+        user={user}
+        activeProject={activeProject}
+        activeChapter={activeChapter}
+        chapters={chapters}
+        nodes={nodes}
+        links={links}
+        hidden={focusMode || !showRight}
+        onInsertText={handleInsertText}
+        onReplaceQuote={handleReplaceQuote}
+        onRefreshGraph={handleRefreshGraphOnly}
+        onAnalyzingChange={setIsAnalyzingChapter}
+        onOpenAuth={() => setAuthModalOpen(true)}
+        onNotify={notify}
+        onClose={() => setShowRight(false)}
+      />
 
       {mentionState && (
         <div
