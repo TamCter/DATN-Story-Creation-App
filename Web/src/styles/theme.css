@@ -1123,6 +1123,29 @@ button {
   border-radius: 999px;
   background: var(--bg-elevated);
   border: 1px solid var(--border);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.extract-check-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 9px;
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+}
+
+.extract-check-row:hover {
+  border-color: var(--border-gold);
+}
+
+.extract-check-row input[type='checkbox'] {
+  margin-top: 2px;
+  accent-color: var(--accent);
+  flex-shrink: 0;
 }
 
 .icon-btn:disabled {

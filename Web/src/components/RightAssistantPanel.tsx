@@ -39,6 +39,7 @@ interface RightAssistantPanelProps {
   links: StoryLink[];
   onInsertText: (text: string, expectedChapterId?: string) => void;
   onReplaceQuote: (quote: string, replacement: string, expectedChapterId?: string) => boolean;
+  onRefreshGraph: () => Promise<void>;
   onOpenAuth: () => void;
   onNotify: (msg: string) => void;
   onClose?: () => void;
@@ -70,6 +71,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   links,
   onInsertText,
   onReplaceQuote,
+  onRefreshGraph,
   onOpenAuth,
   onNotify,
   onClose,
@@ -88,6 +90,11 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
     result: ChapterAnalysisResult;
   } | null>(null);
   const [appliedIssueIds, setAppliedIssueIds] = useState<Set<string>>(() => new Set());
+  const [selectedNodeIdxs, setSelectedNodeIdxs] = useState<Set<number>>(() => new Set());
+  const [selectedEventIdxs, setSelectedEventIdxs] = useState<Set<number>>(() => new Set());
+  const [selectedStatusIdxs, setSelectedStatusIdxs] = useState<Set<number>>(() => new Set());
+  const [savingExtracted, setSavingExtracted] = useState(false);
+  const [savedExtractedDone, setSavedExtractedDone] = useState(false);
   const [analysisError, setAnalysisError] = useState('');
   const analysisReqRef = useRef(0);
 
@@ -105,6 +112,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
   useEffect(() => {
     setAnalysisError('');
     setAppliedIssueIds(new Set());
+    setSelectedNodeIdxs(new Set());
+    setSelectedEventIdxs(new Set());
+    setSelectedStatusIdxs(new Set());
+    setSavedExtractedDone(false);
   }, [activeChapterId]);
 
   useEffect(() => {
@@ -164,6 +175,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
       } else {
         setAnalysisState({ chapterId: targetChapterId, result: res.data });
         setAppliedIssueIds(new Set());
+        setSelectedNodeIdxs(new Set((res.data.suggestedNodes || []).map((_, i) => i)));
+        setSelectedEventIdxs(new Set((res.data.suggestedEvents || []).map((_, i) => i)));
+        setSelectedStatusIdxs(new Set((res.data.characterStatusChanges || []).map((_, i) => i)));
+        setSavedExtractedDone(false);
       }
     } catch (err: unknown) {
       if (analysisReqRef.current !== reqId || activeChapterIdRef.current !== targetChapterId) {
@@ -271,6 +286,158 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
     }
   };
 
+  const handleSaveExtractedToProject = async () => {
+    if (!user) {
+      onOpenAuth();
+      return;
+    }
+    if (!activeProject || activeProject.isLocalOnly || !analysis || !analysisState) {
+      onNotify('Hãy đăng nhập và mở dự án đồng bộ để lưu node vào đồ thị.');
+      return;
+    }
+    const totalSelected =
+      selectedNodeIdxs.size + selectedEventIdxs.size + selectedStatusIdxs.size;
+    if (totalSelected === 0 || savingExtracted) return;
+
+    setSavingExtracted(true);
+    let createdCount = 0;
+    let updatedCount = 0;
+    let failedCount = 0;
+
+    try {
+      const existingKeys = new Set(
+        nodes.map((n) => `${n.type.toLowerCase()}::${n.name.trim().toLowerCase()}`)
+      );
+
+      for (const idx of Array.from(selectedNodeIdxs)) {
+        const sn = analysis.suggestedNodes?.[idx];
+        if (!sn || !sn.name?.trim()) continue;
+        const key = `${sn.type.toLowerCase()}::${sn.name.trim().toLowerCase()}`;
+        if (existingKeys.has(key)) continue;
+        try {
+          const payload: Record<string, unknown> = {
+            name: sn.name.trim(),
+            type: sn.type,
+            role: sn.role || '',
+            desc: sn.desc || '',
+            status: sn.status || '',
+            gender: sn.gender || '',
+            dob: sn.dob || '',
+            age: sn.age || '',
+            birthplace: sn.birthplace || '',
+            weapon: sn.weapon || '',
+            sect: sn.sect || '',
+            personality: sn.personality || '',
+            rarity: sn.rarity || '',
+            origin: sn.origin || '',
+            element: sn.element || '',
+            holderOrLocation: sn.holderOrLocation || '',
+            region: sn.region || '',
+            climate: sn.climate || '',
+            terrain: sn.terrain || '',
+            dangerLevel: sn.dangerLevel || '',
+            ruler: sn.ruler || '',
+            subType: sn.subType || '',
+            alignment: sn.alignment || '',
+            leader: sn.leader || '',
+            headquarters: sn.headquarters || '',
+            motto: sn.motto || '',
+          };
+          Object.keys(payload).forEach((k) => {
+            if (payload[k] === '') delete payload[k];
+          });
+          await webApi.createNode(activeProject.id, payload);
+          existingKeys.add(key);
+          createdCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      for (const idx of Array.from(selectedEventIdxs)) {
+        const ev = analysis.suggestedEvents?.[idx];
+        if (!ev || !ev.name?.trim()) continue;
+        const key = `event::${ev.name.trim().toLowerCase()}`;
+        if (existingKeys.has(key)) continue;
+        try {
+          const payload: Record<string, unknown> = {
+            name: ev.name.trim(),
+            type: 'event',
+            role: 'BIẾN CỐ',
+            desc: ev.desc || '',
+            chapter: analysisState.chapterId,
+            eventType: ev.eventType || '',
+            importance: ev.importance || '',
+            arcName: ev.arcName || '',
+            sequenceOrder: ev.sequenceOrder || '',
+            location: ev.location || '',
+            time: ev.time || '',
+            timelineType: ev.timelineType || '',
+            duration: ev.duration || '',
+            cause: ev.cause || '',
+            conflict: ev.conflict || '',
+            outcome: ev.outcome || '',
+            consequences: ev.consequences || '',
+            impact: ev.impact || '',
+            characterRoles: ev.characterRoles || '',
+            charactersInvolved: Array.isArray(ev.charactersInvolved)
+              ? JSON.stringify(ev.charactersInvolved)
+              : '',
+            itemsInvolved: Array.isArray(ev.itemsInvolved)
+              ? JSON.stringify(ev.itemsInvolved)
+              : '',
+            factionsInvolved: Array.isArray(ev.factionsInvolved)
+              ? JSON.stringify(ev.factionsInvolved)
+              : '',
+          };
+          Object.keys(payload).forEach((k) => {
+            if (payload[k] === '') delete payload[k];
+          });
+          await webApi.createNode(activeProject.id, payload);
+          existingKeys.add(key);
+          createdCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      for (const idx of Array.from(selectedStatusIdxs)) {
+        const sc = analysis.characterStatusChanges?.[idx];
+        if (!sc || !sc.characterName?.trim()) continue;
+        const match = nodes.find(
+          (n) =>
+            n.type === 'character' &&
+            n.name.trim().toLowerCase() === sc.characterName.trim().toLowerCase()
+        );
+        if (!match) continue;
+        try {
+          await webApi.updateNode(match.id, {
+            status: sc.status,
+            ...(sc.statusEvent ? { statusEvent: sc.statusEvent } : {}),
+          });
+          updatedCount += 1;
+        } catch {
+          failedCount += 1;
+        }
+      }
+
+      await onRefreshGraph();
+
+      if (failedCount === 0) {
+        setSavedExtractedDone(true);
+        onNotify(
+          `Đã lưu ${createdCount} node mới${updatedCount > 0 ? ` và cập nhật ${updatedCount} trạng thái` : ''} vào dự án.`
+        );
+      } else {
+        onNotify(
+          `Đã lưu ${createdCount + updatedCount} mục, ${failedCount} mục bị lỗi. Bạn có thể thử lại.`
+        );
+      }
+    } finally {
+      setSavingExtracted(false);
+    }
+  };
+
   const renderIssueIcon = (severity: ChapterAnalysisIssue['severity']) => {
     if (severity === 'error') return <ShieldAlert size={14} color="var(--danger)" />;
     if (severity === 'warning') return <AlertTriangle size={14} color="var(--warning)" />;
@@ -319,10 +486,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
         <div className="panel-body">
           <div className="card">
             <div style={{ fontSize: 13.5, fontWeight: 600, marginBottom: 4 }}>
-              Kiểm tra mâu thuẫn & phân tích chương
+              Phân tích chương & tạo node
             </div>
             <p style={{ fontSize: 12.5, color: 'var(--text-secondary)', margin: '0 0 10px' }}>
-              Đối chiếu bản thảo với nhân vật, sự kiện và các chương trước để phát hiện lỗi logic.
+              Kiểm tra mâu thuẫn bản thảo bạn tự viết và tự động trích xuất nhân vật, địa điểm, vật phẩm, tổ chức, sự kiện để lưu vào dự án.
             </p>
             <button
               type="button"
@@ -337,7 +504,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 </>
               ) : (
                 <>
-                  <Sparkles size={14} /> Phân tích chương hiện tại
+                  <Sparkles size={14} /> Phân tích & tạo node
                 </>
               )}
             </button>
@@ -426,20 +593,155 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                 ))
               )}
 
-              {analysis.suggestedNodes && analysis.suggestedNodes.length > 0 && (
-                <div className="card">
-                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-muted)', marginBottom: 6 }}>
-                    THỰC THỂ MỚI PHÁT HIỆN ({analysis.suggestedNodes.length})
+              {((analysis.suggestedNodes && analysis.suggestedNodes.length > 0) ||
+                (analysis.suggestedEvents && analysis.suggestedEvents.length > 0) ||
+                (analysis.characterStatusChanges && analysis.characterStatusChanges.length > 0)) && (
+                <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', textTransform: 'uppercase' }}>
+                    Trích xuất Node từ chương
                   </div>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                    {analysis.suggestedNodes.map((n, idx) => (
-                      <div key={`${n.name}-${idx}`} style={{ fontSize: 12.5 }}>
-                        <strong>{n.name}</strong>{' '}
-                        <span style={{ color: 'var(--text-muted)' }}>({n.type})</span>
-                        {n.desc ? <div style={{ color: 'var(--text-secondary)' }}>{n.desc}</div> : null}
+
+                  {analysis.suggestedNodes && analysis.suggestedNodes.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>
+                        THỰC THỂ MỚI ({analysis.suggestedNodes.length})
                       </div>
-                    ))}
-                  </div>
+                      {analysis.suggestedNodes.map((n, idx) => (
+                        <label key={`${n.type}-${n.name}-${idx}`} className="extract-check-row">
+                          <input
+                            type="checkbox"
+                            disabled={savedExtractedDone || savingExtracted}
+                            checked={selectedNodeIdxs.has(idx)}
+                            onChange={() =>
+                              setSelectedNodeIdxs((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(idx)) next.delete(idx);
+                                else next.add(idx);
+                                return next;
+                              })
+                            }
+                          />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                              <strong style={{ fontSize: 12.5, minWidth: 0, wordBreak: 'break-word' }}>
+                                {n.name}
+                              </strong>
+                              <span className="node-pill" style={{ color: NODE_TYPE_COLORS[n.type] }}>
+                                {NODE_TYPE_LABELS[n.type]}
+                              </span>
+                            </div>
+                            {n.desc && (
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                                {n.desc}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {analysis.suggestedEvents && analysis.suggestedEvents.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>
+                        SỰ KIỆN MỚI ({analysis.suggestedEvents.length})
+                      </div>
+                      {analysis.suggestedEvents.map((ev, idx) => (
+                        <label key={`${ev.name}-${idx}`} className="extract-check-row">
+                          <input
+                            type="checkbox"
+                            disabled={savedExtractedDone || savingExtracted}
+                            checked={selectedEventIdxs.has(idx)}
+                            onChange={() =>
+                              setSelectedEventIdxs((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(idx)) next.delete(idx);
+                                else next.add(idx);
+                                return next;
+                              })
+                            }
+                          />
+                          <div style={{ minWidth: 0, flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                              <strong style={{ fontSize: 12.5, minWidth: 0, wordBreak: 'break-word' }}>
+                                {ev.name}
+                              </strong>
+                              <span className="node-pill" style={{ color: NODE_TYPE_COLORS.event }}>
+                                Sự kiện
+                              </span>
+                            </div>
+                            {ev.desc && (
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 3 }}>
+                                {ev.desc}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  {analysis.characterStatusChanges && analysis.characterStatusChanges.length > 0 && (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                      <div style={{ fontSize: 11.5, fontWeight: 700, color: 'var(--text-muted)' }}>
+                        CẬP NHẬT TRẠNG THÁI ({analysis.characterStatusChanges.length})
+                      </div>
+                      {analysis.characterStatusChanges.map((sc, idx) => (
+                        <label key={`${sc.characterName}-${idx}`} className="extract-check-row">
+                          <input
+                            type="checkbox"
+                            disabled={savedExtractedDone || savingExtracted}
+                            checked={selectedStatusIdxs.has(idx)}
+                            onChange={() =>
+                              setSelectedStatusIdxs((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(idx)) next.delete(idx);
+                                else next.add(idx);
+                                return next;
+                              })
+                            }
+                          />
+                          <div style={{ minWidth: 0, flex: 1, fontSize: 12.5 }}>
+                            <strong>{sc.characterName}</strong> →{' '}
+                            <span style={{ color: 'var(--accent)', fontWeight: 600 }}>{sc.status}</span>
+                            {sc.reason && (
+                              <div style={{ fontSize: 12, color: 'var(--text-secondary)', marginTop: 2 }}>
+                                {sc.reason}
+                              </div>
+                            )}
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  )}
+
+                  <button
+                    type="button"
+                    className="primary-btn"
+                    style={{ width: '100%' }}
+                    disabled={
+                      savingExtracted ||
+                      savedExtractedDone ||
+                      selectedNodeIdxs.size + selectedEventIdxs.size + selectedStatusIdxs.size === 0
+                    }
+                    onClick={() => void handleSaveExtractedToProject()}
+                  >
+                    {savingExtracted ? (
+                      <>
+                        <Loader2 size={14} className="spin" /> Đang lưu vào dự án...
+                      </>
+                    ) : savedExtractedDone ? (
+                      <>
+                        <Check size={14} /> Đã lưu vào dự án
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 size={14} /> Lưu{' '}
+                        {selectedNodeIdxs.size + selectedEventIdxs.size + selectedStatusIdxs.size} mục
+                        vào dự án
+                      </>
+                    )}
+                  </button>
                 </div>
               )}
             </>
@@ -545,6 +847,24 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             return nodeById.get(trimmed)?.name || trimmed;
           };
 
+          const formatChapterVal = (raw?: string): string => {
+            if (!raw) return '';
+            const trimmed = raw.trim();
+            if (!trimmed) return '';
+            const found = chapters.find(
+              (c) =>
+                c.id === trimmed ||
+                (c.code && c.code.toLowerCase() === trimmed.toLowerCase()) ||
+                String(c.chapterNumber) === trimmed
+            );
+            if (found) {
+              return found.title
+                ? `Chương ${found.chapterNumber}: ${found.title}`
+                : `Chương ${found.chapterNumber}`;
+            }
+            return trimmed;
+          };
+
           const detailRows: Array<{ label: string; value: string }> = [
             { label: 'Vai trò', value: selectedNode.role || '' },
             { label: 'Trạng thái', value: selectedNode.status || '' },
@@ -572,7 +892,7 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
             { label: 'Tổ chức trực thuộc', value: formatListVal(selectedNode.subFactions) },
             { label: 'Trụ sở', value: formatListVal(selectedNode.headquarters) },
             { label: 'Tôn chỉ / Khẩu hiệu', value: selectedNode.motto || '' },
-            { label: 'Chương', value: selectedNode.chapter || '' },
+            { label: 'Chương', value: formatChapterVal(selectedNode.chapter) },
             { label: 'Thời gian', value: selectedNode.time || '' },
             { label: 'Địa điểm diễn ra', value: formatListVal(selectedNode.location) },
             { label: 'Loại sự kiện', value: selectedNode.eventType || '' },
@@ -749,8 +1069,10 @@ export const RightAssistantPanel: React.FC<RightAssistantPanelProps> = ({
                   className="world-node-card"
                   onClick={() => setSelectedWorldNodeId(node.id)}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-                    <strong style={{ fontSize: 13.5 }}>{node.name}</strong>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8 }}>
+                    <strong style={{ fontSize: 13.5, minWidth: 0, wordBreak: 'break-word' }}>
+                      {node.name}
+                    </strong>
                     <span className="node-pill" style={{ color: NODE_TYPE_COLORS[node.type] }}>
                       {NODE_TYPE_LABELS[node.type]}
                     </span>

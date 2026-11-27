@@ -818,6 +818,25 @@ export default function App() {
     }
   };
 
+  const handleRefreshGraphOnly = useCallback(async () => {
+    if (!user || !activeProject || activeProject.isLocalOnly) return;
+    const targetProjectId = activeProject.id;
+    const capturedSessionGen = sessionGenRef.current;
+    try {
+      const graphRes = await webApi.getProjectGraph(targetProjectId);
+      if (
+        sessionGenRef.current !== capturedSessionGen ||
+        activeProjectIdRef.current !== targetProjectId
+      ) {
+        return;
+      }
+      setNodes(graphRes?.data?.nodes || []);
+      setLinks(graphRes?.data?.links || []);
+    } catch {
+      // Ignore transient graph refresh error
+    }
+  }, [activeProject, user]);
+
   // Insert text at cursor position in manuscript textarea (guarded by chapter ID)
   const handleInsertText = (textToInsert: string, expectedChapterId?: string) => {
     if (!activeChapter) return;
@@ -1306,51 +1325,6 @@ export default function App() {
                   placeholder="Bắt đầu viết câu chuyện của bạn tại đây... (Gõ @ để ping nhân vật/địa điểm, Ctrl+] thụt đầu dòng, Ctrl+S lưu)"
                   spellCheck
                 />
-
-                {mentionState && (
-                  <div
-                    className="mention-popover"
-                    style={{ top: mentionState.top, left: mentionState.left }}
-                    role="listbox"
-                    aria-label="Gợi ý thực thể để chèn"
-                  >
-                    <div className="mention-header">
-                      <span>
-                        Ping thực thể{mentionState.query ? `: @${mentionState.query}` : ''}
-                      </span>
-                      <span>↑↓ · Enter</span>
-                    </div>
-                    {mentionMatches.length === 0 ? (
-                      <div style={{ padding: '8px 10px', fontSize: 12.5, color: 'var(--text-muted)' }}>
-                        Không có thực thể bắt đầu bằng “{mentionState.query}”
-                      </div>
-                    ) : (
-                      mentionMatches.map((node, idx) => (
-                        <button
-                          key={node.id}
-                          type="button"
-                          role="option"
-                          aria-selected={idx === mentionIndex}
-                          className={`mention-item ${idx === mentionIndex ? 'active' : ''}`}
-                          onMouseDown={(e) => e.preventDefault()}
-                          onMouseEnter={() => setMentionIndex(idx)}
-                          onClick={() => selectMentionNode(node)}
-                        >
-                          <div style={{ minWidth: 0, flex: 1 }}>
-                            <div className="mention-item-name">{node.name}</div>
-                            {node.role && <div className="mention-item-role">{node.role}</div>}
-                          </div>
-                          <span
-                            className="node-pill"
-                            style={{ color: MENTION_TYPE_COLORS[node.type], flexShrink: 0 }}
-                          >
-                            {MENTION_TYPE_LABELS[node.type]}
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
               </div>
             </article>
           ) : (
@@ -1392,10 +1366,56 @@ export default function App() {
           links={links}
           onInsertText={handleInsertText}
           onReplaceQuote={handleReplaceQuote}
+          onRefreshGraph={handleRefreshGraphOnly}
           onOpenAuth={() => setAuthModalOpen(true)}
           onNotify={notify}
           onClose={() => setShowRight(false)}
         />
+      )}
+
+      {mentionState && (
+        <div
+          className="mention-popover"
+          style={{ top: mentionState.top, left: mentionState.left }}
+          role="listbox"
+          aria-label="Gợi ý thực thể để chèn"
+        >
+          <div className="mention-header">
+            <span>
+              Ping thực thể{mentionState.query ? `: @${mentionState.query}` : ''}
+            </span>
+            <span>↑↓ · Enter</span>
+          </div>
+          {mentionMatches.length === 0 ? (
+            <div style={{ padding: '8px 10px', fontSize: 12.5, color: 'var(--text-muted)' }}>
+              Không có thực thể bắt đầu bằng “{mentionState.query}”
+            </div>
+          ) : (
+            mentionMatches.map((node, idx) => (
+              <button
+                key={node.id}
+                type="button"
+                role="option"
+                aria-selected={idx === mentionIndex}
+                className={`mention-item ${idx === mentionIndex ? 'active' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setMentionIndex(idx)}
+                onClick={() => selectMentionNode(node)}
+              >
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div className="mention-item-name">{node.name}</div>
+                  {node.role && <div className="mention-item-role">{node.role}</div>}
+                </div>
+                <span
+                  className="node-pill"
+                  style={{ color: MENTION_TYPE_COLORS[node.type] }}
+                >
+                  {MENTION_TYPE_LABELS[node.type]}
+                </span>
+              </button>
+            ))
+          )}
+        </div>
       )}
 
       <AuthModal
