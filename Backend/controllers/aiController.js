@@ -844,19 +844,29 @@ async function chatWithAI(req, res, next) {
     }
 
     const isDraftMode = mode === 'web_draft_write' || mode === 'web_draft_rewrite';
-    const effectiveMaxMsgLen = isDraftMode ? MAX_DRAFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
-    const normalizedMessages = messages
-      .filter((message) => message?.role !== 'system')
-      .slice(-MAX_CHAT_MESSAGES)
-      .map((message) => {
-        if (!message || typeof message.content !== 'string') {
-          throw new Error('Mỗi tin nhắn phải có nội dung văn bản hợp lệ.');
-        }
-        return {
-          role: message.role === 'assistant' ? 'assistant' : 'user',
-          content: message.content.slice(0, effectiveMaxMsgLen),
-        };
-      });
+    const isLongWebMode = isDraftMode || isStructuredWebOutline;
+    const effectiveMaxMsgLen = isLongWebMode ? MAX_DRAFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
+    const rawUserMessages = messages.filter((message) => message?.role !== 'system').slice(-MAX_CHAT_MESSAGES);
+    if (isLongWebMode) {
+      const oversized = rawUserMessages.find(
+        (m) => m && typeof m.content === 'string' && m.content.length > effectiveMaxMsgLen
+      );
+      if (oversized) {
+        return res.status(400).json({
+          success: false,
+          message: `Nội dung gửi AI (${oversized.content.length} ký tự) vượt giới hạn ${effectiveMaxMsgLen} ký tự. Vui lòng rút gọn trước khi gửi.`,
+        });
+      }
+    }
+    const normalizedMessages = rawUserMessages.map((message) => {
+      if (!message || typeof message.content !== 'string') {
+        throw new Error('Mỗi tin nhắn phải có nội dung văn bản hợp lệ.');
+      }
+      return {
+        role: message.role === 'assistant' ? 'assistant' : 'user',
+        content: message.content.slice(0, effectiveMaxMsgLen),
+      };
+    });
 
     while (normalizedMessages[0]?.role === 'assistant') {
       normalizedMessages.shift();

@@ -185,6 +185,7 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
         .filter(Boolean)
         .join('\n');
 
+      const MAX_OUTLINE_PROMPT_CHARS = 20000;
       const prompt = [
         `Dự án truyện: "${project.title}"`,
         existingSummary ? `\nThông tin dàn ý đã có:\n${existingSummary}` : '',
@@ -194,6 +195,13 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       ]
         .filter(Boolean)
         .join('\n');
+
+      if (prompt.length > MAX_OUTLINE_PROMPT_CHARS) {
+        onNotify(
+          `Nội dung dàn ý gửi AI (${prompt.length.toLocaleString('vi-VN')} ký tự) vượt giới hạn ${MAX_OUTLINE_PROMPT_CHARS.toLocaleString('vi-VN')} ký tự. Hãy rút gọn bớt trước khi gửi.`
+        );
+        return;
+      }
 
       const res = await webApi.chatWithAI({
         mode: 'web_outline_story',
@@ -273,6 +281,7 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
         .filter(Boolean)
         .join('\n');
 
+      const MAX_OUTLINE_PROMPT_CHARS = 20000;
       const customNote = (chapterAiPrompts[ch.id] || '').trim();
       const prompt = [
         `Hãy lập khung dàn ý và chia từng cảnh cho ${ch.title || `Chương ${ch.chapterNumber}`} (Chương số ${ch.chapterNumber}).`,
@@ -285,6 +294,13 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       ]
         .filter(Boolean)
         .join('\n');
+
+      if (prompt.length > MAX_OUTLINE_PROMPT_CHARS) {
+        onNotify(
+          `Nội dung dàn ý chương gửi AI (${prompt.length.toLocaleString('vi-VN')} ký tự) vượt giới hạn ${MAX_OUTLINE_PROMPT_CHARS.toLocaleString('vi-VN')} ký tự. Hãy rút gọn bớt trước khi gửi.`
+        );
+        return;
+      }
 
       const res = await webApi.chatWithAI({
         mode: 'web_outline_chapter',
@@ -310,20 +326,24 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       const strVal = (v: unknown): string | undefined =>
         typeof v === 'string' && v.trim() ? v.trim() : undefined;
 
-      const mappedScenes: OutlineScene[] = Array.isArray(parsed.scenes)
+      const parsedScenes: OutlineScene[] = Array.isArray(parsed.scenes)
         ? parsed.scenes
             .filter(
               (s): s is Record<string, unknown> =>
                 Boolean(s && typeof s === 'object' && !Array.isArray(s)) &&
-                (typeof (s as Record<string, unknown>).title === 'string' ||
-                  typeof (s as Record<string, unknown>).summary === 'string')
+                ((typeof (s as Record<string, unknown>).title === 'string' &&
+                  ((s as Record<string, unknown>).title as string).trim().length > 0) ||
+                  (typeof (s as Record<string, unknown>).summary === 'string' &&
+                    ((s as Record<string, unknown>).summary as string).trim().length > 0))
             )
             .map((s, idx) => ({
               id: `sc-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
               title: (typeof s.title === 'string' && s.title.trim()) || `Cảnh ${idx + 1}`,
               summary: typeof s.summary === 'string' ? s.summary.trim() : '',
             }))
-        : getChapterScenes(chOutline);
+        : [];
+      const existingScenes = getChapterScenes(chOutline);
+      const mappedScenes = parsedScenes.length > 0 ? parsedScenes : existingScenes;
 
       onUpdateChapterOutline(ch.id, {
         ...(strVal(parsed.setting) ? { setting: strVal(parsed.setting) } : {}),
