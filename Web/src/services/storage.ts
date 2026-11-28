@@ -1,7 +1,10 @@
 import type {
   AuthUser,
+  ChapterDraftStore,
+  ChapterOutline,
   DailyGoalState,
   EditorPreferences,
+  ProjectOutline,
   StoryChapter,
   StoryProject,
 } from '../types/story';
@@ -14,8 +17,27 @@ const KEYS = {
   LOCAL_PROJECTS: 'story_web_local_projects',
   LOCAL_CHAPTERS_PREFIX: 'story_web_local_chapters_',
   DRAFTS_PREFIX: 'story_web_draft_',
+  OUTLINE_PREFIX: 'story_web_outline_',
+  CHAPTER_VERSIONS_PREFIX: 'story_web_versions_',
   LAST_PROJECT_ID: 'story_web_last_project_id',
   LAST_CHAPTER_ID: 'story_web_last_chapter_id',
+};
+
+export const EMPTY_CHAPTER_OUTLINE: ChapterOutline = {
+  setting: '',
+  style: '',
+  characters: '',
+  roughEvents: '',
+  logicNotes: '',
+};
+
+export const EMPTY_PROJECT_OUTLINE: ProjectOutline = {
+  worldSetting: '',
+  writingStyle: '',
+  storyFramework: '',
+  storyLogic: '',
+  characterOverview: '',
+  chapters: {},
 };
 
 export const DEFAULT_PREFS: EditorPreferences = {
@@ -225,5 +247,66 @@ export const webStorage = {
 
   saveLocalChapters(projectId: string, chapters: StoryChapter[]): boolean {
     return safeWrite(KEYS.LOCAL_CHAPTERS_PREFIX + projectId, chapters);
+  },
+
+  // Project Outline (Story Bible + per-chapter outline frames)
+  getProjectOutline(projectId: string): ProjectOutline {
+    const stored = safeRead<Partial<ProjectOutline> | null>(KEYS.OUTLINE_PREFIX + projectId, null);
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return { ...EMPTY_PROJECT_OUTLINE, chapters: {} };
+    }
+    const chaptersMap =
+      stored.chapters && typeof stored.chapters === 'object' && !Array.isArray(stored.chapters)
+        ? (stored.chapters as Record<string, ChapterOutline>)
+        : {};
+    return {
+      worldSetting: typeof stored.worldSetting === 'string' ? stored.worldSetting : '',
+      writingStyle: typeof stored.writingStyle === 'string' ? stored.writingStyle : '',
+      storyFramework: typeof stored.storyFramework === 'string' ? stored.storyFramework : '',
+      storyLogic: typeof stored.storyLogic === 'string' ? stored.storyLogic : '',
+      characterOverview: typeof stored.characterOverview === 'string' ? stored.characterOverview : '',
+      chapters: chaptersMap,
+      updatedAt: typeof stored.updatedAt === 'number' ? stored.updatedAt : undefined,
+    };
+  },
+
+  saveProjectOutline(projectId: string, outline: ProjectOutline): boolean {
+    return safeWrite(KEYS.OUTLINE_PREFIX + projectId, outline);
+  },
+
+  // Chapter Draft Versions (v1, v2, v3... saved persistently so user can resume anytime)
+  getChapterDraftVersions(chapterId: string): ChapterDraftStore {
+    const stored = safeRead<Partial<ChapterDraftStore> | null>(
+      KEYS.CHAPTER_VERSIONS_PREFIX + chapterId,
+      null
+    );
+    if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
+      return { activeVersionId: null, versions: [] };
+    }
+    const versions = Array.isArray(stored.versions)
+      ? stored.versions.filter(
+          (v) =>
+            v &&
+            typeof v === 'object' &&
+            typeof v.id === 'string' &&
+            typeof v.versionNumber === 'number' &&
+            typeof v.content === 'string'
+        )
+      : [];
+    const latestId = versions.length > 0 ? versions[versions.length - 1].id : null;
+    const activeVersionId =
+      typeof stored.activeVersionId === 'string' &&
+      versions.some((v) => v.id === stored.activeVersionId)
+        ? stored.activeVersionId
+        : latestId;
+    return { activeVersionId, versions };
+  },
+
+  saveChapterDraftVersions(chapterId: string, store: ChapterDraftStore): boolean {
+    return safeWrite(KEYS.CHAPTER_VERSIONS_PREFIX + chapterId, store);
+  },
+
+  clearChapterDraftVersions(chapterId: string): void {
+    safeRemove(KEYS.CHAPTER_VERSIONS_PREFIX + chapterId);
   },
 };

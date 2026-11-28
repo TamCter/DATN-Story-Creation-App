@@ -1,10 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  BookOpen,
   Check,
   ChevronDown,
   ChevronUp,
   Cloud,
   CloudOff,
+  Compass,
+  FileEdit,
   FileText,
   Maximize2,
   Minimize2,
@@ -19,23 +22,28 @@ import {
   Sun,
 } from 'lucide-react';
 import { AuthModal } from './components/AuthModal';
+import { DraftingView } from './components/DraftingView';
 import { LeftSidebar } from './components/LeftSidebar';
+import { OutlineView } from './components/OutlineView';
 import { RightAssistantPanel } from './components/RightAssistantPanel';
 import { ApiError, webApi } from './services/api';
-import { webStorage } from './services/storage';
+import { EMPTY_CHAPTER_OUTLINE, EMPTY_PROJECT_OUTLINE, webStorage } from './services/storage';
 import type {
   AuthUser,
+  ChapterOutline,
   DailyGoalState,
   EditorFont,
   EditorPreferences,
   EditorTheme,
   PageWidthMode,
   PaperStyle,
+  ProjectOutline,
   StoryChapter,
   StoryLink,
   StoryNode,
   StoryNodeType,
   StoryProject,
+  WorkspaceMode,
 } from './types/story';
 import { countParagraphs, countWords, estimateReadingMinutes } from './utils/text';
 
@@ -149,6 +157,11 @@ export default function App() {
   const [toast, setToast] = useState<string | null>(null);
   const [baselineSyncVersion, setBaselineSyncVersion] = useState(0);
   const [isAnalyzingChapter, setIsAnalyzingChapter] = useState(false);
+  const [workspaceMode, setWorkspaceMode] = useState<WorkspaceMode>('manuscript');
+  const [projectOutline, setProjectOutline] = useState<ProjectOutline>(() => ({
+    ...EMPTY_PROJECT_OUTLINE,
+    chapters: {},
+  }));
   const [mentionState, setMentionState] = useState<MentionPopupState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
 
@@ -397,6 +410,58 @@ export default function App() {
     webStorage.saveLastSelection(activeProjectId, activeChapterId);
   }, [authChecked, activeProjectId, activeChapterId]);
 
+  // Load saved outline whenever active project changes
+  useEffect(() => {
+    if (!activeProjectId) {
+      setProjectOutline({ ...EMPTY_PROJECT_OUTLINE, chapters: {} });
+      return;
+    }
+    setProjectOutline(webStorage.getProjectOutline(activeProjectId));
+  }, [activeProjectId]);
+
+  const handleUpdateProjectOutline = useCallback(
+    (patch: Partial<Omit<ProjectOutline, 'chapters'>>) => {
+      if (!activeProjectId) return;
+      setProjectOutline((prev) => {
+        const next: ProjectOutline = {
+          ...prev,
+          ...patch,
+          updatedAt: Date.now(),
+        };
+        webStorage.saveProjectOutline(activeProjectId, next);
+        return next;
+      });
+    },
+    [activeProjectId]
+  );
+
+  const handleUpdateChapterOutline = useCallback(
+    (chapterId: string, patch: Partial<ChapterOutline>) => {
+      if (!activeProjectId) return;
+      setProjectOutline((prev) => {
+        const currentCh: ChapterOutline = {
+          ...EMPTY_CHAPTER_OUTLINE,
+          ...(prev.chapters[chapterId] || {}),
+        };
+        const next: ProjectOutline = {
+          ...prev,
+          updatedAt: Date.now(),
+          chapters: {
+            ...prev.chapters,
+            [chapterId]: {
+              ...currentCh,
+              ...patch,
+              updatedAt: Date.now(),
+            },
+          },
+        };
+        webStorage.saveProjectOutline(activeProjectId, next);
+        return next;
+      });
+    },
+    [activeProjectId]
+  );
+
   // Sync a single chapter to backend, serialized per chapter so older saves never overwrite newer ones
   const syncChapterToServer = useCallback(
     async (
@@ -595,6 +660,69 @@ export default function App() {
       notify('Đã lưu bản thảo cục bộ.');
     }
   }, [activeChapter, activeProject, notify, syncChapterToServer, user]);
+
+  const handlePublishDraftToManuscript = useCallback(
+    async (draftContent: string, chapterId: string) => {
+      if (!activeChapter || !activeProject || activeChapter.id !== chapterId || isAnalyzingChapter) {
+        return;
+      }
+      const nextRev = (chapterEditRevRef.current[chapterId] || 0) + 1;
+      chapterEditRevRef.current[chapterId] = nextRev;
+
+      const updatedChapter: StoryChapter = {
+        ...activeChapter,
+        content: draftContent,
+        updatedAt: Date.now(),
+        dirty: Boolean(user && !activeChapter.isLocalOnly),
+      };
+
+      const nextWords = countWords(draftContent);
+      const delta = nextWords - lastWordCountRef.current;
+      lastWordCountRef.current = nextWords;
+      if (delta > 0) {
+        setDailyGoal(webStorage.addWordsWrittenToday(delta));
+      }
+
+      const isLocalTarget = !user || Boolean(activeProject.isLocalOnly) || Boolean(activeChapter.isLocalOnly);
+      const nextList = chaptersRef.current.map((c) => (c.id === chapterId ? updatedChapter : c));
+      setChapters(nextList);
+
+      if (isLocalTarget) {
+        const ok = webStorage.saveLocalChapters(activeProject.id, nextList);
+        setSaveStatus(ok ? 'local' : 'error');
+        setWorkspaceMode('manuscript');
+        notify(
+          ok
+            ? 'Đã lưu bản nháp vào Bản chính (cục bộ).'
+            : 'Đã đưa vào Bản chính nhưng không thể ghi vào bộ nhớ trình duyệt.'
+        );
+        return;
+      }
+
+      const existingTimer = saveTimersRef.current.get(chapterId);
+      if (existingTimer) {
+        window.clearTimeout(existingTimer);
+        saveTimersRef.current.delete(chapterId);
+      }
+
+      webStorage.saveChapterDraft(chapterId, {
+        title: updatedChapter.title,
+        desc: updatedChapter.desc || '',
+        content: updatedChapter.content,
+        updatedAt: Date.now(),
+        dirty: true,
+      });
+
+      const outcome = await syncChapterToServer(updatedChapter, nextRev, sessionGenRef.current);
+      setWorkspaceMode('manuscript');
+      if (outcome === 'saved') {
+        notify('Đã lưu bản nháp vào Bản chính và đồng bộ lên máy chủ.');
+      } else {
+        notify('Đã đưa vào Bản chính (đã lưu nháp cục bộ, sẽ đồng bộ khi có mạng).');
+      }
+    },
+    [activeChapter, activeProject, isAnalyzingChapter, notify, syncChapterToServer, user]
+  );
 
   // Keyboard shortcuts: Ctrl+S, Ctrl+Shift+F, Escape
   useEffect(() => {
@@ -1136,6 +1264,41 @@ export default function App() {
               </button>
             )}
 
+            <div className="mode-switcher" role="tablist" aria-label="Chế độ làm việc">
+              <button
+                type="button"
+                role="tab"
+                aria-selected={workspaceMode === 'outline'}
+                className={`mode-btn ${workspaceMode === 'outline' ? 'active' : ''}`}
+                disabled={isAnalyzingChapter}
+                onClick={() => setWorkspaceMode('outline')}
+              >
+                <Compass size={13} /> Dàn ý
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={workspaceMode === 'draft'}
+                className={`mode-btn ${workspaceMode === 'draft' ? 'active' : ''}`}
+                disabled={isAnalyzingChapter}
+                onClick={() => setWorkspaceMode('draft')}
+              >
+                <FileEdit size={13} /> Viết nháp
+              </button>
+              <button
+                type="button"
+                role="tab"
+                aria-selected={workspaceMode === 'manuscript'}
+                className={`mode-btn ${workspaceMode === 'manuscript' ? 'active' : ''}`}
+                disabled={isAnalyzingChapter}
+                onClick={() => setWorkspaceMode('manuscript')}
+              >
+                <BookOpen size={13} /> Bản chính
+              </button>
+            </div>
+
+            <div className="topbar-divider" />
+
             <button
               type="button"
               className="icon-btn"
@@ -1285,6 +1448,40 @@ export default function App() {
           </div>
         </header>
 
+        {workspaceMode === 'outline' ? (
+          <OutlineView
+            project={activeProject}
+            chapters={chapters}
+            activeChapterId={activeChapterId}
+            outline={projectOutline}
+            onUpdateProjectOutline={handleUpdateProjectOutline}
+            onUpdateChapterOutline={handleUpdateChapterOutline}
+            onCreateChapter={handleCreateChapter}
+            onOpenChapterDraft={(chapterId) => {
+              setActiveChapterId(chapterId);
+              setWorkspaceMode('draft');
+            }}
+            onOpenChapterManuscript={(chapterId) => {
+              setActiveChapterId(chapterId);
+              setWorkspaceMode('manuscript');
+            }}
+            locked={isAnalyzingChapter}
+          />
+        ) : workspaceMode === 'draft' ? (
+          <DraftingView
+            user={user}
+            project={activeProject}
+            chapter={activeChapter}
+            nodes={nodes}
+            outline={projectOutline}
+            prefs={prefs}
+            locked={isAnalyzingChapter}
+            onPublishToManuscript={handlePublishDraftToManuscript}
+            onOpenOutline={() => setWorkspaceMode('outline')}
+            onOpenAuth={() => setAuthModalOpen(true)}
+            onNotify={notify}
+          />
+        ) : (
         <div className="editor-scroll-area">
           {activeChapter ? (
             <article
@@ -1394,6 +1591,7 @@ export default function App() {
             </div>
           )}
         </div>
+        )}
 
         <footer className="editor-statusbar">
           <div className="statusbar-stats">

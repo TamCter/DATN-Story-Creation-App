@@ -192,3 +192,40 @@ export interface DailyGoalState {
   /** Map YYYY-MM-DD -> words added that day */
   history: Record<string, number>;
 }
+
+export type WorkspaceMode = 'outline' | 'draft' | 'manuscript';
+
+export interface ChapterOutline {
+  setting: string;
+  style: string;
+  characters: string;
+  roughEvents: string;
+  logicNotes: string;
+  updatedAt?: number;
+}
+
+export interface ProjectOutline {
+  worldSetting: string;
+  writingStyle: string;
+  storyFramework: string;
+  storyLogic: string;
+  characterOverview: string;
+  chapters: Record<string, ChapterOutline>;
+  updatedAt?: number;
+}
+
+export interface ChapterDraftVersion {
+  id: string;
+  versionNumber: number;
+  label: string;
+  source: 'ai' | 'ai-rewrite' | 'user';
+  instruction?: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ChapterDraftStore {
+  activeVersionId: string | null;
+  versions: ChapterDraftVersion[];
+}
