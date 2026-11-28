@@ -342,15 +342,12 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
               summary: typeof s.summary === 'string' ? s.summary.trim() : '',
             }))
         : [];
-      const existingScenes = getChapterScenes(chOutline);
-      const mappedScenes = parsedScenes.length > 0 ? parsedScenes : existingScenes;
-
       onUpdateChapterOutline(ch.id, {
         ...(strVal(parsed.setting) ? { setting: strVal(parsed.setting) } : {}),
         ...(strVal(parsed.style) ? { style: strVal(parsed.style) } : {}),
         ...(strVal(parsed.characters) ? { characters: strVal(parsed.characters) } : {}),
         ...(strVal(parsed.logicNotes) ? { logicNotes: strVal(parsed.logicNotes) } : {}),
-        scenes: mappedScenes,
+        ...(parsedScenes.length > 0 ? { scenes: parsedScenes } : {}),
       });
 
       // Chỉ đổi tên gợi ý từ AI khi tên chương hiện tại vẫn khớp tên ban đầu và vẫn là tên mặc định ("Chương X")
@@ -366,7 +363,11 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       }
 
       setChapterAiPrompts((prev) => ({ ...prev, [ch.id]: '' }));
-      onNotify(`AI đã lập dàn ý và chia ${mappedScenes.length} cảnh cho chương.`);
+      onNotify(
+        parsedScenes.length > 0
+          ? `AI đã lập dàn ý và chia ${parsedScenes.length} cảnh cho chương.`
+          : 'AI đã cập nhật dàn ý chương (giữ nguyên danh sách cảnh hiện có).'
+      );
     } catch (err: unknown) {
       if (activeProjectIdRef.current !== originProjectId) return;
       onNotify(err instanceof Error ? err.message : 'Không thể gọi AI lập dàn ý chương.');
