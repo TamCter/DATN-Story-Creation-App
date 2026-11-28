@@ -1533,3 +1533,101 @@ button {
     grid-template-columns: 1fr;
   }
 }
+
+/* AI Outline Bar, Inline Chapter Title & Per-Scene Builder */
+.ai-outline-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.outline-chapter-title-input {
+  flex: 1;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.outline-chapter-title-input:hover {
+  border-color: var(--border);
+  background: var(--bg-app);
+}
+
+.outline-chapter-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-app);
+}
+
+.scene-empty-box {
+  padding: 12px;
+  border-radius: 9px;
+  border: 1px dashed var(--border);
+  background: var(--bg-app);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.scene-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-index-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.scene-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scene-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+}

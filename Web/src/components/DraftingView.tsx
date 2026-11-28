@@ -79,7 +79,17 @@ function buildOutlineContextBlock(
   if (chapterOutline.setting.trim()) chParts.push(`- Bối cảnh chương: ${chapterOutline.setting.trim()}`);
   if (chapterOutline.style.trim()) chParts.push(`- Văn phong/nhịp điệu chương: ${chapterOutline.style.trim()}`);
   if (chapterOutline.characters.trim()) chParts.push(`- Nhân vật xuất hiện: ${chapterOutline.characters.trim()}`);
-  if (chapterOutline.roughEvents.trim()) chParts.push(`- Sự kiện thô / diễn biến:\n${chapterOutline.roughEvents.trim()}`);
+  if (Array.isArray(chapterOutline.scenes) && chapterOutline.scenes.length > 0) {
+    const scenesBlock = chapterOutline.scenes
+      .map(
+        (sc, idx) =>
+          `  ${idx + 1}. ${sc.title || `Cảnh ${idx + 1}`}${sc.summary?.trim() ? `: ${sc.summary.trim()}` : ''}`
+      )
+      .join('\n');
+    chParts.push(`- Danh sách từng cảnh theo thứ tự:\n${scenesBlock}`);
+  } else if (chapterOutline.roughEvents.trim()) {
+    chParts.push(`- Sự kiện thô / diễn biến:\n${chapterOutline.roughEvents.trim()}`);
+  }
   if (chapterOutline.logicNotes.trim()) chParts.push(`- Móc nối logic & mục tiêu: ${chapterOutline.logicNotes.trim()}`);
   if (chParts.length > 0) {
     parts.push(`\n[DÀN Ý CHƯƠNG NÀY]\n${chParts.join('\n')}`);
@@ -160,6 +170,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
     chapterOutline.setting.trim() ||
       chapterOutline.style.trim() ||
       chapterOutline.characters.trim() ||
+      (Array.isArray(chapterOutline.scenes) && chapterOutline.scenes.length > 0) ||
       chapterOutline.roughEvents.trim() ||
       chapterOutline.logicNotes.trim() ||
       outline.worldSetting.trim() ||
@@ -239,7 +250,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
       }
 
       const res = await webApi.chatWithAI({
-        mode: 'web_writing',
+        mode: mode === 'generate_v1' ? 'web_draft_write' : 'web_draft_rewrite',
         messages: [{ role: 'user', content: promptText }],
         projectContext: {
           projectId: project.isLocalOnly ? undefined : project.id,
@@ -385,10 +396,24 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
                   {chapterOutline.characters && (
                     <div><strong>Nhân vật:</strong> {chapterOutline.characters}</div>
                   )}
-                  {chapterOutline.roughEvents && (
-                    <div style={{ whiteSpace: 'pre-wrap' }}>
-                      <strong>Sự kiện thô:</strong> {chapterOutline.roughEvents}
+                  {Array.isArray(chapterOutline.scenes) && chapterOutline.scenes.length > 0 ? (
+                    <div>
+                      <strong>Các cảnh ({chapterOutline.scenes.length}):</strong>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 2, marginTop: 3, paddingLeft: 8 }}>
+                        {chapterOutline.scenes.map((sc, i) => (
+                          <div key={sc.id}>
+                            {i + 1}. <strong>{sc.title || `Cảnh ${i + 1}`}</strong>
+                            {sc.summary ? ` — ${sc.summary}` : ''}
+                          </div>
+                        ))}
+                      </div>
                     </div>
+                  ) : (
+                    chapterOutline.roughEvents && (
+                      <div style={{ whiteSpace: 'pre-wrap' }}>
+                        <strong>Sự kiện thô:</strong> {chapterOutline.roughEvents}
+                      </div>
+                    )
                   )}
                   {chapterOutline.logicNotes && (
                     <div><strong>Logic:</strong> {chapterOutline.logicNotes}</div>

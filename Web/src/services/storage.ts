@@ -28,6 +28,7 @@ export const EMPTY_CHAPTER_OUTLINE: ChapterOutline = {
   style: '',
   characters: '',
   roughEvents: '',
+  scenes: [],
   logicNotes: '',
 };
 

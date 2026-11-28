@@ -195,11 +195,18 @@ export interface DailyGoalState {
 
 export type WorkspaceMode = 'outline' | 'draft' | 'manuscript';
 
+export interface OutlineScene {
+  id: string;
+  title: string;
+  summary: string;
+}
+
 export interface ChapterOutline {
   setting: string;
   style: string;
   characters: string;
   roughEvents: string;
+  scenes: OutlineScene[];
   logicNotes: string;
   updatedAt?: number;
 }

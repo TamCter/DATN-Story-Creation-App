@@ -661,6 +661,57 @@ export default function App() {
     }
   }, [activeChapter, activeProject, notify, syncChapterToServer, user]);
 
+  const handleRenameChapter = useCallback(
+    (chapterId: string, newTitle: string) => {
+      if (!activeProject || isAnalyzingChapter) return;
+      const target = chaptersRef.current.find((c) => c.id === chapterId);
+      if (!target) return;
+
+      const nextRev = (chapterEditRevRef.current[chapterId] || 0) + 1;
+      chapterEditRevRef.current[chapterId] = nextRev;
+
+      const isLocalTarget =
+        !user || Boolean(activeProject.isLocalOnly) || Boolean(target.isLocalOnly);
+      const updatedChapter: StoryChapter = {
+        ...target,
+        title: newTitle,
+        updatedAt: Date.now(),
+        dirty: !isLocalTarget,
+      };
+
+      const targetProjectId = activeProject.id;
+      setChapters((prev) => {
+        const nextList = prev.map((c) => (c.id === chapterId ? updatedChapter : c));
+        if (isLocalTarget) {
+          const ok = webStorage.saveLocalChapters(targetProjectId, nextList);
+          setSaveStatus(ok ? 'local' : 'error');
+        }
+        return nextList;
+      });
+
+      if (isLocalTarget) return;
+
+      webStorage.saveChapterDraft(chapterId, {
+        title: updatedChapter.title,
+        desc: updatedChapter.desc || '',
+        content: updatedChapter.content || '',
+        updatedAt: Date.now(),
+        dirty: true,
+      });
+
+      const capturedSessionGen = sessionGenRef.current;
+      setSaveStatus('saving');
+      const existingTimer = saveTimersRef.current.get(chapterId);
+      if (existingTimer) window.clearTimeout(existingTimer);
+      const timerId = window.setTimeout(() => {
+        saveTimersRef.current.delete(chapterId);
+        void syncChapterToServer(updatedChapter, nextRev, capturedSessionGen);
+      }, 900);
+      saveTimersRef.current.set(chapterId, timerId);
+    },
+    [activeProject, isAnalyzingChapter, syncChapterToServer, user]
+  );
+
   const handlePublishDraftToManuscript = useCallback(
     async (draftContent: string, chapterId: string) => {
       if (!activeChapter || !activeProject || activeChapter.id !== chapterId || isAnalyzingChapter) {
@@ -1450,12 +1501,15 @@ export default function App() {
 
         {workspaceMode === 'outline' ? (
           <OutlineView
+            user={user}
             project={activeProject}
             chapters={chapters}
+            nodes={nodes}
             activeChapterId={activeChapterId}
             outline={projectOutline}
             onUpdateProjectOutline={handleUpdateProjectOutline}
             onUpdateChapterOutline={handleUpdateChapterOutline}
+            onRenameChapter={handleRenameChapter}
             onCreateChapter={handleCreateChapter}
             onOpenChapterDraft={(chapterId) => {
               setActiveChapterId(chapterId);
@@ -1465,6 +1519,8 @@ export default function App() {
               setActiveChapterId(chapterId);
               setWorkspaceMode('manuscript');
             }}
+            onOpenAuth={() => setAuthModalOpen(true)}
+            onNotify={notify}
             locked={isAnalyzingChapter}
           />
         ) : workspaceMode === 'draft' ? (

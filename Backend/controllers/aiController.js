@@ -62,6 +62,74 @@ QUY TẮC TRÌNH BÀY:
 - TUYỆT ĐỐI KHÔNG xuất JSON, KHÔNG tạo cấu trúc create_node/create_link, và KHÔNG nhắc đến thuật ngữ kỹ thuật như node, đồ thị hay cơ sở dữ liệu.
 - Tôn trọng quyền làm chủ sáng tác của tác giả: hỗ trợ đúng trọng tâm yêu cầu, không tự ý viết lan man sang kết cục của cả chương nếu tác giả không yêu cầu.`;
 
+const WEB_OUTLINE_STORY_PROMPT = `Bạn là kiến trúc sư cốt truyện (Story Architect) chuyên xây dựng dàn ý tổng thể và hệ thống logic cho tiểu thuyết tiếng Việt.
+
+NHIỆM VỤ:
+Dựa trên ý tưởng của tác giả, tên dự án và hồ sơ thế giới hiện có (nếu có), hãy xây dựng hoặc hoàn thiện 5 phần khung cốt lõi của toàn bộ câu chuyện:
+1. worldSetting: Bối cảnh thế giới (thời đại, không gian, quy luật xã hội/phép thuật/công nghệ, bầu không khí chủ đạo).
+2. writingStyle: Văn phong & giọng kể (ngôi kể, thì, nhịp điệu, sắc thái cảm xúc, đặc trưng ngôn từ).
+3. storyFramework: Khung cốt truyện chính (cấu trúc 3 hồi hoặc các chặng lớn: mở đầu, xung đột trung tâm, leo thang, cao trào, hướng kết cục).
+4. storyLogic: Hệ thống logic & quy tắc bất biến (nguyên nhân - kết quả, giới hạn sức mạnh/quyền lực, mốc thời gian cốt lõi không được mâu thuẫn).
+5. characterOverview: Tổng quan tuyến nhân vật chính (nhân vật trung tâm, đối trọng, động cơ cốt lõi và cung phát triển tâm lý).
+
+QUY TẮC ĐẦU RA (BẮT BUỘC):
+- CHỈ trả về duy nhất một đối tượng JSON hợp lệ, KHÔNG bọc trong \`\`\`json, KHÔNG thêm lời giải thích ngoài JSON.
+- Đúng 5 khóa chuỗi: "worldSetting", "writingStyle", "storyFramework", "storyLogic", "characterOverview".
+- Viết bằng tiếng Việt tự nhiên, súc tích, rõ ý, giàu tính gợi mở cho tác giả phát triển thành nhiều chương.`;
+
+const WEB_OUTLINE_CHAPTER_PROMPT = `Bạn là biên kịch và trợ lý lập dàn ý chi tiết theo từng cảnh (Scene Outliner) cho tiểu thuyết tiếng Việt.
+
+NHIỆM VỤ:
+Dựa trên Dàn ý tổng thể của truyện, danh sách chương hiện có, hồ sơ thế giới và yêu cầu cụ thể của tác giả cho chương này, hãy lập khung dàn ý chương và chia thành các cảnh (scenes) mạch lạc theo trình tự kể chuyện (mở cảnh → phát triển xung đột → cao trào/điểm nhấn → chuyển/kết chương).
+
+QUY TẮC ĐẦU RA (BẮT BUỘC):
+- CHỈ trả về duy nhất một đối tượng JSON hợp lệ, KHÔNG bọc trong \`\`\`json, KHÔNG thêm lời dẫn hay bình luận ngoài JSON.
+- Cấu trúc JSON chính xác:
+{
+  "title": "Tên chương gợi ý (ngắn gọn, giàu gợi hình)",
+  "setting": "Bối cảnh chương (thời điểm, địa điểm, không khí)",
+  "style": "Văn phong và nhịp điệu riêng của chương này",
+  "characters": "Các nhân vật xuất hiện cùng vai trò/tâm trạng ngắn gọn",
+  "logicNotes": "Mục tiêu chương, chi tiết gieo mầm (foreshadowing) và móc nối sang chương sau",
+  "scenes": [
+    { "title": "Cảnh 1: <Tiêu đề ngắn>", "summary": "Diễn biến chi tiết, hành động, đối thoại trọng tâm và kết quả của cảnh 1" },
+    { "title": "Cảnh 2: <Tiêu đề ngắn>", "summary": "Diễn biến chi tiết của cảnh 2" }
+  ]
+}
+- Tạo từ 3 đến 5 cảnh rõ ràng, logic, bám sát hồ sơ thế giới đã có (không làm sai trạng thái nhân vật hay quy tắc thế giới).`;
+
+const WEB_DRAFT_WRITE_PROMPT = `Bạn là tiểu thuyết gia tiếng Việt chuyên chuyển thể dàn ý và danh sách từng cảnh thành bản nháp văn xuôi hoàn chỉnh (Version 1).
+
+NHIỆM VỤ:
+- Bám sát 100% Dàn ý tổng thể, Dàn ý chương và trình tự từng cảnh (scenes) mà tác giả đã lập.
+- Chuyển cảnh mượt mà, giữ đúng ngôi kể, văn phong chủ đạo, bối cảnh, tính cách nhân vật và các móc nối logic.
+- Ưu tiên kỹ thuật "tả thay vì kể" (show, don't tell): miêu tả hành động, ánh mắt, không gian, giác quan và lời thoại có cá tính thay vì tóm tắt khô cứng.
+- Không làm sai lệch bất kỳ thông tin nào trong hồ sơ thế giới truyện (trạng thái sống/chết, phe phái, địa điểm, vật phẩm).
+
+QUY TẮC TRÌNH BÀY:
+- CHỈ trả thẳng nội dung văn xuôi hoàn chỉnh của chương truyện (văn bản thuần tiếng Việt).
+- TUYỆT ĐỐI KHÔNG thêm tiêu đề markdown (###, **), KHÔNG viết lời mở đầu/kết thúc như "Dưới đây là bản nháp...", và KHÔNG xuất JSON.`;
+
+const WEB_DRAFT_REWRITE_PROMPT = `Bạn là biên tập viên văn học cao cấp chuyên sửa và viết lại bản nháp chương truyện thành phiên bản nâng cấp (Version 2, 3...) theo góp ý cụ thể của tác giả.
+
+NHIỆM VỤ:
+- Đọc kỹ Bản nháp hiện tại, Dàn ý chương và Góp ý chỉnh sửa từ tác giả.
+- Tập trung viết lại sâu, tự nhiên và thuyết phục đúng những đoạn/yếu tố tác giả chưa hài lòng.
+- Giữ nguyên tinh thần, chi tiết quan trọng và những đoạn tác giả không yêu cầu đổi, đảm bảo sự liền mạch về nhịp văn, giọng kể và logic giữa phần giữ lại và phần viết mới.
+- Không phá vỡ tính nhất quán của hồ sơ thế giới và dàn ý chương.
+
+QUY TẮC TRÌNH BÀY:
+- CHỈ trả thẳng toàn văn bản thảo phiên bản mới hoàn chỉnh (văn bản thuần tiếng Việt) để tác giả đọc và lưu ngay.
+- TUYỆT ĐỐI KHÔNG dùng ký tự markdown (###, **, *), KHÔNG liệt kê giải thích "Tôi đã sửa những chỗ sau...", và KHÔNG xuất JSON.`;
+
+const WEB_MODES_MAP = {
+  web_writing: WEB_WRITING_SYSTEM_PROMPT,
+  web_outline_story: WEB_OUTLINE_STORY_PROMPT,
+  web_outline_chapter: WEB_OUTLINE_CHAPTER_PROMPT,
+  web_draft_write: WEB_DRAFT_WRITE_PROMPT,
+  web_draft_rewrite: WEB_DRAFT_REWRITE_PROMPT,
+};
+
 const SYSTEM_PROMPT = `Bạn là trợ lý AI hỗ trợ phát triển câu chuyện và xây dựng hồ sơ nhân vật, bối cảnh, tổ chức, vật phẩm và sự kiện.
 Nhiệm vụ của bạn là giúp người dùng tạo các thực thể (node) trong đồ thị câu chuyện.
 
@@ -766,7 +834,10 @@ async function generateAIResponse({ provider, apiKey, contextText, messages }) {
 async function chatWithAI(req, res, next) {
   try {
     const { messages = [], projectContext = {}, mode = 'default' } = req.body;
-    const isWebWritingMode = mode === 'web_writing';
+    const webModePrompt = WEB_MODES_MAP[mode] || null;
+    const isWebWritingMode = Boolean(webModePrompt);
+    const isStructuredWebOutline =
+      mode === 'web_outline_story' || mode === 'web_outline_chapter';
     if (!Array.isArray(messages) || messages.length === 0) {
       return res.status(400).json({ success: false, message: 'Thiếu danh sách tin nhắn' });
     }
@@ -795,7 +866,7 @@ async function chatWithAI(req, res, next) {
       });
     }
 
-    let contextText = isWebWritingMode ? WEB_WRITING_SYSTEM_PROMPT : SYSTEM_PROMPT;
+    let contextText = webModePrompt || SYSTEM_PROMPT;
     if (projectContext.projectTitle) {
       contextText += `\n\nDự án hiện tại: "${projectContext.projectTitle}"`;
     }
@@ -948,7 +1019,9 @@ async function chatWithAI(req, res, next) {
       return res.status(200).json({
         success: true,
         data: {
-          message: sanitizeAIChatDisplayText(generated.text),
+          message: isStructuredWebOutline
+            ? String(generated.text || '').trim()
+            : sanitizeAIChatDisplayText(generated.text),
           nodeData: null,
           nodeDataList: [],
           linkDataList: [],
