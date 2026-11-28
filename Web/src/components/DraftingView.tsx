@@ -123,6 +123,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
 
   const activeChapterIdRef = useRef<string | null>(chapterId);
   activeChapterIdRef.current = chapterId;
+  const draftTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Load saved versions for current chapter (resuming at latest version automatically)
   useEffect(() => {
@@ -152,6 +153,14 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
     () => draftStore.versions.find((v) => v.id === draftStore.activeVersionId) || null,
     [draftStore]
   );
+
+  // Auto-grow draft textarea so text never overflows outside the paper sheet
+  useEffect(() => {
+    const el = draftTextareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(460, el.scrollHeight)}px`;
+  }, [activeVersion?.id, activeVersion?.content, prefs.fontSize, prefs.lineHeight, prefs.pageWidth]);
 
   const nextVersionNumber = useMemo(() => {
     if (draftStore.versions.length === 0) return 1;
@@ -631,6 +640,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
             )}
 
             <textarea
+              ref={draftTextareaRef}
               className={`manuscript-textarea font-${prefs.font}`}
               style={{
                 fontSize: `${prefs.fontSize}px`,

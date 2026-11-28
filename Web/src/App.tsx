@@ -226,6 +226,15 @@ export default function App() {
     lastWordCountRef.current = countWords(activeChapter?.content || '');
   }, [activeChapterId, baselineSyncVersion]);
 
+  // Auto-grow manuscript textarea so long chapters expand the paper sheet cleanly
+  useEffect(() => {
+    if (workspaceMode !== 'manuscript') return;
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.max(460, el.scrollHeight)}px`;
+  }, [activeChapter?.id, activeChapter?.content, prefs.fontSize, prefs.lineHeight, prefs.pageWidth, workspaceMode]);
+
   const loadLocalWorkspace = useCallback(() => {
     projectLoadGenRef.current += 1;
     const localProjects = webStorage.getLocalProjects();
