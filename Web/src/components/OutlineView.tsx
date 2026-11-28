@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -41,6 +41,8 @@ interface OutlineViewProps {
   onOpenChapterManuscript: (chapterId: string) => void;
   onOpenAuth: () => void;
   onNotify: (msg: string) => void;
+  outlineSaveError?: boolean;
+  onRetrySaveOutline?: () => void;
   locked?: boolean;
 }
 
@@ -81,6 +83,8 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
   onOpenChapterManuscript,
   onOpenAuth,
   onNotify,
+  outlineSaveError = false,
+  onRetrySaveOutline,
   locked = false,
 }) => {
   const [showMasterOutline, setShowMasterOutline] = useState(true);
@@ -89,6 +93,11 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
   const [generatingStoryOutline, setGeneratingStoryOutline] = useState(false);
   const [chapterAiPrompts, setChapterAiPrompts] = useState<Record<string, string>>({});
   const [generatingChapterId, setGeneratingChapterId] = useState<string | null>(null);
+
+  const activeProjectIdRef = useRef<string | null>(project?.id || null);
+  activeProjectIdRef.current = project?.id || null;
+  const chaptersRef = useRef(chapters);
+  chaptersRef.current = chapters;
 
   if (!project) {
     return (
@@ -163,6 +172,7 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       return;
     }
     if (generatingStoryOutline || locked) return;
+    const originProjectId = project.id;
     setGeneratingStoryOutline(true);
     try {
       const existingSummary = [
@@ -195,29 +205,31 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
         },
       });
 
-      const parsed = parseJsonFromAI<{
-        worldSetting?: string;
-        writingStyle?: string;
-        storyFramework?: string;
-        storyLogic?: string;
-        characterOverview?: string;
-      }>(res.data?.message || '');
+      if (activeProjectIdRef.current !== originProjectId) return;
 
-      if (!parsed) {
+      const parsed = parseJsonFromAI<Record<string, unknown>>(res.data?.message || '');
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         onNotify('AI trả về định dạng chưa chuẩn JSON. Hãy thử bấm lại.');
         return;
       }
 
+      const strVal = (v: unknown): string | undefined =>
+        typeof v === 'string' && v.trim() ? v.trim() : undefined;
+
       onUpdateProjectOutline({
-        ...(parsed.worldSetting ? { worldSetting: parsed.worldSetting } : {}),
-        ...(parsed.writingStyle ? { writingStyle: parsed.writingStyle } : {}),
-        ...(parsed.storyFramework ? { storyFramework: parsed.storyFramework } : {}),
-        ...(parsed.storyLogic ? { storyLogic: parsed.storyLogic } : {}),
-        ...(parsed.characterOverview ? { characterOverview: parsed.characterOverview } : {}),
+        ...(strVal(parsed.worldSetting) ? { worldSetting: strVal(parsed.worldSetting) } : {}),
+        ...(strVal(parsed.writingStyle) ? { writingStyle: strVal(parsed.writingStyle) } : {}),
+        ...(strVal(parsed.storyFramework) ? { storyFramework: strVal(parsed.storyFramework) } : {}),
+        ...(strVal(parsed.storyLogic) ? { storyLogic: strVal(parsed.storyLogic) } : {}),
+        ...(strVal(parsed.characterOverview)
+          ? { characterOverview: strVal(parsed.characterOverview) }
+          : {}),
       });
       setStoryAiPrompt('');
       onNotify('AI đã lập xong khung & logic tổng thể câu chuyện.');
     } catch (err: unknown) {
+      if (activeProjectIdRef.current !== originProjectId) return;
       onNotify(err instanceof Error ? err.message : 'Không thể gọi AI lập dàn ý tổng thể.');
     } finally {
       setGeneratingStoryOutline(false);
@@ -230,6 +242,8 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
       return;
     }
     if (generatingChapterId || locked) return;
+    const originProjectId = project.id;
+    const initialTitle = (ch.title || '').trim();
     setGeneratingChapterId(ch.id);
     try {
       const chOutline: ChapterOutline = {
@@ -284,46 +298,57 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
         },
       });
 
-      const parsed = parseJsonFromAI<{
-        title?: string;
-        setting?: string;
-        style?: string;
-        characters?: string;
-        logicNotes?: string;
-        scenes?: Array<{ title?: string; summary?: string }>;
-      }>(res.data?.message || '');
+      if (activeProjectIdRef.current !== originProjectId) return;
 
-      if (!parsed) {
+      const parsed = parseJsonFromAI<Record<string, unknown>>(res.data?.message || '');
+
+      if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
         onNotify('AI trả về định dạng chưa chuẩn JSON. Hãy thử bấm lại.');
         return;
       }
 
+      const strVal = (v: unknown): string | undefined =>
+        typeof v === 'string' && v.trim() ? v.trim() : undefined;
+
       const mappedScenes: OutlineScene[] = Array.isArray(parsed.scenes)
         ? parsed.scenes
-            .filter((s) => s && (s.title || s.summary))
+            .filter(
+              (s): s is Record<string, unknown> =>
+                Boolean(s && typeof s === 'object' && !Array.isArray(s)) &&
+                (typeof (s as Record<string, unknown>).title === 'string' ||
+                  typeof (s as Record<string, unknown>).summary === 'string')
+            )
             .map((s, idx) => ({
               id: `sc-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 5)}`,
-              title: String(s.title || `Cảnh ${idx + 1}`).trim(),
-              summary: String(s.summary || '').trim(),
+              title: (typeof s.title === 'string' && s.title.trim()) || `Cảnh ${idx + 1}`,
+              summary: typeof s.summary === 'string' ? s.summary.trim() : '',
             }))
         : getChapterScenes(chOutline);
 
       onUpdateChapterOutline(ch.id, {
-        ...(parsed.setting ? { setting: parsed.setting } : {}),
-        ...(parsed.style ? { style: parsed.style } : {}),
-        ...(parsed.characters ? { characters: parsed.characters } : {}),
-        ...(parsed.logicNotes ? { logicNotes: parsed.logicNotes } : {}),
+        ...(strVal(parsed.setting) ? { setting: strVal(parsed.setting) } : {}),
+        ...(strVal(parsed.style) ? { style: strVal(parsed.style) } : {}),
+        ...(strVal(parsed.characters) ? { characters: strVal(parsed.characters) } : {}),
+        ...(strVal(parsed.logicNotes) ? { logicNotes: strVal(parsed.logicNotes) } : {}),
         scenes: mappedScenes,
       });
 
-      // Nếu tên chương hiện tại vẫn là tên mặc định ("Chương X") thì tự điền tên gợi ý từ AI
-      if (parsed.title?.trim() && /^chương\s*\d+\s*$/i.test((ch.title || '').trim())) {
-        onRenameChapter(ch.id, parsed.title.trim());
+      // Chỉ đổi tên gợi ý từ AI khi tên chương hiện tại vẫn khớp tên ban đầu và vẫn là tên mặc định ("Chương X")
+      const suggestedTitle = strVal(parsed.title);
+      const latestChapter = chaptersRef.current.find((c) => c.id === ch.id);
+      const latestTitle = (latestChapter?.title || '').trim();
+      if (
+        suggestedTitle &&
+        latestTitle === initialTitle &&
+        /^chương\s*\d+\s*$/i.test(latestTitle)
+      ) {
+        onRenameChapter(ch.id, suggestedTitle);
       }
 
       setChapterAiPrompts((prev) => ({ ...prev, [ch.id]: '' }));
       onNotify(`AI đã lập dàn ý và chia ${mappedScenes.length} cảnh cho chương.`);
     } catch (err: unknown) {
+      if (activeProjectIdRef.current !== originProjectId) return;
       onNotify(err instanceof Error ? err.message : 'Không thể gọi AI lập dàn ý chương.');
     } finally {
       setGeneratingChapterId(null);
@@ -333,6 +358,27 @@ export const OutlineView: React.FC<OutlineViewProps> = ({
   return (
     <div className="editor-scroll-area">
       <div className="outline-container">
+        {outlineSaveError && (
+          <div
+            className="auth-error"
+            style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 0 }}
+          >
+            <span>
+              Không thể lưu dàn ý vào bộ nhớ trình duyệt (bộ nhớ đầy hoặc bị chặn). Thay đổi vẫn được giữ tạm thời.
+            </span>
+            {onRetrySaveOutline && (
+              <button
+                type="button"
+                className="icon-btn bordered"
+                style={{ height: 28, fontSize: 12, flexShrink: 0 }}
+                onClick={onRetrySaveOutline}
+              >
+                Thử lưu lại
+              </button>
+            )}
+          </div>
+        )}
+
         {/* MASTER STORY OUTLINE & LOGIC */}
         <section className="outline-section-card">
           <button

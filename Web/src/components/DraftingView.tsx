@@ -120,6 +120,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
   const [generating, setGenerating] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [showOutlinePreview, setShowOutlinePreview] = useState(true);
+  const [draftSaveError, setDraftSaveError] = useState(false);
 
   const activeChapterIdRef = useRef<string | null>(chapterId);
   activeChapterIdRef.current = chapterId;
@@ -127,6 +128,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
 
   // Load saved versions for current chapter (resuming at latest version automatically)
   useEffect(() => {
+    setDraftSaveError(false);
     if (!chapterId) {
       setDraftStore({ activeVersionId: null, versions: [] });
       return;
@@ -142,11 +144,29 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
     setAiPrompt('');
   }, [chapterId]);
 
-  const persistStore = (targetChapterId: string, next: ChapterDraftStore) => {
-    webStorage.saveChapterDraftVersions(targetChapterId, next);
+  const mergeStoredWithMemory = (
+    targetChapterId: string,
+    memoryVersions: ChapterDraftVersion[]
+  ): ChapterDraftVersion[] => {
+    const stored = webStorage.getChapterDraftVersions(targetChapterId).versions;
+    const byId = new Map<string, ChapterDraftVersion>();
+    for (const v of stored) byId.set(v.id, v);
+    for (const v of memoryVersions) {
+      const existing = byId.get(v.id);
+      if (!existing || v.updatedAt >= existing.updatedAt) {
+        byId.set(v.id, v);
+      }
+    }
+    return Array.from(byId.values()).sort((a, b) => a.versionNumber - b.versionNumber);
+  };
+
+  const persistStore = (targetChapterId: string, next: ChapterDraftStore): boolean => {
+    const ok = webStorage.saveChapterDraftVersions(targetChapterId, next);
     if (activeChapterIdRef.current === targetChapterId) {
       setDraftStore(next);
+      setDraftSaveError(!ok);
     }
+    return ok;
   };
 
   const activeVersion = useMemo(
@@ -158,9 +178,26 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
   useEffect(() => {
     const el = draftTextareaRef.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(460, el.scrollHeight)}px`;
-  }, [activeVersion?.id, activeVersion?.content, prefs.fontSize, prefs.lineHeight, prefs.pageWidth]);
+    const resize = () => {
+      el.style.height = 'auto';
+      el.style.height = `${Math.max(460, el.scrollHeight)}px`;
+    };
+    resize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(resize);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [
+    activeVersion?.id,
+    activeVersion?.content,
+    prefs.font,
+    prefs.fontSize,
+    prefs.lineHeight,
+    prefs.pageWidth,
+  ]);
 
   const nextVersionNumber = useMemo(() => {
     if (draftStore.versions.length === 0) return 1;
@@ -186,16 +223,21 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
       outline.storyFramework.trim()
   );
 
-  // Create manual Version 1 (empty or seeded from current manuscript)
+  // Create manual Version (empty, seeded from manuscript, or snapshot of current draft)
   const handleCreateManualVersion = (seedFromManuscript: boolean) => {
     if (!chapter) return;
+    const baseVersions = mergeStoredWithMemory(chapter.id, draftStore.versions);
+    const nextNum =
+      baseVersions.length > 0
+        ? Math.max(...baseVersions.map((v) => v.versionNumber)) + 1
+        : 1;
     const now = Date.now();
     const newVersion: ChapterDraftVersion = {
       id: `v-${now}-${Math.random().toString(36).slice(2, 6)}`,
-      versionNumber: nextVersionNumber,
+      versionNumber: nextNum,
       label: seedFromManuscript
-        ? `Version ${nextVersionNumber} — Lấy từ bản chính`
-        : `Version ${nextVersionNumber} — Tự viết`,
+        ? `Version ${nextNum} — Lấy từ bản chính`
+        : `Version ${nextNum} — Tự viết`,
       source: 'user',
       content: seedFromManuscript ? chapter.content || '' : activeVersion?.content || '',
       createdAt: now,
@@ -203,19 +245,24 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
     };
     const nextStore: ChapterDraftStore = {
       activeVersionId: newVersion.id,
-      versions: [...draftStore.versions, newVersion],
+      versions: [...baseVersions, newVersion],
     };
-    persistStore(chapter.id, nextStore);
-    onNotify(`Đã tạo ${newVersion.label}.`);
+    const ok = persistStore(chapter.id, nextStore);
+    if (ok) {
+      onNotify(`Đã tạo ${newVersion.label}.`);
+    } else {
+      onNotify('Đã tạo phiên bản trong bộ nhớ tạm nhưng không thể lưu vào bộ nhớ trình duyệt.');
+    }
   };
 
-  // Auto-save edits directly to the currently opened version
+  // Auto-save edits directly to the currently opened version, preserving any newer stored versions
   const handleEditActiveVersion = (nextContent: string) => {
     if (!chapter || !activeVersion || locked) return;
+    const baseVersions = mergeStoredWithMemory(chapter.id, draftStore.versions);
     const now = Date.now();
     const nextStore: ChapterDraftStore = {
       activeVersionId: activeVersion.id,
-      versions: draftStore.versions.map((v) =>
+      versions: baseVersions.map((v) =>
         v.id === activeVersion.id ? { ...v, content: nextContent, updatedAt: now } : v
       ),
     };
@@ -230,6 +277,7 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
     }
     if (!project || !chapter || generating || locked) return;
 
+    const MAX_DRAFT_PROMPT_CHARS = 20000;
     const targetChapterId = chapter.id;
     const baseVersion = activeVersion;
     const instruction = aiPrompt.trim();
@@ -239,25 +287,32 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
       return;
     }
 
+    const outlineBlock = buildOutlineContextBlock(project, chapter, outline, chapterOutline);
+    let promptText = '';
+
+    if (mode === 'generate_v1') {
+      promptText =
+        `${outlineBlock}\n\n` +
+        `YÊU CẦU: Hãy dựa vào dàn ý và hồ sơ thế giới ở trên để viết bản nháp hoàn chỉnh (Version ${nextVersionNumber}) cho chương này.` +
+        `${instruction ? `\nYêu cầu bổ sung của tác giả: ${instruction}` : ''}` +
+        `\nHãy viết thẳng nội dung truyện hoàn chỉnh bằng tiếng Việt mượt mà, không thêm lời bình luận mở đầu hay kết thúc.`;
+    } else {
+      promptText =
+        `${outlineBlock}\n\n` +
+        `[BẢN NHÁP HIỆN TẠI — Version ${baseVersion?.versionNumber || 1}]\n"""\n${baseVersion?.content || ''}\n"""\n\n` +
+        `YÊU CẦU VIẾT LẠI TỪ TÁC GIẢ: ${instruction}\n` +
+        `Hãy viết lại toàn bộ bản nháp thành phiên bản mới hoàn chỉnh (giữ nguyên các đoạn đã ổn và sửa sâu những chỗ tác giả yêu cầu), trả thẳng nội dung chương truyện không rào đón.`;
+    }
+
+    if (promptText.length > MAX_DRAFT_PROMPT_CHARS) {
+      onNotify(
+        `Nội dung gửi AI (${promptText.length.toLocaleString('vi-VN')} ký tự) vượt giới hạn ${MAX_DRAFT_PROMPT_CHARS.toLocaleString('vi-VN')} ký tự. Hãy rút gọn bớt bản nháp hoặc dàn ý trước khi gửi.`
+      );
+      return;
+    }
+
     setGenerating(true);
     try {
-      const outlineBlock = buildOutlineContextBlock(project, chapter, outline, chapterOutline);
-      let promptText = '';
-
-      if (mode === 'generate_v1') {
-        promptText =
-          `${outlineBlock}\n\n` +
-          `YÊU CẦU: Hãy dựa vào dàn ý và hồ sơ thế giới ở trên để viết bản nháp hoàn chỉnh (Version ${nextVersionNumber}) cho chương này.` +
-          `${instruction ? `\nYêu cầu bổ sung của tác giả: ${instruction}` : ''}` +
-          `\nHãy viết thẳng nội dung truyện hoàn chỉnh bằng tiếng Việt mượt mà, không thêm lời bình luận mở đầu hay kết thúc.`;
-      } else {
-        promptText =
-          `${outlineBlock}\n\n` +
-          `[BẢN NHÁP HIỆN TẠI — Version ${baseVersion?.versionNumber || 1}]\n"""\n${(baseVersion?.content || '').slice(0, 12000)}\n"""\n\n` +
-          `YÊU CẦU VIẾT LẠI TỪ TÁC GIẢ: ${instruction}\n` +
-          `Hãy viết lại toàn bộ bản nháp thành phiên bản mới hoàn chỉnh (giữ nguyên các đoạn đã ổn và sửa sâu những chỗ tác giả yêu cầu), trả thẳng nội dung chương truyện không rào đón.`;
-      }
-
       const res = await webApi.chatWithAI({
         mode: mode === 'generate_v1' ? 'web_draft_write' : 'web_draft_rewrite',
         messages: [{ role: 'user', content: promptText }],
@@ -277,10 +332,13 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
         return;
       }
 
-      const latestStore = webStorage.getChapterDraftVersions(targetChapterId);
+      const latestVersions =
+        activeChapterIdRef.current === targetChapterId
+          ? mergeStoredWithMemory(targetChapterId, draftStore.versions)
+          : webStorage.getChapterDraftVersions(targetChapterId).versions;
       const nextNum =
-        latestStore.versions.length > 0
-          ? Math.max(...latestStore.versions.map((v) => v.versionNumber)) + 1
+        latestVersions.length > 0
+          ? Math.max(...latestVersions.map((v) => v.versionNumber)) + 1
           : 1;
       const now = Date.now();
       const created: ChapterDraftVersion = {
@@ -298,13 +356,17 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
       };
       const nextStore: ChapterDraftStore = {
         activeVersionId: created.id,
-        versions: [...latestStore.versions, created],
+        versions: [...latestVersions, created],
       };
-      persistStore(targetChapterId, nextStore);
+      const ok = persistStore(targetChapterId, nextStore);
       if (activeChapterIdRef.current === targetChapterId) {
         setAiPrompt('');
       }
-      onNotify(`Đã tạo ${created.label} (${countWords(generatedText).toLocaleString('vi-VN')} từ).`);
+      if (ok) {
+        onNotify(`Đã tạo ${created.label} (${countWords(generatedText).toLocaleString('vi-VN')} từ).`);
+      } else {
+        onNotify(`Đã tạo ${created.label} trong bộ nhớ tạm nhưng không thể lưu vào trình duyệt.`);
+      }
     } catch (err: unknown) {
       onNotify(err instanceof Error ? err.message : 'Không thể gọi AI viết nháp lúc này.');
     } finally {
@@ -314,15 +376,16 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
 
   const handleDeleteVersion = (versionId: string) => {
     if (!chapter || locked) return;
-    const remaining = draftStore.versions.filter((v) => v.id !== versionId);
+    const baseVersions = mergeStoredWithMemory(chapter.id, draftStore.versions);
+    const remaining = baseVersions.filter((v) => v.id !== versionId);
     const nextActive =
       draftStore.activeVersionId === versionId
         ? remaining.length > 0
           ? remaining[remaining.length - 1].id
           : null
         : draftStore.activeVersionId;
-    persistStore(chapter.id, { activeVersionId: nextActive, versions: remaining });
-    onNotify('Đã xóa phiên bản nháp.');
+    const ok = persistStore(chapter.id, { activeVersionId: nextActive, versions: remaining });
+    onNotify(ok ? 'Đã xóa phiên bản nháp.' : 'Đã xóa tạm nhưng không thể cập nhật bộ nhớ trình duyệt.');
   };
 
   const handlePublish = async () => {
@@ -441,6 +504,54 @@ export const DraftingView: React.FC<DraftingViewProps> = ({
             </div>
           )}
         </div>
+
+        {/* PERSISTENT SAVE ERROR BANNER */}
+        {draftSaveError && (
+          <div
+            className="auth-error"
+            style={{ justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}
+          >
+            <span>
+              Không thể lưu bản nháp vào bộ nhớ trình duyệt (bộ nhớ đầy hoặc bị chặn). Dữ liệu vẫn được giữ trong bộ nhớ tạm.
+            </span>
+            <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+              <button
+                type="button"
+                className="icon-btn bordered"
+                style={{ height: 28, fontSize: 12 }}
+                onClick={() => {
+                  const ok = persistStore(chapter.id, draftStore);
+                  onNotify(
+                    ok
+                      ? 'Đã lưu bản nháp vào bộ nhớ trình duyệt.'
+                      : 'Vẫn không thể lưu bản nháp.'
+                  );
+                }}
+              >
+                Thử lưu lại
+              </button>
+              {activeVersion && (
+                <button
+                  type="button"
+                  className="icon-btn bordered"
+                  style={{ height: 28, fontSize: 12 }}
+                  onClick={() => {
+                    if (!navigator.clipboard?.writeText) {
+                      onNotify('Trình duyệt không hỗ trợ sao chép tự động.');
+                      return;
+                    }
+                    void navigator.clipboard
+                      .writeText(activeVersion.content)
+                      .then(() => onNotify('Đã sao chép bản nháp hiện tại.'))
+                      .catch(() => onNotify('Không thể sao chép bản nháp.'));
+                  }}
+                >
+                  Sao chép
+                </button>
+              )}
+            </div>
+          </div>
+        )}
 
         {/* VERSION HISTORY BAR */}
         <div className="draft-version-bar">

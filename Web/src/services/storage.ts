@@ -256,10 +256,32 @@ export const webStorage = {
     if (!stored || typeof stored !== 'object' || Array.isArray(stored)) {
       return { ...EMPTY_PROJECT_OUTLINE, chapters: {} };
     }
-    const chaptersMap =
+    const rawChapters =
       stored.chapters && typeof stored.chapters === 'object' && !Array.isArray(stored.chapters)
-        ? (stored.chapters as Record<string, ChapterOutline>)
+        ? (stored.chapters as Record<string, unknown>)
         : {};
+    const chaptersMap: Record<string, ChapterOutline> = {};
+    for (const [chId, rawCh] of Object.entries(rawChapters)) {
+      if (!rawCh || typeof rawCh !== 'object' || Array.isArray(rawCh)) continue;
+      const obj = rawCh as Record<string, unknown>;
+      const rawScenes = Array.isArray(obj.scenes) ? obj.scenes : [];
+      const scenes = rawScenes
+        .filter((s): s is Record<string, unknown> => Boolean(s && typeof s === 'object' && !Array.isArray(s)))
+        .map((s, idx) => ({
+          id: typeof s.id === 'string' && s.id.trim() ? s.id : `sc-norm-${idx}`,
+          title: typeof s.title === 'string' ? s.title : '',
+          summary: typeof s.summary === 'string' ? s.summary : '',
+        }));
+      chaptersMap[chId] = {
+        setting: typeof obj.setting === 'string' ? obj.setting : '',
+        style: typeof obj.style === 'string' ? obj.style : '',
+        characters: typeof obj.characters === 'string' ? obj.characters : '',
+        roughEvents: typeof obj.roughEvents === 'string' ? obj.roughEvents : '',
+        scenes,
+        logicNotes: typeof obj.logicNotes === 'string' ? obj.logicNotes : '',
+        updatedAt: typeof obj.updatedAt === 'number' ? obj.updatedAt : undefined,
+      };
+    }
     return {
       worldSetting: typeof stored.worldSetting === 'string' ? stored.worldSetting : '',
       writingStyle: typeof stored.writingStyle === 'string' ? stored.writingStyle : '',

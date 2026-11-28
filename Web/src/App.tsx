@@ -162,6 +162,7 @@ export default function App() {
     ...EMPTY_PROJECT_OUTLINE,
     chapters: {},
   }));
+  const [outlineSaveError, setOutlineSaveError] = useState(false);
   const [mentionState, setMentionState] = useState<MentionPopupState | null>(null);
   const [mentionIndex, setMentionIndex] = useState(0);
 
@@ -231,9 +232,27 @@ export default function App() {
     if (workspaceMode !== 'manuscript') return;
     const el = textareaRef.current;
     if (!el) return;
-    el.style.height = 'auto';
-    el.style.height = `${Math.max(460, el.scrollHeight)}px`;
-  }, [activeChapter?.id, activeChapter?.content, prefs.fontSize, prefs.lineHeight, prefs.pageWidth, workspaceMode]);
+    const resize = () => {
+      el.style.height = 'auto';
+      el.style.height = `${Math.max(460, el.scrollHeight)}px`;
+    };
+    resize();
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(resize);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', resize);
+    return () => window.removeEventListener('resize', resize);
+  }, [
+    activeChapter?.id,
+    activeChapter?.content,
+    prefs.font,
+    prefs.fontSize,
+    prefs.lineHeight,
+    prefs.pageWidth,
+    workspaceMode,
+  ]);
 
   const loadLocalWorkspace = useCallback(() => {
     projectLoadGenRef.current += 1;
@@ -421,6 +440,7 @@ export default function App() {
 
   // Load saved outline whenever active project changes
   useEffect(() => {
+    setOutlineSaveError(false);
     if (!activeProjectId) {
       setProjectOutline({ ...EMPTY_PROJECT_OUTLINE, chapters: {} });
       return;
@@ -437,7 +457,8 @@ export default function App() {
           ...patch,
           updatedAt: Date.now(),
         };
-        webStorage.saveProjectOutline(activeProjectId, next);
+        const ok = webStorage.saveProjectOutline(activeProjectId, next);
+        setOutlineSaveError(!ok);
         return next;
       });
     },
@@ -464,12 +485,24 @@ export default function App() {
             },
           },
         };
-        webStorage.saveProjectOutline(activeProjectId, next);
+        const ok = webStorage.saveProjectOutline(activeProjectId, next);
+        setOutlineSaveError(!ok);
         return next;
       });
     },
     [activeProjectId]
   );
+
+  const handleRetrySaveOutline = useCallback(() => {
+    if (!activeProjectId) return;
+    const ok = webStorage.saveProjectOutline(activeProjectId, projectOutline);
+    setOutlineSaveError(!ok);
+    notify(
+      ok
+        ? 'Đã lưu dàn ý vào bộ nhớ trình duyệt.'
+        : 'Vẫn không thể lưu dàn ý (bộ nhớ trình duyệt đầy hoặc bị chặn).'
+    );
+  }, [activeProjectId, notify, projectOutline]);
 
   // Sync a single chapter to backend, serialized per chapter so older saves never overwrite newer ones
   const syncChapterToServer = useCallback(
@@ -1530,6 +1563,8 @@ export default function App() {
             }}
             onOpenAuth={() => setAuthModalOpen(true)}
             onNotify={notify}
+            outlineSaveError={outlineSaveError}
+            onRetrySaveOutline={handleRetrySaveOutline}
             locked={isAnalyzingChapter}
           />
         ) : workspaceMode === 'draft' ? (

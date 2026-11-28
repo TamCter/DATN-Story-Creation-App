@@ -8,6 +8,7 @@ const MAX_NODES_PER_CHAT_TURN = 3;
 const MAX_CHAT_MESSAGES = 40;
 const MAX_STORED_CHAT_MESSAGES = 100;
 const MAX_MESSAGE_LENGTH = 4000;
+const MAX_DRAFT_MESSAGE_LENGTH = 20000;
 const NODE_TYPES = ['character', 'item', 'location', 'faction', 'event'];
 const CORE_REQUIRED_NODE_FIELDS = {
   character: ['name', 'type', 'role', 'desc', 'gender', 'dob', 'personality', 'status'],
@@ -842,6 +843,8 @@ async function chatWithAI(req, res, next) {
       return res.status(400).json({ success: false, message: 'Thiếu danh sách tin nhắn' });
     }
 
+    const isDraftMode = mode === 'web_draft_write' || mode === 'web_draft_rewrite';
+    const effectiveMaxMsgLen = isDraftMode ? MAX_DRAFT_MESSAGE_LENGTH : MAX_MESSAGE_LENGTH;
     const normalizedMessages = messages
       .filter((message) => message?.role !== 'system')
       .slice(-MAX_CHAT_MESSAGES)
@@ -851,7 +854,7 @@ async function chatWithAI(req, res, next) {
         }
         return {
           role: message.role === 'assistant' ? 'assistant' : 'user',
-          content: message.content.slice(0, MAX_MESSAGE_LENGTH),
+          content: message.content.slice(0, effectiveMaxMsgLen),
         };
       });
 
