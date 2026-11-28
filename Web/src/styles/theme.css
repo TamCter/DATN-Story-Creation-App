@@ -490,6 +490,7 @@ button {
   padding: 28px 24px 64px;
   display: flex;
   justify-content: center;
+  align-items: flex-start;
 }
 
 .paper-sheet {
@@ -501,6 +502,7 @@ button {
   padding: 36px 44px 48px;
   display: flex;
   flex-direction: column;
+  flex-shrink: 0;
   min-height: calc(100vh - 150px);
   transition: max-width 0.2s ease;
 }
@@ -612,11 +614,11 @@ button {
 }
 
 .manuscript-textarea {
-  flex: 1;
   width: 100%;
   min-height: 460px;
   border: none;
   resize: none;
+  overflow: hidden;
   background: transparent;
   color: var(--text-primary);
   white-space: pre-wrap;
@@ -1271,4 +1273,363 @@ button {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Workspace Mode Switcher (Dàn ý / Viết nháp / Bản chính) */
+.mode-switcher {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 9px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  gap: 2px;
+}
+
+.mode-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 27px;
+  padding: 0 9px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+
+.mode-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Outline Studio */
+.outline-container {
+  width: 100%;
+  max-width: 960px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.outline-section-card {
+  background: var(--bg-paper);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 16px 18px;
+  box-shadow: var(--shadow-paper);
+}
+
+.outline-section-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--text-primary);
+}
+
+.outline-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.outline-field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.outline-field-full {
+  grid-column: 1 / -1;
+}
+
+.outline-label {
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.outline-textarea {
+  width: 100%;
+  padding: 9px 11px;
+  border-radius: 9px;
+  border: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  line-height: 1.55;
+  resize: vertical;
+}
+
+.outline-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.outline-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.outline-chapters-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.outline-chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.outline-chapter-card {
+  background: var(--bg-paper);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.outline-chapter-card.active {
+  border-color: var(--border-gold);
+}
+
+.outline-chapter-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.outline-chapter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--text-primary);
+  min-width: 0;
+}
+
+.outline-chapter-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+
+/* Drafting / Versioned Workspace */
+.draft-workspace {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.draft-workspace.width-narrow {
+  max-width: 720px;
+}
+
+.draft-workspace.width-medium {
+  max-width: 860px;
+}
+
+.draft-workspace.width-wide {
+  max-width: 1080px;
+}
+
+.draft-outline-preview {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.draft-version-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.version-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 9px;
+  background: var(--bg-paper);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+
+.version-pill.active {
+  border-color: var(--accent);
+  background: var(--bg-active);
+}
+
+.version-pill-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 8px;
+  border: none;
+  background: transparent;
+  font-size: 12px;
+  color: var(--text-primary);
+}
+
+.version-source-tag {
+  font-size: 10.5px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg-elevated);
+  color: var(--accent);
+}
+
+.version-del-btn {
+  border: none;
+  border-left: 1px solid var(--border-subtle);
+  background: transparent;
+  color: var(--text-muted);
+  padding: 5px 6px;
+  display: inline-flex;
+  align-items: center;
+}
+
+.version-del-btn:hover:not(:disabled) {
+  color: var(--danger);
+  background: var(--bg-hover);
+}
+
+@media (max-width: 720px) {
+  .outline-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* AI Outline Bar, Inline Chapter Title & Per-Scene Builder */
+.ai-outline-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 14px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.outline-chapter-title-input {
+  flex: 1;
+  min-width: 120px;
+  height: 30px;
+  padding: 0 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 14.5px;
+  font-weight: 700;
+}
+
+.outline-chapter-title-input:hover {
+  border-color: var(--border);
+  background: var(--bg-app);
+}
+
+.outline-chapter-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--bg-app);
+}
+
+.scene-empty-box {
+  padding: 12px;
+  border-radius: 9px;
+  border: 1px dashed var(--border);
+  background: var(--bg-app);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.scene-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 10px;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-subtle);
+}
+
+.scene-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scene-index-badge {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.scene-title-input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-app);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.scene-title-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }

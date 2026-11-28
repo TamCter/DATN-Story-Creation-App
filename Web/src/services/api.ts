@@ -232,7 +232,12 @@ class WebApiClient {
   }
 
   async chatWithAI(payload: {
-    mode?: 'web_writing';
+    mode?:
+      | 'web_writing'
+      | 'web_outline_story'
+      | 'web_outline_chapter'
+      | 'web_draft_write'
+      | 'web_draft_rewrite';
     messages: Array<{ role: 'user' | 'assistant'; content: string }>;
     projectContext?: {
       projectId?: string;
